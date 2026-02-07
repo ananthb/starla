@@ -1,0 +1,26 @@
+[package]
+name = "starla-metrics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[dependencies]
+starla-common = { path = "../starla-common", version = "6000.0.0" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+prometheus = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
+metrics-exporter-prometheus = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[features]
+default = []
+export = ["prometheus", "metrics", "metrics-exporter-prometheus", "axum", "serde"]

@@ -1,0 +1,25 @@
+[package]
+name = "starla-results"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[dependencies]
+starla-common = { path = "../starla-common", version = "6000.0.0" }
+starla-database = { path = "../starla-database", version = "6000.0.0" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+rocksdb = { workspace = true }
+chrono = { workspace = true }
+flate2 = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

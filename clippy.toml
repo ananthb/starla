@@ -1,0 +1,10 @@
+# Clippy configuration for Starla
+
+# Cognitive complexity threshold
+cognitive-complexity-threshold = 30
+
+# Too many arguments threshold
+too-many-arguments-threshold = 10
+
+# Type complexity threshold
+type-complexity-threshold = 300

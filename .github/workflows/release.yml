@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.system }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - x86_64-linux
+          - aarch64-linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Setup Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Setup QEMU for aarch64
+        if: matrix.system == 'aarch64-linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static
+
+      - name: Configure Nix for cross-compilation
+        if: matrix.system == 'aarch64-linux'
+        run: |
+          echo "extra-platforms = aarch64-linux" | sudo tee -a /etc/nix/nix.conf
+          sudo systemctl restart nix-daemon
+
+      - name: Build default package
+        run: nix build .#packages.${{ matrix.system }}.default -o result
+
+      - name: Build minimal package
+        run: nix build .#packages.${{ matrix.system }}.minimal -o result-minimal
+
+      - name: Package binaries
+        run: |
+          mkdir -p dist
+          cp result/bin/* dist/
+          tar -czvf starla-${{ github.ref_name }}-${{ matrix.system }}.tar.gz -C dist .
+
+          rm -rf dist && mkdir -p dist
+          cp result-minimal/bin/* dist/
+          tar -czvf starla-minimal-${{ github.ref_name }}-${{ matrix.system }}.tar.gz -C dist .
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.system }}
+          path: "*.tar.gz"
+
+  publish-crates:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          # Publish in dependency order with delay between each
+          publish_crate() {
+            echo "Publishing $1..."
+            cargo publish -p "$1" --no-verify || echo "Note: $1 may already be published"
+            sleep 30  # Wait for crates.io to index
+          }
+
+          # Layer 1: No internal dependencies
+          publish_crate starla-common
+
+          # Layer 2: Depends on starla-common only
+          publish_crate starla-network
+          publish_crate starla-database
+          publish_crate starla-controller
+          publish_crate starla-metrics
+
+          # Layer 3: Multiple internal dependencies
+          publish_crate starla-measurements
+          publish_crate starla-results
+
+          # Layer 4: Depends on most crates
+          publish_crate starla-scheduler
+
+          # Binaries (optional - usually not published to crates.io)
+          # publish_crate starla
+
+  release:
+    name: Create Release
+    needs: [build, publish-crates]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum *.tar.gz > SHA256SUMS.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/SHA256SUMS.txt

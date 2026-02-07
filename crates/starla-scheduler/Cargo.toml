@@ -1,0 +1,21 @@
+[package]
+name = "starla-scheduler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[dependencies]
+starla-common = { path = "../starla-common", version = "6000.0.0" }
+starla-measurements = { path = "../starla-measurements", version = "6000.0.0" }
+starla-database = { path = "../starla-database", version = "6000.0.0" }
+starla-results = { path = "../starla-results", version = "6000.0.0" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+rand = { workspace = true }

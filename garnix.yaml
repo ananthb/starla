@@ -1,0 +1,9 @@
+# Garnix CI configuration
+# https://garnix.io/docs/ci/yaml_config
+
+builds:
+  include:
+    - "packages.x86_64-linux.*"
+    - "packages.aarch64-linux.*"
+    - "checks.x86_64-linux.*"
+    - "devShells.x86_64-linux.*"

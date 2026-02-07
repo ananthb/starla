@@ -1,0 +1,67 @@
+# Starla Configuration
+#
+# This file should be installed at ~/.config/starla/config.toml
+# or /etc/starla/config.toml for system-wide installation
+
+[probe]
+# Probe ID (auto-assigned during registration)
+id = "auto"
+
+# Firmware version
+firmware_version = 6000
+
+# Log level: trace, debug, info, warn, error
+log_level = "info"
+
+[network]
+# Telnet port for receiving measurement commands
+telnet_port = 2023
+
+# HTTP POST port for uploading results
+http_post_port = 8080
+
+# Send interface traffic statistics
+rxtxrpt = false
+
+[controller]
+# Registration servers
+registration_servers = [
+    "woolsey.atlas.ripe.net:443",
+    "cla.atlas.ripe.net:443"
+]
+
+# SSH connection timeout (seconds)
+ssh_timeout = 30
+
+# Keepalive interval (seconds)
+keepalive_interval = 60
+
+[storage]
+# Data directory for results and state
+data_dir = "/var/lib/starla/data"
+
+# Maximum queue size in MB
+max_queue_size_mb = 100
+
+# Result retention period in days
+retention_days = 7
+
+[metrics]
+# Enable Prometheus metrics export (requires metrics-export feature)
+enabled = true
+
+# Metrics server listen address
+listen_addr = "127.0.0.1:9090"
+
+[logging]
+# Log format: json or text
+format = "json"
+
+# Log output: stdout, file, or syslog
+output = "stdout"
+
+# Maximum log file size in MB (when output=file)
+max_file_size_mb = 10
+
+# Maximum number of rotated log files
+max_files = 5

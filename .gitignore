@@ -1,0 +1,51 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.deb
+*.rpm
+*.tar.gz
+
+# Test artifacts
+tests/fixtures/*.generated
+
+# Runtime
+*.pid
+*.sock
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# Keys (never commit!)
+probe_key
+probe_key.pub
+*.pem
+*.key
+
+# Nix
+.direnv/
+result
+result-*
+
+# Environment
+.env
+.env.local
+
+# Reference implementation
+reference/

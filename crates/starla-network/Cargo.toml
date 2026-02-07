@@ -1,0 +1,22 @@
+[package]
+name = "starla-network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+readme = "README.md"
+
+[dependencies]
+starla-common = { path = "../starla-common", version = "6000.0.0" }
+tokio = { workspace = true }
+socket2 = { workspace = true }
+pnet = { workspace = true }
+pnet_packet = { workspace = true }
+nix = { workspace = true }
+libc = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+caps = { workspace = true }

@@ -1,0 +1,32 @@
+[package]
+name = "starla"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "starla"
+path = "src/main.rs"
+
+[dependencies]
+starla-common = { path = "../../crates/starla-common", version = "6000.0.0" }
+starla-network = { path = "../../crates/starla-network", version = "6000.0.0" }
+starla-scheduler = { path = "../../crates/starla-scheduler", version = "6000.0.0" }
+starla-controller = { path = "../../crates/starla-controller", version = "6000.0.0" }
+starla-results = { path = "../../crates/starla-results", version = "6000.0.0" }
+starla-database = { path = "../../crates/starla-database", version = "6000.0.0" }
+starla-metrics = { path = "../../crates/starla-metrics", version = "6000.0.0", optional = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+rustls = { workspace = true }
+
+[features]
+default = ["observability"]
+observability = ["metrics-export", "structured-logging"]
+metrics-export = ["starla-metrics/export"]
+structured-logging = ["starla-common/json"]
+minimal = []

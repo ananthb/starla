@@ -1,0 +1,24 @@
+[package]
+name = "mock-controller"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "mock_controller"
+path = "src/lib.rs"
+
+[dependencies]
+starla-common = { path = "../../crates/starla-common", version = "6000.0.0" }
+tokio = { workspace = true }
+russh = { workspace = true }
+russh-keys = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }

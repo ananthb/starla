@@ -1,0 +1,115 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/starla-common",
+    "crates/starla-network",
+    "crates/starla-measurements",
+    "crates/starla-scheduler",
+    "crates/starla-controller",
+    "crates/starla-results",
+    "crates/starla-database",
+    "crates/starla-metrics",
+    "binaries/starla-probe",
+    "tests/mock-controller",
+]
+
+[workspace.package]
+version = "6000.0.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+authors = ["Starla Contributors"]
+repository = "https://github.com/ananthb/starla"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Networking
+socket2 = { version = "0.5", features = ["all"] }
+pnet = "0.35"
+pnet_packet = "0.35"
+
+# DNS
+hickory-dns = "0.24"
+hickory-resolver = "0.24"
+hickory-client = "0.24"
+hickory-proto = "0.24"
+
+# HTTP
+reqwest = { version = "0.12", features = ["http2", "rustls-tls", "json"], default-features = false }
+hyper = { version = "1.0", features = ["http2", "server", "client"] }
+hyper-util = "0.1"
+http-body-util = "0.1"
+
+# TLS/SSL
+rustls = { version = "0.23" }
+tokio-rustls = "0.26"
+rustls-native-certs = "0.7"
+webpki-roots = "0.26"
+x509-parser = "0.16"
+rustls-pemfile = "2.0"
+
+# SSH (Pure Rust)
+russh = "0.44"
+russh-keys = "0.44"
+
+# Database
+rocksdb = { version = "0.23", default-features = false, features = ["lz4"] }
+
+# System
+nix = { version = "0.29", features = ["user", "net", "socket", "process"] }
+caps = "0.5"
+libc = "0.2"
+
+# Observability - Metrics (feature-gated)
+prometheus = { version = "0.13" }
+metrics = { version = "0.23" }
+metrics-exporter-prometheus = { version = "0.15" }
+axum = { version = "0.7" }
+
+# Observability - Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Async utilities
+futures = "0.3"
+async-trait = "0.1"
+
+# Utilities
+bytes = "1.7"
+rand = "0.8"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+base64 = "0.22"
+hex = "0.4"
+sha2 = "0.10"
+flate2 = "1.0"
+
+# Testing
+tempfile = "3.10"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
