@@ -1,7 +1,5 @@
 # Starla
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-
 Starla is a network measurement probe tool that runs on end-user machines and talks
 to [RIPE Atlas](https://atlas.ripe.net).
 Its a drop-in replacement for the [RIPE Atlas Software Probe](https://atlas.ripe.net/docs/howtos/software-probes/).
