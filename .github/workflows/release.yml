@@ -21,26 +21,52 @@ jobs:
           nix config set extra-substituters "https://cache.garnix.io"
           nix config set extra-trusted-public-keys "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
 
-      - name: Build release artifacts
-        run: nix build .#release
+      - name: Build x86_64 release
+        run: nix build .#packages.x86_64-linux.release -o result-x86_64
+
+      - name: Build aarch64 release
+        run: nix build .#packages.aarch64-linux.release -o result-aarch64
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            result/*
+            result-x86_64/starla-x86_64-linux
+            result-aarch64/starla-aarch64-linux
+            result-x86_64/config.toml.example
+            result-x86_64/starla.service
           generate_release_notes: true
 
-      - name: Build OCI image
-        run: nix build .#oci
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Push OCI image to ghcr.io
+      - name: Build and push x86_64 OCI image
         run: |
-          nix shell nixpkgs#skopeo -c skopeo copy \
-            --dest-creds="${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
-            "docker-archive:$(readlink result)" \
-            "docker://ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
-          nix shell nixpkgs#skopeo -c skopeo copy \
-            --dest-creds="${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
-            "docker-archive:$(readlink result)" \
-            "docker://ghcr.io/ananthb/starla:latest"
+          nix build .#packages.x86_64-linux.oci -o result-oci-x86_64
+          skopeo copy \
+            "docker-archive:$(readlink result-oci-x86_64)" \
+            "docker://ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-amd64"
+
+      - name: Build and push aarch64 OCI image
+        run: |
+          nix build .#packages.aarch64-linux.oci -o result-oci-aarch64
+          skopeo copy \
+            "docker-archive:$(readlink result-oci-aarch64)" \
+            "docker://ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-arm64"
+
+      - name: Create multi-arch manifest
+        run: |
+          nix shell nixpkgs#manifest-tool -c manifest-tool \
+            --username "${{ github.actor }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}" \
+            push from-args \
+            --platforms linux/amd64,linux/arm64 \
+            --template "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-ARCH" \
+            --target "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
+          nix shell nixpkgs#manifest-tool -c manifest-tool \
+            --username "${{ github.actor }}" \
+            --password "${{ secrets.GITHUB_TOKEN }}" \
+            push from-args \
+            --platforms linux/amd64,linux/arm64 \
+            --template "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-ARCH" \
+            --target "ghcr.io/ananthb/starla:latest"

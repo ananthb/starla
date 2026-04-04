@@ -1,0 +1,42 @@
+[Unit]
+Description=Starla RIPE Atlas Software Probe
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/starla --config /etc/starla/config.toml
+Restart=on-failure
+RestartSec=10
+
+DynamicUser=true
+ConfigurationDirectory=starla
+ConfigurationDirectoryMode=0750
+StateDirectory=starla
+StateDirectoryMode=0750
+RuntimeDirectory=starla
+RuntimeDirectoryMode=0750
+
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallFilter=@system-service ~@privileged @network-io @raw-io
+
+[Install]
+WantedBy=multi-user.target
