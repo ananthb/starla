@@ -8,9 +8,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils.url = "github:numtide/flake-utils";
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils }:
+  outputs = { self, nixpkgs, rust-overlay, flake-utils, git-hooks }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
@@ -92,19 +96,46 @@
           tcpdump
         ];
 
+        pre-commit-check = git-hooks.lib.${system}.run {
+          src = ./.;
+          hooks = {
+            check-json.enable = true;
+            check-merge-conflicts.enable = true;
+            check-toml.enable = true;
+            check-yaml.enable = true;
+            detect-private-keys.enable = true;
+            end-of-file-fixer.enable = true;
+            mixed-line-endings.enable = true;
+            trim-trailing-whitespace.enable = true;
+            nixpkgs-fmt.enable = true;
+            rustfmt = {
+              enable = true;
+              packageOverrides.cargo = rustToolchain;
+              packageOverrides.rustfmt = rustToolchain;
+            };
+            clippy = {
+              enable = true;
+              packageOverrides.cargo = rustToolchain;
+              packageOverrides.clippy = rustToolchain;
+              settings.allFeatures = true;
+              settings.denyWarnings = true;
+            };
+          };
+        };
+
       in
       {
         packages = {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "starla";
-            version = "6000.0.0";
+            version = "0.1.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
 
-            inherit nativeBuildInputs;
-            buildInputs = with pkgs; [ openssl ];
+            inherit nativeBuildInputs buildInputs;
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
 
-            # Skip tests during build (run separately in checks)
             doCheck = false;
 
             meta = with pkgs.lib; {
@@ -115,15 +146,25 @@
             };
           };
 
+          release =
+            let
+              pkg = self.packages.${system}.default;
+            in
+            pkgs.runCommand "starla-release" { } ''
+              mkdir -p $out
+              cp ${pkg}/bin/starla $out/starla-x86_64-linux
+            '';
+
           # Minimal build without observability features
           minimal = pkgs.rustPlatform.buildRustPackage {
             pname = "starla-minimal";
-            version = "6000.0.0";
+            version = "0.1.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
 
-            inherit nativeBuildInputs;
-            buildInputs = with pkgs; [ openssl ];
+            inherit nativeBuildInputs buildInputs;
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
 
             buildNoDefaultFeatures = true;
             buildFeatures = [ "minimal" ];
@@ -139,87 +180,66 @@
           };
         };
 
-        # CI checks for garnix
+        # CI checks
         checks = {
-          # Formatting check
-          formatting = pkgs.runCommand "check-formatting"
-            {
-              buildInputs = [ rustToolchain ];
-              src = ./.;
-            } ''
-            cd $src
-            cargo fmt --all -- --check
-            touch $out
-          '';
+          inherit pre-commit-check;
 
-          # Clippy lints (all features)
-          clippy = pkgs.runCommand "check-clippy"
-            {
-              buildInputs = nativeBuildInputs ++ buildInputs;
-              src = ./.;
-              OPENSSL_DIR = pkgs.openssl.dev;
-              OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-            } ''
-            cd $src
-            export HOME=$(mktemp -d)
-            cargo clippy --all-targets --all-features -- -D warnings
-            touch $out
-          '';
+          # Build + clippy + tests (all features)
 
-          # Clippy lints (minimal features)
-          clippy-minimal = pkgs.runCommand "check-clippy-minimal"
-            {
-              buildInputs = nativeBuildInputs ++ buildInputs;
-              src = ./.;
-              OPENSSL_DIR = pkgs.openssl.dev;
-              OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-            } ''
-            cd $src
-            export HOME=$(mktemp -d)
-            cargo clippy --all-targets --no-default-features --features minimal -- -D warnings
-            touch $out
-          '';
+          default = pkgs.rustPlatform.buildRustPackage {
+            pname = "starla-check";
+            version = "0.0.0";
+            src = ./.;
+            cargoLock.lockFile = ./Cargo.lock;
+            inherit nativeBuildInputs buildInputs;
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
+            buildPhase = ''
+              export HOME=$(mktemp -d)
+              cargo clippy --all-targets --all-features -- -D warnings
+            '';
+            doCheck = true;
+            checkPhase = ''
+              export HOME=$(mktemp -d)
+              cargo test --all-features --workspace
+            '';
+            installPhase = "touch $out";
+          };
 
-          # Unit tests (all features)
-          tests = pkgs.runCommand "check-tests"
-            {
-              buildInputs = nativeBuildInputs ++ buildInputs;
-              src = ./.;
-              OPENSSL_DIR = pkgs.openssl.dev;
-              OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-            } ''
-            cd $src
-            export HOME=$(mktemp -d)
-            cargo test --all-features --workspace
-            touch $out
-          '';
+          # Build + clippy + tests (minimal features)
+          minimal = pkgs.rustPlatform.buildRustPackage {
+            pname = "starla-check-minimal";
+            version = "0.0.0";
+            src = ./.;
+            cargoLock.lockFile = ./Cargo.lock;
+            inherit nativeBuildInputs buildInputs;
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
+            buildPhase = ''
+              export HOME=$(mktemp -d)
+              cargo clippy --all-targets --no-default-features --features minimal -- -D warnings
+            '';
+            doCheck = true;
+            checkPhase = ''
+              export HOME=$(mktemp -d)
+              cargo test --no-default-features --features minimal --workspace
+            '';
+            installPhase = "touch $out";
+          };
 
-          # Unit tests (minimal features)
-          tests-minimal = pkgs.runCommand "check-tests-minimal"
-            {
-              buildInputs = nativeBuildInputs ++ buildInputs;
-              src = ./.;
-              OPENSSL_DIR = pkgs.openssl.dev;
-              OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-            } ''
-            cd $src
-            export HOME=$(mktemp -d)
-            cargo test --no-default-features --features minimal --workspace
-            touch $out
-          '';
-
-          # Build check (ensures the package builds)
+          # Full package builds
           build = self.packages.${system}.default;
           build-minimal = self.packages.${system}.minimal;
         };
 
         devShells.default = pkgs.mkShell {
-          name = "starla-v6000";
+          name = "starla-dev";
 
           buildInputs = [ rustToolchain ] ++ devPackages ++ buildInputs;
 
           shellHook = ''
-                        cat << 'EOF'
+            ${pre-commit-check.shellHook}
+            cat << 'EOF'
             ================================================================
             Starla - Nix Development Environment
             ================================================================
@@ -245,10 +265,10 @@
               nix flake check                      Run all CI checks
 
             EOF
-                        echo "Environment:"
-                        echo "  Rust:    $(rustc --version | cut -d' ' -f2)"
-                        echo "  Cargo:   $(cargo --version | cut -d' ' -f2)"
-                        echo ""
+            echo "Environment:"
+            echo "  Rust:    $(rustc --version | cut -d' ' -f2)"
+            echo "  Cargo:   $(cargo --version | cut -d' ' -f2)"
+            echo ""
           '';
 
           # Environment variables
