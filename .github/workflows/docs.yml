@@ -29,17 +29,20 @@ jobs:
             extra-substituters = https://cache.garnix.io
             extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
 
-      - name: Build documentation
+      - name: Build API documentation
         run: nix develop -c cargo doc --workspace --no-deps --all-features
 
-      - name: Add index redirect
-        run: echo '<meta http-equiv="refresh" content="0;url=starla_common/index.html">' > target/doc/index.html
+      - name: Assemble site
+        run: |
+          mkdir -p site
+          cp doc/*.html site/
+          mv target/doc site/api
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: target/doc
+          path: site
 
       - id: deploy
         uses: actions/deploy-pages@v4

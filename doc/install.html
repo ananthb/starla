@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install &amp; Run - Starla</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --accent: #2b6cb0; --code-bg: #f5f5f5; --border: #e2e2e2; --max-w: 740px; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a1a; --fg: #e0e0e0; --muted: #999; --accent: #63b3ed; --code-bg: #2d2d2d; --border: #404040; } }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; }
+  .container { max-width: var(--max-w); margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.3rem; margin-top: 2rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.3rem; }
+  p { margin: 0.5rem 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul, ol { margin: 0.5rem 0 0.5rem 1.5rem; }
+  li { margin: 0.3rem 0; }
+  code { background: var(--code-bg); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9em; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; }
+  pre code { background: none; padding: 0; }
+  nav { margin: 0.5rem 0 1.5rem; }
+  nav a { color: var(--accent); }
+  table { border-collapse: collapse; margin: 0.75rem 0; width: 100%; }
+  th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="container">
+<nav><a href="index.html">&larr; Starla</a></nav>
+<h1>Install &amp; Run</h1>
+
+<h2>Docker / Podman</h2>
+
+<p>The container image is published to <code>ghcr.io/ananthb/starla</code> for both
+<code>amd64</code> and <code>arm64</code>.</p>
+
+<pre><code># Run with persistent state
+docker run -d --name starla \
+  -v starla-state:/var/lib/starla \
+  --cap-add NET_RAW \
+  ghcr.io/ananthb/starla:latest</code></pre>
+
+<p><code>CAP_NET_RAW</code> is required for ping and traceroute measurements.
+Without it, only DNS, HTTP, TLS, and NTP measurements will work.</p>
+
+<h3>With a config file</h3>
+<pre><code># Download example config
+curl -LO https://github.com/ananthb/starla/releases/latest/download/config.toml.example
+cp config.toml.example config.toml
+# Edit config.toml as needed
+
+docker run -d --name starla \
+  -v starla-state:/var/lib/starla \
+  -v $(pwd)/config.toml:/etc/starla/config.toml:ro \
+  --cap-add NET_RAW \
+  ghcr.io/ananthb/starla:latest \
+  --config /etc/starla/config.toml</code></pre>
+
+<h3>Podman</h3>
+<pre><code>podman run -d --name starla \
+  -v starla-state:/var/lib/starla \
+  --cap-add NET_RAW \
+  ghcr.io/ananthb/starla:latest</code></pre>
+
+<h3>View logs and probe key</h3>
+<pre><code># Follow logs
+docker logs -f starla
+
+# Get the probe public key (needed for registration)
+docker exec starla cat /var/lib/starla/probe_key.pub</code></pre>
+
+<h2>NixOS</h2>
+
+<p>Add the starla flake to your NixOS configuration:</p>
+
+<pre><code># flake.nix
+{
+  inputs.starla.url = "github:ananthb/starla";
+
+  outputs = { self, nixpkgs, starla, ... }: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      modules = [
+        starla.nixosModules.default
+        {
+          services.starla.enable = true;
+        }
+      ];
+    };
+  };
+}</code></pre>
+
+<p>That's it. The module handles everything: systemd service with
+<code>DynamicUser=true</code>, <code>CAP_NET_RAW</code>, filesystem hardening,
+state/config/runtime directories.</p>
+
+<h3>Configuration options</h3>
+
+<table>
+<tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>logLevel</code></td><td><code>"info"</code></td><td>Log verbosity (trace/debug/info/warn/error)</td></tr>
+<tr><td><code>reportInterfaceStats</code></td><td><code>false</code></td><td>Send network interface traffic statistics</td></tr>
+<tr><td><code>controller.registrationServers</code></td><td>reg03, reg04</td><td>RIPE Atlas registration servers</td></tr>
+<tr><td><code>controller.sshTimeout</code></td><td><code>30</code></td><td>SSH connection timeout (seconds)</td></tr>
+<tr><td><code>controller.keepaliveInterval</code></td><td><code>60</code></td><td>SSH keepalive interval (seconds)</td></tr>
+<tr><td><code>storage.maxQueueSizeMB</code></td><td><code>100</code></td><td>Max result queue size</td></tr>
+<tr><td><code>storage.retentionDays</code></td><td><code>30</code></td><td>Result retention period</td></tr>
+<tr><td><code>metrics.enable</code></td><td><code>true</code></td><td>Prometheus metrics export</td></tr>
+<tr><td><code>metrics.listenAddr</code></td><td><code>"127.0.0.1:9090"</code></td><td>Metrics listen address</td></tr>
+<tr><td><code>logging.format</code></td><td><code>"json"</code></td><td>Log format (json/text)</td></tr>
+<tr><td><code>logging.output</code></td><td><code>"stdout"</code></td><td>Log destination (stdout/file/syslog)</td></tr>
+</table>
+
+<h3>Example with options</h3>
+<pre><code>services.starla = {
+  enable = true;
+  logLevel = "debug";
+  metrics.listenAddr = "0.0.0.0:9090";
+  storage.retentionDays = 7;
+};</code></pre>
+
+<h3>Probe key location</h3>
+<pre><code># State is at /var/lib/starla/ (managed by systemd)
+sudo cat /var/lib/starla/probe_key.pub</code></pre>
+
+<h2>Release Binary</h2>
+
+<p>Download the latest release from
+<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.</p>
+
+<pre><code># Download binary and support files
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-x86_64-linux
+curl -LO https://github.com/ananthb/starla/releases/latest/download/config.toml.example
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla.service
+
+# For ARM64:
+# curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-aarch64-linux
+
+chmod +x starla-x86_64-linux</code></pre>
+
+<h3>Install as a systemd service</h3>
+<pre><code># Install binary
+sudo install -m 755 starla-x86_64-linux /usr/bin/starla
+
+# Install config
+sudo mkdir -p /etc/starla
+sudo install -m 644 config.toml.example /etc/starla/config.toml
+
+# Install and enable service
+sudo install -m 644 starla.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now starla</code></pre>
+
+<h3>Run directly</h3>
+<pre><code># Needs CAP_NET_RAW for ping/traceroute
+sudo setcap cap_net_raw=eip ./starla-x86_64-linux
+./starla-x86_64-linux
+
+# Or run as root
+sudo ./starla-x86_64-linux</code></pre>
+
+<h3>Probe key location</h3>
+<pre><code># As root: /var/lib/starla/probe_key.pub
+# As user: ~/.local/state/starla/probe_key.pub
+cat ~/.local/state/starla/probe_key.pub</code></pre>
+
+<h2>After Installation</h2>
+
+<ol>
+  <li>Start starla and wait for it to generate an SSH key pair</li>
+  <li>Copy the public key from the log output or <code>probe_key.pub</code></li>
+  <li>Register at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a></li>
+  <li>Once approved, starla will connect to a controller and begin measurements</li>
+</ol>
+
+<h2>Configuration File</h2>
+
+<p>See <a href="https://github.com/ananthb/starla/blob/main/config.toml.example">config.toml.example</a>
+for all available options. The config file is optional &mdash; all settings have sensible defaults.</p>
+
+<p>Config file search order:</p>
+<ol>
+  <li><code>--config</code> CLI flag</li>
+  <li><code>$CONFIGURATION_DIRECTORY/config.toml</code> (systemd)</li>
+  <li><code>$XDG_CONFIG_HOME/starla/config.toml</code></li>
+  <li><code>/etc/starla/config.toml</code> (root) or <code>~/.config/starla/config.toml</code> (user)</li>
+</ol>
+
+</div>
+</body>
+</html>
