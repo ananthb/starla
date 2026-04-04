@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -29,3 +30,17 @@ jobs:
           files: |
             result/*
           generate_release_notes: true
+
+      - name: Build OCI image
+        run: nix build .#oci
+
+      - name: Push OCI image to ghcr.io
+        run: |
+          nix shell nixpkgs#skopeo -c skopeo copy \
+            --dest-creds="${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+            "docker-archive:$(readlink result)" \
+            "docker://ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
+          nix shell nixpkgs#skopeo -c skopeo copy \
+            --dest-creds="${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+            "docker-archive:$(readlink result)" \
+            "docker://ghcr.io/ananthb/starla:latest"

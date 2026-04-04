@@ -155,6 +155,19 @@
               cp ${pkg}/bin/starla $out/starla-x86_64-linux
             '';
 
+          oci = pkgs.dockerTools.buildLayeredImage {
+            name = "ghcr.io/ananthb/starla";
+            tag = "latest";
+            contents = [
+              self.packages.${system}.default
+              pkgs.cacert
+            ];
+            config = {
+              Entrypoint = [ "/bin/starla" ];
+              Env = [ "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" ];
+            };
+          };
+
           # Minimal build without observability features
           minimal = pkgs.rustPlatform.buildRustPackage {
             pname = "starla-minimal";
