@@ -114,13 +114,9 @@
                 packageOverrides.cargo = rustToolchain;
                 packageOverrides.rustfmt = rustToolchain;
               };
-              clippy = {
-                enable = true;
-                packageOverrides.cargo = rustToolchain;
-                packageOverrides.clippy = rustToolchain;
-                settings.allFeatures = true;
-                settings.denyWarnings = true;
-              };
+              # clippy is handled by checks.default and checks.minimal
+              # which use buildRustPackage with vendored dependencies.
+              # The pre-commit hook can't fetch crates in the nix sandbox.
             };
           };
 
