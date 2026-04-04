@@ -9,6 +9,7 @@ use starla_common::{
     MeasurementData, MeasurementId, MeasurementResult, MeasurementType, ProbeId, Timestamp,
 };
 use starla_network::get_source_addr_for_dest;
+use std::fmt::Write;
 use std::net::IpAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,23 +48,50 @@ impl Measurement for Dns {
             DnsProtocol::UDP => "UDP",
         };
 
-        // Get the source address that would be used for this destination
         let src_addr = get_source_addr_for_dest(self.config.target).ok();
 
         // Format DNS result object to match C probe field order:
-        // { "rt":35.265, "size":62, "ID":12345, "ANCOUNT":1, "QDCOUNT":1, "NSCOUNT":0,
-        // "ARCOUNT":0 }
-        let result_str = format!(
-            "{{ \"rt\":{:.3}, \"size\":{}, \"ID\":{}, \"ANCOUNT\":{}, \"QDCOUNT\":{}, \
-             \"NSCOUNT\":{}, \"ARCOUNT\":{} }}",
+        // { "rt":35.265,"size":62, "abuf":"base64...","ID":12345,
+        //   "ANCOUNT":1, "QDCOUNT":1, "NSCOUNT":0, "ARCOUNT":0,
+        //   "answers":[ {"TYPE":"TXT", "NAME":"hostname.bind", "RDATA":["value"]} ] }
+        let mut result_str = String::with_capacity(512);
+        write!(
+            result_str,
+            "{{ \"rt\":{:.3},\"size\":{}, \"abuf\":\"{}\",\"ID\":{}, \"ANCOUNT\":{}, \
+             \"QDCOUNT\":{}, \"NSCOUNT\":{}, \"ARCOUNT\":{}",
             results.rt,
             results.size,
+            results.abuf,
             results.id,
             results.ancount,
             results.qdcount,
             results.nscount,
             results.arcount,
-        );
+        )
+        .unwrap();
+
+        // Add parsed answers if present
+        if let Some(answers) = resolver::decode_answers(&results.abuf) {
+            write!(result_str, ",\"answers\":[ ").unwrap();
+            for (i, ans) in answers.iter().enumerate() {
+                if i > 0 {
+                    write!(result_str, ", ").unwrap();
+                }
+                let rdata_json: Vec<String> =
+                    ans.rdata.iter().map(|s| format!("\"{}\"", s)).collect();
+                write!(
+                    result_str,
+                    "{{\"TYPE\":\"{}\", \"NAME\":\"{}\", \"RDATA\":[ {} ]}}",
+                    ans.record_type,
+                    ans.name,
+                    rdata_json.join(", ")
+                )
+                .unwrap();
+            }
+            write!(result_str, " ]").unwrap();
+        }
+
+        write!(result_str, " }}").unwrap();
 
         Ok(MeasurementResult {
             fw: starla_common::FIRMWARE_VERSION,

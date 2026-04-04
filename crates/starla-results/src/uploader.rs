@@ -293,13 +293,9 @@ impl ResultUploader {
         // Log body for debugging
         let body_str = String::from_utf8_lossy(&body);
         if body.len() > 2200 {
-            trace!("Upload request body (first 2KB):\n{}", &body_str[..2048]);
-            trace!(
-                "Upload request body (last 200 bytes):\n...{}",
-                &body_str[body.len().saturating_sub(200)..]
-            );
+            trace!("Upload body (first 2KB):\n{}", &body_str[..2048]);
         } else {
-            trace!("Upload request body:\n{}", body_str);
+            trace!("Upload body:\n{}", body_str);
         }
 
         let (body, is_compressed) = if self.should_compress(body.len()) {

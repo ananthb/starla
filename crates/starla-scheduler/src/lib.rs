@@ -269,10 +269,35 @@ impl Scheduler {
             (due, exp)
         };
 
-        // Execute due jobs (DNS resolution happens here)
+        // Execute due jobs concurrently
         for job in due_jobs {
             debug!(msm_id = job.msm_id, "Executing scheduled measurement");
-            self.execute_job(&job).await;
+            let executor = self.executor.clone();
+            let result_handler = self.result_handler.clone();
+            let probe_id = self.probe_id;
+            tokio::spawn(async move {
+                match job.to_measurement(probe_id) {
+                    Ok(measurement) => match measurement.execute().await {
+                        Ok(result) => {
+                            debug!(msm_id = result.msm_id.0, "Measurement completed");
+                            if let Err(e) = executor.store_result(&result) {
+                                error!("Failed to store result: {}", e);
+                            }
+                            if let Some(ref handler) = result_handler {
+                                if let Err(e) = handler.submit(result).await {
+                                    error!("Failed to submit result: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!(msm_id = job.msm_id, "Measurement failed: {}", e);
+                        }
+                    },
+                    Err(e) => {
+                        error!(msm_id = job.msm_id, "Failed to create measurement: {}", e);
+                    }
+                }
+            });
         }
     }
 }
