@@ -4,25 +4,40 @@
 //!
 //! **Config directory** (for config.toml):
 //! 1. `$CONFIGURATION_DIRECTORY` (systemd)
-//! 2. `$XDG_CONFIG_HOME/starla`
-//! 3. Root: `/etc/starla`, non-root: `~/.config/starla`
+//! 2. Container: `/config`
+//! 3. `$XDG_CONFIG_HOME/starla`
+//! 4. Root: `/etc/starla`, non-root: `~/.config/starla`
 //!
 //! **State directory** (for keys, probe_id, known_hosts):
 //! 1. CLI `--state-dir` (via override)
 //! 2. `$STATE_DIRECTORY` (systemd)
-//! 3. `$XDG_STATE_HOME/starla`
-//! 4. Root: `/var/lib/starla`, non-root: `~/.local/state/starla`
+//! 3. Container: `/state`
+//! 4. `$XDG_STATE_HOME/starla`
+//! 5. Root: `/var/lib/starla`, non-root: `~/.local/state/starla`
 //!
 //! **Runtime directory** (for ephemeral databases, caches):
 //! 1. `$RUNTIME_DIRECTORY` (systemd)
-//! 2. `$XDG_RUNTIME_DIR/starla`
-//! 3. Root: `/run/starla`, non-root: `/tmp/starla-<uid>`
+//! 2. Container: `/run/starla`
+//! 3. `$XDG_RUNTIME_DIR/starla`
+//! 4. Root: `/run/starla`, non-root: `/tmp/starla-<uid>`
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
 /// Application name used in subdirectories
 const APP_NAME: &str = "starla";
+
+/// Detect if running inside a container (Docker, Podman, etc.)
+///
+/// Checks for:
+/// - `container` env var (set by podman, systemd-nspawn)
+/// - `/.dockerenv` file (Docker)
+/// - `/run/.containerenv` file (Podman)
+fn is_container() -> bool {
+    std::env::var("container").is_ok()
+        || std::path::Path::new("/.dockerenv").exists()
+        || std::path::Path::new("/run/.containerenv").exists()
+}
 
 /// CLI override for state directory (set once at startup via `set_state_dir`)
 static STATE_DIR_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
@@ -48,11 +63,16 @@ pub fn set_runtime_dir(path: PathBuf) {
 ///
 /// Priority:
 /// 1. `$CONFIGURATION_DIRECTORY` (systemd)
-/// 2. `$XDG_CONFIG_HOME/starla`
-/// 3. Root: `/etc/starla`, non-root: `~/.config/starla`
+/// 2. Container: `/config`
+/// 3. `$XDG_CONFIG_HOME/starla`
+/// 4. Root: `/etc/starla`, non-root: `~/.config/starla`
 pub fn config_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("CONFIGURATION_DIRECTORY") {
         return PathBuf::from(dir);
+    }
+
+    if is_container() {
+        return PathBuf::from("/config");
     }
 
     if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
@@ -75,8 +95,9 @@ pub fn config_dir() -> PathBuf {
 /// Priority:
 /// 1. CLI override (set via `set_state_dir`)
 /// 2. `$STATE_DIRECTORY` (systemd)
-/// 3. `$XDG_STATE_HOME/starla`
-/// 4. Root: `/var/lib/starla`, non-root: `~/.local/state/starla`
+/// 3. Container: `/state`
+/// 4. `$XDG_STATE_HOME/starla`
+/// 5. Root: `/var/lib/starla`, non-root: `~/.local/state/starla`
 pub fn state_dir() -> PathBuf {
     if let Some(override_dir) = STATE_DIR_OVERRIDE.get() {
         return override_dir.clone();
@@ -84,6 +105,10 @@ pub fn state_dir() -> PathBuf {
 
     if let Ok(dir) = std::env::var("STATE_DIRECTORY") {
         return PathBuf::from(dir);
+    }
+
+    if is_container() {
+        return PathBuf::from("/state");
     }
 
     if let Ok(xdg_state) = std::env::var("XDG_STATE_HOME") {
@@ -106,8 +131,9 @@ pub fn state_dir() -> PathBuf {
 /// Priority:
 /// 1. CLI override (set via `set_runtime_dir`)
 /// 2. `$RUNTIME_DIRECTORY` (systemd)
-/// 3. `$XDG_RUNTIME_DIR/starla`
-/// 4. Root: `/run/starla`, non-root: `/tmp/starla-<uid>`
+/// 3. Container: `/run/starla`
+/// 4. `$XDG_RUNTIME_DIR/starla`
+/// 5. Root: `/run/starla`, non-root: `/tmp/starla-<uid>`
 pub fn runtime_dir() -> PathBuf {
     if let Some(override_dir) = RUNTIME_DIR_OVERRIDE.get() {
         return override_dir.clone();
@@ -115,6 +141,10 @@ pub fn runtime_dir() -> PathBuf {
 
     if let Ok(dir) = std::env::var("RUNTIME_DIRECTORY") {
         return PathBuf::from(dir);
+    }
+
+    if is_container() {
+        return PathBuf::from("/run").join(APP_NAME);
     }
 
     if let Ok(xdg_runtime) = std::env::var("XDG_RUNTIME_DIR") {

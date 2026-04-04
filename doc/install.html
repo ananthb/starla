@@ -40,12 +40,15 @@
 
 <pre><code># Run with persistent state
 docker run -d --name starla \
-  -v starla-state:/var/lib/starla \
+  -v starla-state:/state \
   --cap-add NET_RAW \
   ghcr.io/ananthb/starla:latest</code></pre>
 
 <p><code>CAP_NET_RAW</code> is required for ping and traceroute measurements.
 Without it, only DNS, HTTP, TLS, and NTP measurements will work.</p>
+
+<p>Inside a container, starla automatically stores state in <code>/state</code>
+and reads config from <code>/config</code> &mdash; no extra flags needed.</p>
 
 <h3>With a config file</h3>
 <pre><code># Download example config
@@ -54,15 +57,14 @@ cp config.toml.example config.toml
 # Edit config.toml as needed
 
 docker run -d --name starla \
-  -v starla-state:/var/lib/starla \
-  -v $(pwd)/config.toml:/etc/starla/config.toml:ro \
+  -v starla-state:/state \
+  -v $(pwd)/config.toml:/config/config.toml:ro \
   --cap-add NET_RAW \
-  ghcr.io/ananthb/starla:latest \
-  --config /etc/starla/config.toml</code></pre>
+  ghcr.io/ananthb/starla:latest</code></pre>
 
 <h3>Podman</h3>
 <pre><code>podman run -d --name starla \
-  -v starla-state:/var/lib/starla \
+  -v starla-state:/state \
   --cap-add NET_RAW \
   ghcr.io/ananthb/starla:latest</code></pre>
 
@@ -71,7 +73,7 @@ docker run -d --name starla \
 docker logs -f starla
 
 # Get the probe public key (needed for registration)
-docker exec starla cat /var/lib/starla/probe_key.pub</code></pre>
+docker exec starla cat /state/probe_key.pub</code></pre>
 
 <h2>NixOS</h2>
 

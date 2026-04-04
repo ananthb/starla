@@ -62,7 +62,7 @@ results back to the API.</p>
 <h2>Quick Start</h2>
 <pre><code># Container (simplest)
 docker run -d --name starla \
-  -v starla-state:/var/lib/starla \
+  -v starla-state:/state \
   --cap-add NET_RAW \
   ghcr.io/ananthb/starla:latest
 
