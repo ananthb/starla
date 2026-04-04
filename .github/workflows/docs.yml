@@ -1,0 +1,46 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Configure Garnix cache
+        run: |
+          nix config set extra-substituters "https://cache.garnix.io"
+          nix config set extra-trusted-public-keys "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
+
+      - name: Build documentation
+        run: nix develop -c cargo doc --workspace --no-deps --all-features
+
+      - name: Add index redirect
+        run: echo '<meta http-equiv="refresh" content="0;url=starla_common/index.html">' > target/doc/index.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
