@@ -27,8 +27,10 @@ jobs:
 
       - name: Configure Garnix cache
         run: |
-          nix config set extra-substituters "https://cache.garnix.io"
-          nix config set extra-trusted-public-keys "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
+          sudo tee -a /etc/nix/nix.conf <<EOF
+          extra-substituters = https://cache.garnix.io
+          extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
+          EOF
 
       - name: Build documentation
         run: nix develop -c cargo doc --workspace --no-deps --all-features
