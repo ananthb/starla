@@ -150,10 +150,51 @@
             release =
               let
                 pkg = self.packages.${system}.default;
+
+                # Evaluate the NixOS module to extract the generated systemd unit
+                evalCfg = (nixpkgs.lib.nixosSystem {
+                  inherit system;
+                  modules = [
+                    self.nixosModules.default
+                    {
+                      services.starla.enable = true;
+                      # Use a generic path for the release binary
+                      services.starla.package = pkgs.writeShellScriptBin "starla" "";
+                    }
+                  ];
+                }).config.systemd.services.starla;
+
+                serviceFile = pkgs.writeText "starla.service" (
+                  let
+                    inherit (nixpkgs) lib;
+                    sc = evalCfg.serviceConfig;
+                    # Replace the nix-store ExecStart with a generic path
+                    execStart = "/usr/bin/starla --config /etc/starla/config.toml";
+                    listOrStr = v: if builtins.isList v then lib.concatStringsSep " " v else toString v;
+                    boolStr = v: if v then "true" else "false";
+                    fmtVal = v:
+                      if builtins.isBool v then boolStr v
+                      else listOrStr v;
+                  in
+                  lib.concatStringsSep "\n" ([
+                    "[Unit]"
+                    "Description=${evalCfg.description}"
+                  ]
+                  ++ map (a: "After=${a}") evalCfg.after
+                  ++ map (w: "Wants=${w}") evalCfg.wants
+                  ++ [ "" "[Service]" "ExecStart=${execStart}" ]
+                  ++ lib.mapAttrsToList (k: v: "${k}=${fmtVal v}")
+                    (builtins.removeAttrs sc [ "ExecStart" ])
+                  ++ [ "" "[Install]" ]
+                  ++ map (w: "WantedBy=${w}") evalCfg.wantedBy
+                  ++ [ "" ])
+                );
               in
               pkgs.runCommand "starla-release" { } ''
                 mkdir -p $out
                 cp ${pkg}/bin/starla $out/starla-x86_64-linux
+                cp ${./config.toml.example} $out/config.toml.example
+                cp ${serviceFile} $out/starla.service
               '';
 
             oci = pkgs.dockerTools.buildLayeredImage {
