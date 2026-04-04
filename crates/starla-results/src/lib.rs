@@ -87,10 +87,11 @@ impl ResultHandler {
     }
 
     /// Set the upload endpoint path (call after controller connection)
-    pub async fn set_endpoint_path(&self, path: String) {
+    pub async fn set_endpoint_path(&self, path: String) -> anyhow::Result<()> {
         let mut uploader = self.uploader.lock().await;
-        uploader.set_endpoint_path(path);
+        uploader.set_endpoint_path(path)?;
         debug!("Result upload endpoint path set");
+        Ok(())
     }
 
     /// Set the session ID (for upload body footer per httppost --post-footer

@@ -123,10 +123,7 @@ impl Scheduler {
                 self.execute_measurement(measurement.as_ref()).await;
             }
             Err(e) => {
-                error!(
-                    msm_id = job.msm_id,
-                    "Failed to create measurement (DNS resolution failed?): {}", e
-                );
+                error!(msm_id = job.msm_id, "Failed to create measurement: {}", e);
             }
         }
     }

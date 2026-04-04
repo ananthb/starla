@@ -228,17 +228,8 @@ async fn main() -> Result<()> {
     let ssh_for_upload: Arc<tokio::sync::Mutex<Option<Arc<SshConnection>>>> =
         Arc::new(tokio::sync::Mutex::new(None));
     let results_db_path = starla_common::results_queue_path();
-    let uploader_config = UploaderConfig {
-        endpoint_path: String::new(), // Set after controller connection
-        timeout: Duration::from_secs(15),
-    };
-    let result_handler_config = ResultHandlerConfig {
-        batch_size: 10,
-        upload_interval: Duration::from_secs(10),
-        max_result_age_secs: 3600, // 1 hour
-        max_attempts: 5,
-        cleanup_interval: Duration::from_secs(300),
-    };
+    let uploader_config = UploaderConfig::default();
+    let result_handler_config = ResultHandlerConfig::default();
     let transport = Box::new(SshUploadTransport {
         ssh: ssh_for_upload.clone(),
     });
@@ -365,8 +356,6 @@ async fn main() -> Result<()> {
                 log_scheduled_summary(&mut scheduled_counts);
                 last_log_time = std::time::Instant::now();
             }
-
-            debug!("Processing command: {:?}", cmd);
 
             debug!("Processing command: {:?}", cmd);
 
@@ -825,7 +814,10 @@ async fn main() -> Result<()> {
                         let endpoint_path =
                             format!("/?PROBE_ID={}&SESSION_ID={}", actual_probe_id, session_id);
                         debug!("Result upload endpoint path: {}", endpoint_path);
-                        result_handler.set_endpoint_path(endpoint_path).await;
+                        result_handler
+                            .set_endpoint_path(endpoint_path)
+                            .await
+                            .expect("endpoint path is always well-formed");
 
                         // Set session ID for upload body footer (per httppost --post-footer
                         // behavior)
@@ -925,7 +917,13 @@ async fn main() -> Result<()> {
                             // Run KEEP session — blocks until connection drops.
                             let keep_ssh_for_keep = {
                                 let guard = ssh_for_upload.lock().await;
-                                guard.as_ref().unwrap().clone()
+                                match guard.as_ref() {
+                                    Some(ssh) => ssh.clone(),
+                                    None => {
+                                        error!("SSH connection not set before KEEP session");
+                                        continue 'connection_loop;
+                                    }
+                                }
                             };
                             let keep_task =
                                 tokio::spawn(

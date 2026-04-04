@@ -477,7 +477,7 @@ impl PersistentResultQueue {
         if memory_removed > 0 || disk_removed > 0 {
             debug!(
                 "Cleaned up {} expired results ({} memory, {} disk)",
-                memory_removed.max(disk_removed),
+                memory_removed + disk_removed,
                 memory_removed,
                 disk_removed
             );
@@ -517,7 +517,7 @@ impl PersistentResultQueue {
         if memory_removed > 0 || disk_removed > 0 {
             warn!(
                 "Dropped {} results that exceeded max attempts",
-                memory_removed.max(disk_removed)
+                memory_removed + disk_removed
             );
         }
 

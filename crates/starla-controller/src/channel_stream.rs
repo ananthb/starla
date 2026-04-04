@@ -64,6 +64,8 @@ pub fn channel_to_stream(mut channel: Channel<Msg>) -> DuplexStream {
             }
         }
 
+        // Ensure SSH channel is closed when bridge exits
+        let _ = channel.eof().await;
         debug!("Channel stream bridge ended");
     });
 

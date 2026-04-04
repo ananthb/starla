@@ -55,9 +55,17 @@ impl ResultUploader {
         Self { transport, config }
     }
 
-    /// Set the endpoint path (call after controller connection)
-    pub fn set_endpoint_path(&mut self, path: String) {
+    /// Set the endpoint path (call after controller connection).
+    /// Path must start with '/' (e.g., "/?PROBE_ID=123&SESSION_ID=abc").
+    pub fn set_endpoint_path(&mut self, path: String) -> anyhow::Result<()> {
+        if !path.starts_with('/') {
+            anyhow::bail!("endpoint path must start with '/', got: {}", path);
+        }
+        if path.contains('\n') || path.contains('\r') {
+            anyhow::bail!("endpoint path contains invalid characters");
+        }
         self.config.endpoint_path = path;
+        Ok(())
     }
 
     /// Check if an endpoint path is configured
@@ -111,7 +119,9 @@ impl ResultUploader {
         // Open transport stream and send raw HTTP/1.1 POST
         let mut stream = tokio::time::timeout(self.config.timeout, self.transport.open())
             .await
-            .map_err(|_| anyhow::anyhow!("Transport open timeout"))??;
+            .map_err(|_| {
+                anyhow::anyhow!("Transport open timed out after {:?}", self.config.timeout)
+            })??;
 
         // Write HTTP request
         let request = format!(
@@ -142,7 +152,7 @@ impl ResultUploader {
                 }
                 Err(_) => {
                     if response.is_empty() {
-                        anyhow::bail!("Response timeout");
+                        anyhow::bail!("Response timed out after {:?}", self.config.timeout);
                     }
                     break;
                 }

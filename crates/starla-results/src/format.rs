@@ -13,31 +13,51 @@ use std::net::IpAddr;
 /// The C probe writes arrays as `[ { ... }, { ... } ]` with spaces inside
 /// brackets and spaces inside braces. Objects are written as `{ "key":value }`.
 fn format_result_value(value: &serde_json::Value) -> String {
+    let mut buf = String::new();
+    write_result_value(&mut buf, value);
+    buf
+}
+
+fn write_result_value(buf: &mut String, value: &serde_json::Value) {
+    use std::fmt::Write;
     match value {
         serde_json::Value::Array(items) => {
             if items.is_empty() {
-                return "[ ]".to_string();
+                buf.push_str("[ ]");
+                return;
             }
-            let entries: Vec<String> = items.iter().map(format_result_value).collect();
-            format!("[ {} ]", entries.join(", "))
+            buf.push_str("[ ");
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    buf.push_str(", ");
+                }
+                write_result_value(buf, item);
+            }
+            buf.push_str(" ]");
         }
         serde_json::Value::Object(map) => {
             if map.is_empty() {
-                return "{ }".to_string();
+                buf.push_str("{ }");
+                return;
             }
-            let entries: Vec<String> = map
-                .iter()
-                .map(|(k, v)| {
-                    let v_str = match v {
-                        serde_json::Value::String(s) => format!("\"{}\"", s),
-                        _ => v.to_string(),
-                    };
-                    format!("\"{}\":{}", k, v_str)
-                })
-                .collect();
-            format!("{{ {} }}", entries.join(", "))
+            buf.push_str("{ ");
+            for (i, (k, v)) in map.iter().enumerate() {
+                if i > 0 {
+                    buf.push_str(", ");
+                }
+                write!(buf, "\"{}\":", k).unwrap();
+                match v {
+                    serde_json::Value::String(s) => write!(buf, "\"{}\"", s).unwrap(),
+                    _ => write_result_value(buf, v),
+                }
+            }
+            buf.push_str(" }");
         }
-        other => other.to_string(),
+        serde_json::Value::String(s) => {
+            use std::fmt::Write;
+            write!(buf, "\"{}\"", s).unwrap();
+        }
+        other => buf.push_str(&other.to_string()),
     }
 }
 

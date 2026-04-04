@@ -290,8 +290,6 @@ pub struct TelnetState {
 /// SSH connection to RIPE Atlas controller
 pub struct SshConnection {
     session: Arc<Mutex<Handle<AtlasClientHandler>>>,
-    #[allow(dead_code)]
-    config: SshConfig,
     host: String,
     port: u16,
 }
@@ -369,7 +367,6 @@ impl SshConnection {
 
         Ok(Self {
             session: Arc::new(Mutex::new(session)),
-            config,
             host: host.to_string(),
             port,
         })
