@@ -13,11 +13,13 @@ use anyhow::Result;
 use clap::Parser;
 use starla_common::logging::{init_logging, LogConfig};
 use starla_controller::{
-    InitResponse, KnownHosts, ProbeInitInfo, SshConfig, TelnetCommand, TelnetServer,
+    InitResponse, KnownHosts, ProbeInitInfo, SshConfig, SshConnection, TelnetCommand,
 };
 #[cfg(feature = "metrics-export")]
 use starla_metrics::MetricsRegistry;
-use starla_results::{CompressionMode, ResultHandler, ResultHandlerConfig, UploaderConfig};
+use starla_results::{
+    ResultHandler, ResultHandlerConfig, UploadStream, UploadTransport, UploaderConfig,
+};
 use starla_scheduler::{
     DnsJobSpec, HttpJobSpec, MeasurementJob, MeasurementSpec, NtpJobSpec, PingJobSpec,
     SchedulerCommand, TlsJobSpec, TracerouteJobSpec,
@@ -28,6 +30,33 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
+
+/// SSH-based upload transport that opens direct-tcpip channels
+/// to the controller's HTTP result endpoint.
+///
+/// The inner SSH connection is set after the KEEP session is established
+/// and updated on reconnection.
+struct SshUploadTransport {
+    ssh: Arc<tokio::sync::Mutex<Option<Arc<SshConnection>>>>,
+}
+
+impl UploadTransport for SshUploadTransport {
+    fn open(
+        &self,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = anyhow::Result<Box<dyn UploadStream>>> + Send + '_>,
+    > {
+        Box::pin(async {
+            let guard = self.ssh.lock().await;
+            let ssh = guard
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("SSH connection not established"))?;
+            let channel = ssh.open_direct_tcpip("127.0.0.1", 8080).await?;
+            let stream = starla_controller::channel_to_stream(channel);
+            Ok(Box::new(stream) as Box<dyn UploadStream>)
+        })
+    }
+}
 
 /// Starla - RIPE Atlas Software Probe
 #[derive(Parser, Debug)]
@@ -129,12 +158,7 @@ async fn main() -> Result<()> {
         starla_common::ProbeConfig::default()
     };
 
-    debug!(
-        "Config: telnet={}, http={}, state_dir={}",
-        config.network.telnet_port,
-        config.network.http_post_port,
-        state_dir.display()
-    );
+    debug!("Config: state_dir={}", state_dir.display());
 
     // Ensure state and runtime directories exist
     if let Err(e) = std::fs::create_dir_all(&state_dir) {
@@ -200,12 +224,13 @@ async fn main() -> Result<()> {
     let db = Arc::new(starla_database::Database::connect(&db_path)?);
 
     // Initialize Results Handler with persistent queue
+    // The SSH transport is populated later when the KEEP connection is established
+    let ssh_for_upload: Arc<tokio::sync::Mutex<Option<Arc<SshConnection>>>> =
+        Arc::new(tokio::sync::Mutex::new(None));
     let results_db_path = starla_common::results_queue_path();
     let uploader_config = UploaderConfig {
-        endpoint: String::new(),          // Will be set after controller connection
-        timeout: Duration::from_secs(15), // 15s to fail faster and trigger reconnection
-        compression: CompressionMode::Auto,
-        ..Default::default()
+        endpoint_path: String::new(), // Set after controller connection
+        timeout: Duration::from_secs(15),
     };
     let result_handler_config = ResultHandlerConfig {
         batch_size: 10,
@@ -214,8 +239,12 @@ async fn main() -> Result<()> {
         max_attempts: 5,
         cleanup_interval: Duration::from_secs(300),
     };
+    let transport = Box::new(SshUploadTransport {
+        ssh: ssh_for_upload.clone(),
+    });
     let result_handler = Arc::new(ResultHandler::new(
         &results_db_path,
+        transport,
         uploader_config,
         result_handler_config,
     )?);
@@ -273,16 +302,14 @@ async fn main() -> Result<()> {
     // Create channel for receiving telnet commands
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<TelnetCommand>(100);
 
-    // Start Telnet Server with command channel
-    // Use a temporary probe_id of 0 - will be updated after registration
-    let telnet_port = config.network.telnet_port;
-    let telnet_server = Arc::new(TelnetServer::with_channel(telnet_port, 0, cmd_tx));
-    let telnet_server_clone = telnet_server.clone();
-    tokio::spawn(async move {
-        if let Err(e) = telnet_server_clone.run().await {
-            error!("Telnet server error: {}", e);
-        }
-    });
+    // Telnet state — passed to SSH connections so forwarded connections
+    // are handled directly without a local TCP listener
+    let telnet_session_id = std::sync::Arc::new(tokio::sync::RwLock::new(None));
+    let telnet_state = starla_controller::TelnetState {
+        command_tx: cmd_tx,
+        probe_id: 0, // Updated after registration
+        session_id: telnet_session_id.clone(),
+    };
 
     // Command handler task - converts telnet commands to scheduler jobs
     #[cfg(feature = "metrics-export")]
@@ -680,6 +707,7 @@ async fn main() -> Result<()> {
                     &key,
                     ssh_config.clone(),
                     known_hosts.clone(),
+                    None,
                 )
                 .await
                 {
@@ -776,8 +804,7 @@ async fn main() -> Result<()> {
                         // INIT connection served its purpose, drop it
                         drop(ctrl_ssh);
 
-                        // Set session ID for telnet authentication
-                        telnet_server.set_session_id(session_id.clone()).await;
+                        // Session ID is set on TelnetState before each KEEP connection
 
                         // Get probe ID - should have been read from state dir at startup
                         // If not set (0), the probe hasn't been registered yet
@@ -794,16 +821,11 @@ async fn main() -> Result<()> {
                             );
                         }
 
-                        // Set result upload endpoint
-                        // The Atlas protocol uses HTTP POST with PROBE_ID and SESSION_ID as
-                        // query parameters Results are
-                        // uploaded via the SSH local port forward tunnel to the controller
-                        let result_endpoint = format!(
-                            "http://127.0.0.1:{}/?PROBE_ID={}&SESSION_ID={}",
-                            config.network.http_post_port, actual_probe_id, session_id
-                        );
-                        debug!("Result upload endpoint: {}", result_endpoint);
-                        result_handler.set_endpoint(result_endpoint).await;
+                        // Set result upload endpoint path (query params for HTTP POST)
+                        let endpoint_path =
+                            format!("/?PROBE_ID={}&SESSION_ID={}", actual_probe_id, session_id);
+                        debug!("Result upload endpoint path: {}", endpoint_path);
+                        result_handler.set_endpoint_path(endpoint_path).await;
 
                         // Set session ID for upload body footer (per httppost --post-footer
                         // behavior)
@@ -823,12 +845,18 @@ async fn main() -> Result<()> {
                                 "Creating connection for KEEP session (attempt {})",
                                 connection_attempt
                             );
+                            // Update telnet state with current probe ID and session ID
+                            let mut keep_telnet = telnet_state.clone();
+                            keep_telnet.probe_id = actual_probe_id;
+                            *keep_telnet.session_id.write().await = Some(session_id.clone());
+
                             let keep_ssh = match starla_controller::SshConnection::connect(
                                 &controller_info.host,
                                 controller_info.port,
                                 &key,
                                 ssh_config.clone(),
                                 known_hosts.clone(),
+                                Some(keep_telnet),
                             )
                             .await
                             {
@@ -856,8 +884,8 @@ async fn main() -> Result<()> {
                                 }
                             };
 
-                            // Setup reverse tunnel: remote_port on controller -> local
-                            // telnet_port
+                            // Setup reverse tunnel: controller connects to remote_port,
+                            // SSH handler routes directly to telnet command parser
                             if let Err(e) = keep_ssh.request_reverse_tunnel(remote_port).await {
                                 error!("Failed to setup reverse tunnel: {}", e);
                                 warn!("Retrying connection in {:?}...", reconnect_delay);
@@ -866,36 +894,16 @@ async fn main() -> Result<()> {
                                     std::cmp::min(reconnect_delay * 2, max_reconnect_delay);
                                 continue 'connection_loop;
                             }
-                            debug!(
-                                "Reverse tunnel established: remote {} -> local {}",
-                                remote_port, telnet_port
-                            );
+                            debug!("Reverse tunnel established: remote port {}", remote_port);
 
-                            // Start HTTP proxy for result uploads
-                            // Create a signal token that the proxy can use to trigger
-                            // reconnection
-                            let proxy_reconnect_signal = CancellationToken::new();
-                            let http_post_port = config.network.http_post_port;
-                            if let Err(e) = keep_ssh
-                                .start_http_proxy(
-                                    http_post_port,
-                                    8080,
-                                    proxy_reconnect_signal.clone(),
-                                )
-                                .await
-                            {
-                                error!(
-                                    "Failed to start HTTP proxy on port {}: {}",
-                                    http_post_port, e
-                                );
-                                error!(
-                                    "Another process may be using this port. Configure a \
-                                     different port in config.toml:"
-                                );
-                                error!("  [network]");
-                                error!("  http_post_port = 8081");
-                                break 'connection_loop;
-                            }
+                            // Share the SSH connection for result uploads (direct-tcpip)
+                            // and KEEP session monitoring
+                            let keep_ssh = Arc::new(keep_ssh);
+                            *ssh_for_upload.lock().await = Some(
+                                // SAFETY: We need the inner SshConnection for both the
+                                // upload transport and run_keep_session. Clone the Arc.
+                                keep_ssh.clone(),
+                            );
 
                             info!("Controller connection established successfully");
 
@@ -915,9 +923,14 @@ async fn main() -> Result<()> {
                             }
 
                             // Run KEEP session — blocks until connection drops.
-                            // Also start the KEEP in a task so we can select on it.
+                            let keep_ssh_for_keep = {
+                                let guard = ssh_for_upload.lock().await;
+                                guard.as_ref().unwrap().clone()
+                            };
                             let keep_task =
-                                tokio::spawn(async move { keep_ssh.run_keep_session().await });
+                                tokio::spawn(
+                                    async move { keep_ssh_for_keep.run_keep_session().await },
+                                );
 
                             // Wait for shutdown or connection loss
                             let should_reconnect = tokio::select! {
@@ -935,11 +948,9 @@ async fn main() -> Result<()> {
                                         Err(e) => warn!("KEEP task panicked: {}", e),
                                         _ => warn!("KEEP session ended"),
                                     }
+                                    // Clear SSH connection so uploads fail fast
+                                    *ssh_for_upload.lock().await = None;
                                     true // Reconnect
-                                }
-                                _ = proxy_reconnect_signal.cancelled() => {
-                                    warn!("HTTP proxy detected dead SSH session, will reconnect...");
-                                    true
                                 }
                             };
 

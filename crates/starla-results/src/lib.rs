@@ -15,7 +15,7 @@ mod uploader;
 pub use format::{AtlasResult, ResultBundle};
 pub use persistent_queue::{PersistentResultQueue, QueueStats, QueuedResult};
 pub use time_sync::TimeSyncTracker;
-pub use uploader::{CompressionMode, ResultUploader, UploaderConfig};
+pub use uploader::{ResultUploader, UploadStream, UploadTransport, UploaderConfig};
 
 use starla_common::MeasurementResult;
 use std::path::Path;
@@ -70,11 +70,12 @@ impl ResultHandler {
     /// Create a new result handler with persistent queue
     pub fn new(
         db_path: &Path,
+        transport: Box<dyn UploadTransport>,
         uploader_config: UploaderConfig,
         config: ResultHandlerConfig,
     ) -> anyhow::Result<Self> {
         let queue = PersistentResultQueue::new(db_path, 1000)?;
-        let uploader = ResultUploader::new(uploader_config);
+        let uploader = ResultUploader::new(transport, uploader_config);
 
         Ok(Self {
             queue: Arc::new(Mutex::new(queue)),
@@ -85,16 +86,11 @@ impl ResultHandler {
         })
     }
 
-    /// Create with default configuration
-    pub fn with_defaults(db_path: &Path, uploader_config: UploaderConfig) -> anyhow::Result<Self> {
-        Self::new(db_path, uploader_config, ResultHandlerConfig::default())
-    }
-
-    /// Set the upload endpoint (call after controller connection)
-    pub async fn set_endpoint(&self, endpoint: String) {
+    /// Set the upload endpoint path (call after controller connection)
+    pub async fn set_endpoint_path(&self, path: String) {
         let mut uploader = self.uploader.lock().await;
-        uploader.set_endpoint(endpoint);
-        debug!("Result upload endpoint set");
+        uploader.set_endpoint_path(path);
+        debug!("Result upload endpoint path set");
     }
 
     /// Set the session ID (for upload body footer per httppost --post-footer
@@ -336,6 +332,20 @@ mod tests {
         }
     }
 
+    /// Dummy transport that always fails (for tests that don't upload)
+    struct NoopTransport;
+    impl UploadTransport for NoopTransport {
+        fn open(
+            &self,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = anyhow::Result<Box<dyn UploadStream>>> + Send + '_,
+            >,
+        > {
+            Box::pin(async { anyhow::bail!("no transport") })
+        }
+    }
+
     #[tokio::test]
     async fn test_result_handler_creation() {
         let dir = tempdir().unwrap();
@@ -343,6 +353,7 @@ mod tests {
 
         let handler = ResultHandler::new(
             &db_path,
+            Box::new(NoopTransport),
             UploaderConfig::default(),
             ResultHandlerConfig::default(),
         )
@@ -361,6 +372,7 @@ mod tests {
 
         let handler = ResultHandler::new(
             &db_path,
+            Box::new(NoopTransport),
             UploaderConfig::default(),
             ResultHandlerConfig::default(),
         )

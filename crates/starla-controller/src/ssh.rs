@@ -223,6 +223,13 @@ struct AtlasClientHandler {
     connect_host: String,
     /// The port we're connecting to
     connect_port: u16,
+    /// Command sender for telnet handler (forwarded connections go here
+    /// directly)
+    command_tx: Option<tokio::sync::mpsc::Sender<crate::telnet::TelnetCommand>>,
+    /// Probe ID for telnet authentication
+    probe_id: u32,
+    /// Session ID for telnet authentication
+    session_id: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
 #[async_trait]
@@ -240,7 +247,7 @@ impl client::Handler for AtlasClientHandler {
 
     async fn server_channel_open_forwarded_tcpip(
         &mut self,
-        mut channel: Channel<Msg>,
+        channel: Channel<Msg>,
         connected_address: &str,
         connected_port: u32,
         originator_address: &str,
@@ -252,95 +259,32 @@ impl client::Handler for AtlasClientHandler {
             originator_address, originator_port, connected_address, connected_port
         );
 
-        // Spawn a task to bridge this channel directly to local telnet
-        // This avoids issues with moving the channel through mpsc
-        let local_port = connected_port;
-        let address = connected_address.to_string();
+        // Convert SSH channel to an async stream and handle directly —
+        // no local TCP port needed
+        let stream = crate::channel_stream::channel_to_stream(channel);
+        let command_tx = self.command_tx.clone();
+        let probe_id = self.probe_id;
+        let session_id = self.session_id.clone();
 
         tokio::spawn(async move {
-            debug!("Bridging forwarded connection {}:{}", address, local_port);
-
-            // Connect to local telnet
-            let local_addr = format!("127.0.0.1:{}", local_port);
-            let local = match tokio::net::TcpStream::connect(&local_addr).await {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("Failed to connect to local {}: {}", local_addr, e);
-                    return;
-                }
-            };
-
-            debug!("Connected to local telnet at {}", local_addr);
-
-            let (mut local_read, mut local_write) = local.into_split();
-            let mut local_buf = [0u8; 4096];
-
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-            debug!("Starting bridge loop for channel {:?}", channel.id());
-
-            loop {
-                tokio::select! {
-                    biased; // Prioritize SSH channel data over local reads
-
-                    // Data from SSH channel -> local
-                    msg = channel.wait() => {
-                        trace!("channel.wait() returned: {:?}", msg.as_ref().map(|m| match m {
-                            ChannelMsg::Data { data } => format!("Data({} bytes)", data.len()),
-                            ChannelMsg::Eof => "Eof".to_string(),
-                            ChannelMsg::Close => "Close".to_string(),
-                            other => format!("{:?}", other),
-                        }));
-                        match msg {
-                            Some(ChannelMsg::Data { data }) => {
-                                trace!("SSH -> Local: {} bytes", data.len());
-                                if let Err(e) = local_write.write_all(&data).await {
-                                    error!("Failed to write to local: {}", e);
-                                    break;
-                                }
-                                let _ = local_write.flush().await;
-                            }
-                            Some(ChannelMsg::Eof) | None => {
-                                debug!("SSH channel closed");
-                                break;
-                            }
-                            Some(ChannelMsg::ExitStatus { exit_status }) => {
-                                debug!("SSH channel exit status: {}", exit_status);
-                            }
-                            other => {
-                                trace!("SSH channel message: {:?}", other);
-                            }
-                        }
-                    }
-                    // Data from local -> SSH channel
-                    result = local_read.read(&mut local_buf) => {
-                        match result {
-                            Ok(0) => {
-                                debug!("Local connection closed");
-                                let _ = channel.eof().await;
-                                break;
-                            }
-                            Ok(n) => {
-                                trace!("Local -> SSH: {} bytes", n);
-                                if let Err(e) = channel.data(&local_buf[..n]).await {
-                                    error!("Failed to write to SSH: {:?}", e);
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                error!("Error reading from local: {}", e);
-                                break;
-                            }
-                        }
-                    }
-                }
+            if let Err(e) =
+                crate::telnet::handle_connection(stream, command_tx, probe_id, session_id).await
+            {
+                error!("Error handling forwarded telnet connection: {}", e);
             }
-
-            debug!("Forwarded connection bridge ended");
+            debug!("Forwarded telnet connection ended");
         });
 
         Ok(())
     }
+}
+
+/// State needed for handling telnet connections directly in the SSH handler
+#[derive(Clone)]
+pub struct TelnetState {
+    pub command_tx: tokio::sync::mpsc::Sender<crate::telnet::TelnetCommand>,
+    pub probe_id: u32,
+    pub session_id: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
 /// SSH connection to RIPE Atlas controller
@@ -354,12 +298,17 @@ pub struct SshConnection {
 
 impl SshConnection {
     /// Connect to a controller server
+    ///
+    /// If `telnet_state` is provided, forwarded SSH connections (reverse
+    /// tunnel) will be handled directly by the telnet command parser
+    /// without a local TCP listener.
     pub async fn connect(
         host: &str,
         port: u16,
         key: &KeyPair,
         config: SshConfig,
         known_hosts: KnownHosts,
+        telnet_state: Option<TelnetState>,
     ) -> anyhow::Result<Self> {
         // RIPE Atlas registration servers only support diffie-hellman-group1-sha1
         // and diffie-hellman-group-exchange-sha256. Since russh doesn't support
@@ -381,10 +330,18 @@ impl SshConnection {
             ..Default::default()
         };
 
+        let (command_tx, probe_id, session_id) = match telnet_state {
+            Some(ts) => (Some(ts.command_tx), ts.probe_id, ts.session_id),
+            None => (None, 0, Arc::new(tokio::sync::RwLock::new(None))),
+        };
+
         let handler = AtlasClientHandler {
             known_hosts: known_hosts.clone(),
             connect_host: host.to_string(),
             connect_port: port,
+            command_tx,
+            probe_id,
+            session_id,
         };
 
         let addr = format!("{}:{}", host, port);
@@ -425,6 +382,7 @@ impl SshConnection {
         key: &KeyPair,
         config: SshConfig,
         known_hosts: KnownHosts,
+        telnet_state: Option<TelnetState>,
     ) -> anyhow::Result<Self> {
         let mut attempts = 0u32;
         let mut delay = config.reconnect_delay;
@@ -432,7 +390,16 @@ impl SshConnection {
         loop {
             attempts += 1;
 
-            match Self::connect(host, port, key, config.clone(), known_hosts.clone()).await {
+            match Self::connect(
+                host,
+                port,
+                key,
+                config.clone(),
+                known_hosts.clone(),
+                telnet_state.clone(),
+            )
+            .await
+            {
                 Ok(conn) => return Ok(conn),
                 Err(e) => {
                     if config.max_reconnect_attempts > 0
@@ -490,7 +457,7 @@ impl SshConnection {
         for server in servers {
             let (host, port) = parse_server(server);
 
-            match Self::connect(host, port, key, config.clone(), known_hosts.clone()).await {
+            match Self::connect(host, port, key, config.clone(), known_hosts.clone(), None).await {
                 Ok(conn) => {
                     info!("Connected to {}", server);
                     return Ok(conn);

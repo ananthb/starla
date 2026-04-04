@@ -5,8 +5,8 @@
 //! dispatching these commands.
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tracing::{debug, error, trace, warn};
 
@@ -227,14 +227,17 @@ enum ConnectionState {
     Authenticated,
 }
 
-/// Handle a single telnet connection with Atlas authentication
-async fn handle_connection(
-    socket: TcpStream,
+/// Handle a single telnet connection with Atlas authentication.
+///
+/// Accepts any async stream — works with both TCP sockets (for local testing)
+/// and SSH channel streams (for production controller connections).
+pub async fn handle_connection(
+    stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
     command_tx: Option<mpsc::Sender<TelnetCommand>>,
     probe_id: u32,
     session_id: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
 ) -> anyhow::Result<()> {
-    let (reader, mut writer) = socket.into_split();
+    let (reader, mut writer) = tokio::io::split(stream);
 
     // Send initial telnet negotiation (like busybox telnetd does)
     let initial_iacs: &[u8] = &[

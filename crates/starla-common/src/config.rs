@@ -39,26 +39,10 @@ impl Default for ProbeSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NetworkSettings {
-    #[serde(default = "default_telnet_port")]
-    pub telnet_port: u16,
-
-    #[serde(default = "default_http_post_port")]
-    pub http_post_port: u16,
-
     #[serde(default)]
     pub rxtxrpt: bool,
-}
-
-impl Default for NetworkSettings {
-    fn default() -> Self {
-        Self {
-            telnet_port: default_telnet_port(),
-            http_post_port: default_http_post_port(),
-            rxtxrpt: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,12 +141,6 @@ impl Default for LoggingSettings {
 fn default_log_level() -> String {
     "info".to_string()
 }
-fn default_telnet_port() -> u16 {
-    2023
-}
-fn default_http_post_port() -> u16 {
-    8080
-}
 fn default_registration_servers() -> Vec<String> {
     vec![
         // Primary registration server (hostname, IPv4, IPv6)
@@ -243,9 +221,8 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ProbeConfig::default();
-        assert_eq!(config.network.telnet_port, 2023);
-        assert_eq!(config.network.http_post_port, 8080);
         assert_eq!(config.probe.log_level, "info");
+        assert!(!config.network.rxtxrpt);
     }
 
     #[test]
@@ -253,6 +230,6 @@ mod tests {
         let config = ProbeConfig::default();
         let toml_str = toml::to_string(&config).unwrap();
         let parsed: ProbeConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.network.telnet_port, 2023);
+        assert_eq!(parsed.probe.log_level, "info");
     }
 }

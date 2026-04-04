@@ -1,250 +1,75 @@
 //! Result uploader for sending measurements to the controller
 //!
-//! Supports gzip compression with auto-negotiation based on server
-//! capabilities.
+//! Sends result data over a transport that implements `UploadTransport`.
+//! In production this is an SSH channel; for testing it can be anything.
 
 use super::format::AtlasResult;
 use super::persistent_queue::QueuedResult;
-use flate2::write::GzEncoder;
-use flate2::Compression;
-use reqwest::Client;
-use starla_common::MeasurementResult;
-use std::io::Write;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
-use tracing::{debug, error, trace, warn};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tracing::{debug, trace};
 
-/// Compression mode for uploads
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum CompressionMode {
-    /// Always compress (if above threshold)
-    Always,
-    /// Never compress
-    Never,
-    /// Auto-detect based on server capabilities
-    #[default]
-    Auto,
+/// An async bidirectional stream for upload transport.
+pub trait UploadStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> UploadStream for T {}
+
+/// A transport that opens streams to the controller's result endpoint
+/// (127.0.0.1:8080 on the remote side of the SSH tunnel).
+pub trait UploadTransport: Send + Sync {
+    /// Open a new bidirectional stream to the controller.
+    fn open(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Box<dyn UploadStream>>> + Send + '_>>;
 }
 
 /// Configuration for the result uploader
 #[derive(Debug, Clone)]
 pub struct UploaderConfig {
-    /// Upload endpoint URL
-    pub endpoint: String,
+    /// URL path and query for the HTTP POST (e.g.,
+    /// "/?PROBE_ID=123&SESSION_ID=abc")
+    pub endpoint_path: String,
     /// Request timeout
     pub timeout: Duration,
-    /// Maximum retry attempts per result
-    pub max_retries: u32,
-    /// Base delay between retries
-    pub retry_delay: Duration,
-    /// Maximum delay between retries
-    pub max_retry_delay: Duration,
-    /// Compression mode
-    pub compression: CompressionMode,
-    /// Minimum body size to compress (bytes)
-    pub compression_threshold: usize,
 }
 
 impl Default for UploaderConfig {
     fn default() -> Self {
         Self {
-            endpoint: String::new(),
+            endpoint_path: String::new(),
             timeout: Duration::from_secs(15),
-            max_retries: 3,
-            retry_delay: Duration::from_secs(5),
-            max_retry_delay: Duration::from_secs(60),
-            compression: CompressionMode::Auto,
-            compression_threshold: 1024, // Only compress if > 1KB
         }
     }
 }
 
 /// Uploads measurement results to the controller
 pub struct ResultUploader {
-    client: Client,
+    transport: Box<dyn UploadTransport>,
     config: UploaderConfig,
-    /// Whether server supports gzip (cached after first probe)
-    server_supports_gzip: AtomicBool,
-    /// Whether we've probed the server yet
-    has_probed_server: AtomicBool,
 }
 
 impl ResultUploader {
-    /// Create a new uploader
-    pub fn new(config: UploaderConfig) -> Self {
-        let client = Client::builder()
-            .timeout(config.timeout)
-            .build()
-            .expect("Failed to create HTTP client");
-
-        Self {
-            client,
-            config,
-            server_supports_gzip: AtomicBool::new(false),
-            has_probed_server: AtomicBool::new(false),
-        }
+    /// Create a new uploader with the given transport
+    pub fn new(transport: Box<dyn UploadTransport>, config: UploaderConfig) -> Self {
+        Self { transport, config }
     }
 
-    /// Set the upload endpoint
-    pub fn set_endpoint(&mut self, endpoint: String) {
-        self.config.endpoint = endpoint;
-        // Reset probe state when endpoint changes
-        self.has_probed_server.store(false, Ordering::SeqCst);
-        self.server_supports_gzip.store(false, Ordering::SeqCst);
+    /// Set the endpoint path (call after controller connection)
+    pub fn set_endpoint_path(&mut self, path: String) {
+        self.config.endpoint_path = path;
     }
 
-    /// Get the current endpoint
-    pub fn endpoint(&self) -> &str {
-        &self.config.endpoint
-    }
-
-    /// Check if an endpoint is configured
+    /// Check if an endpoint path is configured
     pub fn has_endpoint(&self) -> bool {
-        !self.config.endpoint.is_empty()
-    }
-
-    /// Probe server for compression support
-    ///
-    /// Note: The official RIPE Atlas httppost tool does not use compression,
-    /// so we disable compression probing to avoid sending unexpected requests
-    /// to the controller. We return false to indicate compression is not
-    /// supported.
-    async fn probe_compression_support(&self) -> bool {
-        // The official httppost tool does not use compression
-        // Disable probing to match reference behavior
-        debug!("Compression disabled to match official httppost behavior");
-        false
-    }
-
-    /// Ensure we've probed the server for compression support
-    async fn ensure_probed(&self) {
-        if self.config.compression == CompressionMode::Auto
-            && !self.has_probed_server.load(Ordering::SeqCst)
-        {
-            let supports = self.probe_compression_support().await;
-            self.server_supports_gzip.store(supports, Ordering::SeqCst);
-            self.has_probed_server.store(true, Ordering::SeqCst);
-        }
-    }
-
-    /// Check if we should compress based on mode and server support
-    fn should_compress(&self, size: usize) -> bool {
-        if size < self.config.compression_threshold {
-            return false;
-        }
-
-        match self.config.compression {
-            CompressionMode::Never => false,
-            CompressionMode::Always => true,
-            CompressionMode::Auto => self.server_supports_gzip.load(Ordering::SeqCst),
-        }
-    }
-
-    /// Compress data using gzip
-    fn compress(data: &[u8]) -> anyhow::Result<Vec<u8>> {
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(data)?;
-        let compressed = encoder.finish()?;
-
-        debug!(
-            "Compressed {} bytes to {} bytes ({:.1}% reduction)",
-            data.len(),
-            compressed.len(),
-            (1.0 - compressed.len() as f64 / data.len() as f64) * 100.0
-        );
-
-        Ok(compressed)
-    }
-
-    /// Upload a single result
-    ///
-    /// The `lts` parameter is the current "local time sync" value - seconds
-    /// since last time sync. The `session_id` is appended to the body as a
-    /// footer (per official httppost behavior).
-    pub async fn upload(
-        &self,
-        result: &MeasurementResult,
-        lts: i64,
-        session_id: Option<&str>,
-    ) -> anyhow::Result<()> {
-        if !self.has_endpoint() {
-            anyhow::bail!("No upload endpoint configured");
-        }
-
-        self.ensure_probed().await;
-
-        // Build POST body matching official httppost format:
-        // 1. Header: "P_TO_C_REPORT\n" (from p_to_c_report_header file)
-        // 2. Result lines: "RESULT <json>\n"
-        // 3. Footer: "\nSESSION_ID <session_id>\n" (from con_session_id.txt file)
-        let atlas_result = AtlasResult::from_measurement(result.clone(), None).with_lts(lts);
-        let result_line = atlas_result.to_result_line();
-
-        let mut body = Vec::with_capacity(b"P_TO_C_REPORT\n".len() + result_line.len() + 64);
-        body.extend_from_slice(b"P_TO_C_REPORT\n");
-        body.extend_from_slice(result_line.as_bytes());
-
-        // Footer matches con_session_id.txt format: "\nSESSION_ID <session_id>\n"
-        if let Some(sid) = session_id {
-            body.push(b'\n');
-            body.extend_from_slice(b"SESSION_ID ");
-            body.extend_from_slice(sid.as_bytes());
-            body.push(b'\n');
-        }
-
-        debug!(
-            "Uploading result: msm_id={}, type={:?}",
-            result.msm_id, result.measurement_type
-        );
-
-        let (body, is_compressed) = if self.should_compress(body.len()) {
-            (Self::compress(&body)?, true)
-        } else {
-            (body, false)
-        };
-
-        // RIPE Atlas controller expects application/x-www-form-urlencoded format
-        // with User-Agent matching the official httppost tool
-        // Responds with "OK\n" for success or "ERR\n" for failure
-        let mut request = self
-            .client
-            .post(&self.config.endpoint)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .header("User-Agent", "httppost for atlas.ripe.net")
-            .header("Connection", "close");
-
-        if is_compressed {
-            request = request.header("Content-Encoding", "gzip");
-        }
-
-        let response = request.body(body).send().await?;
-
-        if response.status().is_success() {
-            // Check response body for OK/ERR
-            let response_body = response.text().await.unwrap_or_default();
-            if response_body.trim() == "OK" {
-                debug!("Upload successful");
-                Ok(())
-            } else {
-                debug!("Upload rejected by controller: {:?}", response_body);
-                anyhow::bail!("Upload rejected: {}", response_body.trim())
-            }
-        } else {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            debug!(
-                "Upload rejected: status={}, response_body={:?}",
-                status, body
-            );
-            anyhow::bail!("Upload failed: {} - {}", status, body)
-        }
+        !self.config.endpoint_path.is_empty()
     }
 
     /// Upload a batch of results
     ///
-    /// The `lts` parameter is the current "local time sync" value - seconds
-    /// since last time sync. The `session_id` is appended to the body as a
-    /// footer (per official httppost behavior).
+    /// Builds the POST body (P_TO_C_REPORT header, RESULT lines, SESSION_ID
+    /// footer), writes a raw HTTP/1.1 POST over the transport stream, and
+    /// reads the response.
     pub async fn upload_batch(
         &self,
         results: &[QueuedResult],
@@ -259,14 +84,8 @@ impl ResultUploader {
             anyhow::bail!("No upload endpoint configured");
         }
 
-        self.ensure_probed().await;
-
-        // Build POST body matching official httppost format:
-        // 1. Header: "P_TO_C_REPORT\n" (from p_to_c_report_header file)
-        // 2. Result lines: "RESULT <json>\n"
-        // 3. Footer: "\nSESSION_ID <session_id>\n" (from con_session_id.txt file)
+        // Build POST body
         let mut body = Vec::new();
-
         body.extend_from_slice(b"P_TO_C_REPORT\n");
 
         for queued in results {
@@ -275,7 +94,6 @@ impl ResultUploader {
             body.extend_from_slice(atlas_result.to_result_line().as_bytes());
         }
 
-        // Footer matches con_session_id.txt format: "\nSESSION_ID <session_id>\n"
         if let Some(sid) = session_id {
             body.push(b'\n');
             body.extend_from_slice(b"SESSION_ID ");
@@ -284,135 +102,86 @@ impl ResultUploader {
         }
 
         debug!(
-            "Uploading batch of {} results ({} bytes) to {}, session_id present: {}",
+            "Uploading batch of {} results ({} bytes)",
             results.len(),
             body.len(),
-            self.config.endpoint,
-            session_id.is_some()
         );
-        // Log body for debugging
-        let body_str = String::from_utf8_lossy(&body);
-        if body.len() > 2200 {
-            trace!("Upload body (first 2KB):\n{}", &body_str[..2048]);
-        } else {
-            trace!("Upload body:\n{}", body_str);
+        trace!("Upload body:\n{}", String::from_utf8_lossy(&body));
+
+        // Open transport stream and send raw HTTP/1.1 POST
+        let mut stream = tokio::time::timeout(self.config.timeout, self.transport.open())
+            .await
+            .map_err(|_| anyhow::anyhow!("Transport open timeout"))??;
+
+        // Write HTTP request
+        let request = format!(
+            "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: \
+             application/x-www-form-urlencoded\r\nUser-Agent: httppost for \
+             atlas.ripe.net\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+            self.config.endpoint_path,
+            body.len(),
+        );
+
+        stream.write_all(request.as_bytes()).await?;
+        stream.write_all(&body).await?;
+        stream.flush().await?;
+
+        // Read HTTP response
+        let mut response = Vec::with_capacity(256);
+        let mut buf = [0u8; 1024];
+        loop {
+            match tokio::time::timeout(self.config.timeout, stream.read(&mut buf)).await {
+                Ok(Ok(0)) => break,
+                Ok(Ok(n)) => response.extend_from_slice(&buf[..n]),
+                Ok(Err(e)) => {
+                    // Read error after we got some data is OK (connection close)
+                    if response.is_empty() {
+                        return Err(e.into());
+                    }
+                    break;
+                }
+                Err(_) => {
+                    if response.is_empty() {
+                        anyhow::bail!("Response timeout");
+                    }
+                    break;
+                }
+            }
+            // Don't read forever — response should be short
+            if response.len() > 4096 {
+                break;
+            }
         }
 
-        let (body, is_compressed) = if self.should_compress(body.len()) {
-            (Self::compress(&body)?, true)
-        } else {
-            (body, false)
-        };
+        let response_str = String::from_utf8_lossy(&response);
+        trace!("Upload response: {:?}", response_str);
 
-        // RIPE Atlas controller expects application/x-www-form-urlencoded format
-        // with User-Agent matching the official httppost tool
-        // Responds with "OK\n" for success or "ERR\n" for failure
-        let mut request = self
-            .client
-            .post(&self.config.endpoint)
-            .header("Content-Type", "application/x-www-form-urlencoded")
-            .header("User-Agent", "httppost for atlas.ripe.net")
-            .header("Connection", "close");
-
-        if is_compressed {
-            request = request.header("Content-Encoding", "gzip");
-        }
-
-        let response = request.body(body).send().await?;
-
-        if response.status().is_success() {
-            // Check response body for OK/ERR
-            let response_body = response.text().await.unwrap_or_default();
-            if response_body.trim() == "OK" {
-                debug!("Batch upload successful: {} results", results.len());
-                Ok(())
+        // Parse HTTP status
+        if let Some(status_line) = response_str.lines().next() {
+            if status_line.contains("200") {
+                // Check body for OK/ERR
+                if let Some(body_start) = response_str.find("\r\n\r\n") {
+                    let resp_body = response_str[body_start + 4..].trim();
+                    if resp_body == "OK" {
+                        debug!("Batch upload successful: {} results", results.len());
+                        return Ok(());
+                    } else {
+                        debug!("Upload rejected: {:?}", resp_body);
+                        anyhow::bail!("Upload rejected: {}", resp_body);
+                    }
+                }
+                // No body separator found but status was 200 — treat as success
+                debug!(
+                    "Batch upload successful (no body): {} results",
+                    results.len()
+                );
+                return Ok(());
             } else {
-                debug!("Batch upload rejected by controller: {:?}", response_body);
-                anyhow::bail!("Batch upload rejected: {}", response_body.trim())
-            }
-        } else {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            debug!(
-                "Upload rejected: status={}, response_body={:?}",
-                status, body
-            );
-            anyhow::bail!("Batch upload failed: {} - {}", status, body)
-        }
-    }
-
-    /// Upload with retry logic
-    ///
-    /// The `lts` parameter is the current "local time sync" value - seconds
-    /// since last time sync. The `session_id` is appended to the body as a
-    /// footer (per official httppost behavior).
-    pub async fn upload_with_retry(
-        &self,
-        result: &MeasurementResult,
-        lts: i64,
-        session_id: Option<&str>,
-    ) -> anyhow::Result<()> {
-        let mut attempts = 0;
-        let mut delay = self.config.retry_delay;
-
-        loop {
-            attempts += 1;
-
-            match self.upload(result, lts, session_id).await {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    if attempts >= self.config.max_retries {
-                        error!("Upload failed after {} attempts: {}", attempts, e);
-                        return Err(e);
-                    }
-
-                    warn!(
-                        "Upload attempt {} failed: {}. Retrying in {:?}...",
-                        attempts, e, delay
-                    );
-
-                    tokio::time::sleep(delay).await;
-                    delay = std::cmp::min(delay * 2, self.config.max_retry_delay);
-                }
+                anyhow::bail!("Upload failed: {}", status_line);
             }
         }
-    }
 
-    /// Upload batch with retry logic
-    ///
-    /// The `lts` parameter is the current "local time sync" value - seconds
-    /// since last time sync. The `session_id` is appended to the body as a
-    /// footer (per official httppost behavior).
-    pub async fn upload_batch_with_retry(
-        &self,
-        results: &[QueuedResult],
-        lts: i64,
-        session_id: Option<&str>,
-    ) -> anyhow::Result<()> {
-        let mut attempts = 0;
-        let mut delay = self.config.retry_delay;
-
-        loop {
-            attempts += 1;
-
-            match self.upload_batch(results, lts, session_id).await {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    if attempts >= self.config.max_retries {
-                        error!("Batch upload failed after {} attempts: {}", attempts, e);
-                        return Err(e);
-                    }
-
-                    warn!(
-                        "Batch upload attempt {} failed: {}. Retrying in {:?}...",
-                        attempts, e, delay
-                    );
-
-                    tokio::time::sleep(delay).await;
-                    delay = std::cmp::min(delay * 2, self.config.max_retry_delay);
-                }
-            }
-        }
+        anyhow::bail!("Empty response from controller")
     }
 }
 
@@ -423,34 +192,6 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = UploaderConfig::default();
-        assert_eq!(config.max_retries, 3);
-        assert_eq!(config.compression, CompressionMode::Auto);
-        assert_eq!(config.compression_threshold, 1024);
-    }
-
-    #[test]
-    fn test_compression() {
-        let data = b"hello world hello world hello world hello world";
-        let compressed = ResultUploader::compress(data).unwrap();
-        // Compressed should be smaller (for repetitive data)
-        assert!(compressed.len() < data.len());
-    }
-
-    #[test]
-    fn test_uploader_creation() {
-        let config = UploaderConfig {
-            endpoint: "http://localhost:8080/results".to_string(),
-            ..Default::default()
-        };
-        let uploader = ResultUploader::new(config);
-        assert_eq!(uploader.endpoint(), "http://localhost:8080/results");
-        assert!(uploader.has_endpoint());
-    }
-
-    #[test]
-    fn test_no_endpoint() {
-        let config = UploaderConfig::default();
-        let uploader = ResultUploader::new(config);
-        assert!(!uploader.has_endpoint());
+        assert!(config.endpoint_path.is_empty());
     }
 }
