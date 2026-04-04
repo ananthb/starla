@@ -7,9 +7,7 @@ let
   configFile = settingsFormat.generate "config.toml" {
     probe.log_level = cfg.logLevel;
     network = {
-      telnet_port = cfg.network.telnetPort;
-      http_post_port = cfg.network.httpPostPort;
-      rxtxrpt = cfg.network.rxtxrpt;
+      rxtxrpt = cfg.reportInterfaceStats;
     };
     controller = {
       registration_servers = cfg.controller.registrationServers;
@@ -41,24 +39,10 @@ in
       description = "Log verbosity level.";
     };
 
-    network = {
-      telnetPort = lib.mkOption {
-        type = lib.types.port;
-        default = 2023;
-        description = "Port for receiving measurement commands from the controller.";
-      };
-
-      httpPostPort = lib.mkOption {
-        type = lib.types.port;
-        default = 8080;
-        description = "Local port for uploading results via the SSH tunnel.";
-      };
-
-      rxtxrpt = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = "Send interface traffic statistics.";
-      };
+    reportInterfaceStats = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Report network interface traffic statistics (rx/tx bytes, packets, errors) to the RIPE Atlas controller.";
     };
 
     controller = {
