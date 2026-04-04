@@ -4,18 +4,27 @@ let
   cfg = config.services.starla;
   settingsFormat = pkgs.formats.toml { };
 
-  configFile = settingsFormat.generate "config.toml" (
-    lib.recursiveUpdate
-      {
-        probe.log_level = cfg.logLevel;
-        network = {
-          telnet_port = cfg.telnetPort;
-          http_post_port = cfg.httpPostPort;
-        };
-        controller.registration_servers = cfg.registrationServers;
-      }
-      cfg.settings
-  );
+  configFile = settingsFormat.generate "config.toml" {
+    probe.log_level = cfg.logLevel;
+    network = {
+      telnet_port = cfg.network.telnetPort;
+      http_post_port = cfg.network.httpPostPort;
+      rxtxrpt = cfg.network.rxtxrpt;
+    };
+    controller = {
+      registration_servers = cfg.controller.registrationServers;
+      ssh_timeout = cfg.controller.sshTimeout;
+      keepalive_interval = cfg.controller.keepaliveInterval;
+    };
+    storage = {
+      max_queue_size_mb = cfg.storage.maxQueueSizeMB;
+      retention_days = cfg.storage.retentionDays;
+    };
+    metrics = {
+      enabled = cfg.metrics.enable;
+      listen_addr = cfg.metrics.listenAddr;
+    };
+  };
 in
 {
   options.services.starla = {
@@ -32,34 +41,75 @@ in
       description = "Log verbosity level.";
     };
 
-    telnetPort = lib.mkOption {
-      type = lib.types.port;
-      default = 2023;
-      description = "Port for receiving measurement commands from the controller.";
+    network = {
+      telnetPort = lib.mkOption {
+        type = lib.types.port;
+        default = 2023;
+        description = "Port for receiving measurement commands from the controller.";
+      };
+
+      httpPostPort = lib.mkOption {
+        type = lib.types.port;
+        default = 8080;
+        description = "Local port for uploading results via the SSH tunnel.";
+      };
+
+      rxtxrpt = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Send interface traffic statistics.";
+      };
     };
 
-    httpPostPort = lib.mkOption {
-      type = lib.types.port;
-      default = 8080;
-      description = "Local port for uploading results via the SSH tunnel.";
+    controller = {
+      registrationServers = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [
+          "reg03.atlas.ripe.net:443"
+          "reg04.atlas.ripe.net:443"
+        ];
+        description = "RIPE Atlas registration servers (host:port).";
+      };
+
+      sshTimeout = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 30;
+        description = "SSH connection timeout in seconds.";
+      };
+
+      keepaliveInterval = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 60;
+        description = "SSH keepalive interval in seconds.";
+      };
     };
 
-    registrationServers = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [
-        "reg03.atlas.ripe.net:443"
-        "reg04.atlas.ripe.net:443"
-      ];
-      description = "RIPE Atlas registration servers.";
+    storage = {
+      maxQueueSizeMB = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 100;
+        description = "Maximum result queue size in MB.";
+      };
+
+      retentionDays = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 30;
+        description = "Result retention period in days.";
+      };
     };
 
-    settings = lib.mkOption {
-      type = settingsFormat.type;
-      default = { };
-      description = ''
-        Additional settings merged into config.toml.
-        See config.toml.example for available options.
-      '';
+    metrics = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable Prometheus metrics export.";
+      };
+
+      listenAddr = lib.mkOption {
+        type = lib.types.str;
+        default = "127.0.0.1:9090";
+        description = "Metrics server listen address.";
+      };
     };
   };
 
