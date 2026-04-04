@@ -6,7 +6,7 @@
 #   /etc/starla/config.toml               (root)
 #   ~/.config/starla/config.toml          (non-root)
 #
-# State directory (databases, keys, probe_id) is resolved separately:
+# State directory (keys, probe_id, known_hosts):
 #   --state-dir CLI flag > $STATE_DIRECTORY > $XDG_STATE_HOME/starla
 #   Root: /var/lib/starla, non-root: ~/.local/state/starla
 
@@ -15,17 +15,11 @@
 log_level = "info"
 
 [network]
-# Telnet port for receiving measurement commands
-telnet_port = 2023
-
-# HTTP POST port for uploading results
-http_post_port = 8080
-
-# Send interface traffic statistics
+# Report network interface traffic statistics (rx/tx bytes, packets, errors)
 rxtxrpt = false
 
 [controller]
-# Registration servers
+# Registration servers (host:port)
 registration_servers = [
     "reg03.atlas.ripe.net:443",
     "reg04.atlas.ripe.net:443"
@@ -34,15 +28,21 @@ registration_servers = [
 # SSH connection timeout (seconds)
 ssh_timeout = 30
 
-# Keepalive interval (seconds)
+# SSH keepalive interval (seconds)
 keepalive_interval = 60
 
 [storage]
-# Maximum queue size in MB
+# Maximum result queue size in MB
 max_queue_size_mb = 100
 
 # Result retention period in days
-retention_days = 7
+retention_days = 30
+
+# Maximum measurement database size in MB
+max_database_size_mb = 1
+
+# Database cleanup interval in hours
+cleanup_interval_hours = 24
 
 [metrics]
 # Enable Prometheus metrics export (requires metrics-export feature)

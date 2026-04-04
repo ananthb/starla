@@ -6,9 +6,7 @@ let
 
   configFile = settingsFormat.generate "config.toml" {
     probe.log_level = cfg.logLevel;
-    network = {
-      rxtxrpt = cfg.reportInterfaceStats;
-    };
+    network.rxtxrpt = cfg.reportInterfaceStats;
     controller = {
       registration_servers = cfg.controller.registrationServers;
       ssh_timeout = cfg.controller.sshTimeout;
@@ -17,10 +15,18 @@ let
     storage = {
       max_queue_size_mb = cfg.storage.maxQueueSizeMB;
       retention_days = cfg.storage.retentionDays;
+      max_database_size_mb = cfg.storage.maxDatabaseSizeMB;
+      cleanup_interval_hours = cfg.storage.cleanupIntervalHours;
     };
     metrics = {
       enabled = cfg.metrics.enable;
       listen_addr = cfg.metrics.listenAddr;
+    };
+    logging = {
+      format = cfg.logging.format;
+      output = cfg.logging.output;
+      max_file_size_mb = cfg.logging.maxFileSizeMB;
+      max_files = cfg.logging.maxFiles;
     };
   };
 in
@@ -80,6 +86,18 @@ in
         default = 30;
         description = "Result retention period in days.";
       };
+
+      maxDatabaseSizeMB = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 1;
+        description = "Maximum measurement database size in MB.";
+      };
+
+      cleanupIntervalHours = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 24;
+        description = "Database cleanup interval in hours.";
+      };
     };
 
     metrics = {
@@ -93,6 +111,32 @@ in
         type = lib.types.str;
         default = "127.0.0.1:9090";
         description = "Metrics server listen address.";
+      };
+    };
+
+    logging = {
+      format = lib.mkOption {
+        type = lib.types.enum [ "json" "text" ];
+        default = "json";
+        description = "Log output format.";
+      };
+
+      output = lib.mkOption {
+        type = lib.types.enum [ "stdout" "file" "syslog" ];
+        default = "stdout";
+        description = "Log output destination.";
+      };
+
+      maxFileSizeMB = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 10;
+        description = "Maximum log file size in MB (when output=file).";
+      };
+
+      maxFiles = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 5;
+        description = "Maximum number of rotated log files.";
       };
     };
   };
