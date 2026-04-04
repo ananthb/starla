@@ -118,9 +118,15 @@ pub struct MeasurementResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MeasurementData {
-    /// Placeholder for actual measurement results
-    /// Will be expanded in the measurements crate
+    /// Structured data (serialized via serde_json::Value)
     Generic(serde_json::Value),
+    /// Pre-formatted "result" field value matching exact C probe output.
+    /// Used when precise formatting (e.g., float decimal places) matters.
+    PreFormatted(String),
+    /// Complete pre-formatted RESULT line body (everything inside `RESULT { ...
+    /// }`). Used for measurement types (TLS, NTP) that have non-standard
+    /// envelope layouts.
+    FullLine(String),
 }
 
 #[cfg(test)]

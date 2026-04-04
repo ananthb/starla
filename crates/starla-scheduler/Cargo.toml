@@ -7,10 +7,10 @@ authors.workspace = true
 readme = "README.md"
 
 [dependencies]
-starla-common = { path = "../starla-common", version = "6000.0.0" }
-starla-measurements = { path = "../starla-measurements", version = "6000.0.0" }
-starla-database = { path = "../starla-database", version = "6000.0.0" }
-starla-results = { path = "../starla-results", version = "6000.0.0" }
+starla-common = { path = "../starla-common", version = "0.1.0" }
+starla-measurements = { path = "../starla-measurements", version = "0.1.0" }
+starla-database = { path = "../starla-database", version = "0.1.0" }
+starla-results = { path = "../starla-results", version = "0.1.0" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 chrono = { workspace = true }

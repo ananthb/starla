@@ -1,7 +1,6 @@
 //! Configuration management
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// Main probe configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -27,10 +26,6 @@ pub struct ProbeConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeSettings {
-    /// Firmware version
-    #[serde(default = "default_firmware_version")]
-    pub firmware_version: u32,
-
     /// Log level
     #[serde(default = "default_log_level")]
     pub log_level: String,
@@ -39,7 +34,6 @@ pub struct ProbeSettings {
 impl Default for ProbeSettings {
     fn default() -> Self {
         Self {
-            firmware_version: default_firmware_version(),
             log_level: default_log_level(),
         }
     }
@@ -91,9 +85,6 @@ impl Default for ControllerSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageSettings {
-    #[serde(default = "default_data_dir")]
-    pub data_dir: PathBuf,
-
     #[serde(default = "default_max_queue_size_mb")]
     pub max_queue_size_mb: u64,
 
@@ -110,7 +101,6 @@ pub struct StorageSettings {
 impl Default for StorageSettings {
     fn default() -> Self {
         Self {
-            data_dir: default_data_dir(),
             max_queue_size_mb: default_max_queue_size_mb(),
             retention_days: default_retention_days(),
             max_database_size_mb: default_max_database_size_mb(),
@@ -164,9 +154,6 @@ impl Default for LoggingSettings {
 }
 
 // Default value functions
-fn default_firmware_version() -> u32 {
-    crate::FIRMWARE_VERSION
-}
 fn default_log_level() -> String {
     "info".to_string()
 }
@@ -193,9 +180,6 @@ fn default_ssh_timeout() -> u64 {
 }
 fn default_keepalive_interval() -> u64 {
     60
-}
-fn default_data_dir() -> PathBuf {
-    crate::paths::state_dir()
 }
 fn default_max_queue_size_mb() -> u64 {
     100
@@ -259,9 +243,9 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ProbeConfig::default();
-        assert_eq!(config.probe.firmware_version, 6000);
         assert_eq!(config.network.telnet_port, 2023);
         assert_eq!(config.network.http_post_port, 8080);
+        assert_eq!(config.probe.log_level, "info");
     }
 
     #[test]
@@ -269,6 +253,6 @@ mod tests {
         let config = ProbeConfig::default();
         let toml_str = toml::to_string(&config).unwrap();
         let parsed: ProbeConfig = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.probe.firmware_version, 6000);
+        assert_eq!(parsed.network.telnet_port, 2023);
     }
 }

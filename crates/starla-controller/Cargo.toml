@@ -7,7 +7,7 @@ authors.workspace = true
 readme = "README.md"
 
 [dependencies]
-starla-common = { path = "../starla-common", version = "6000.0.0" }
+starla-common = { path = "../starla-common", version = "0.1.0" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 russh = { workspace = true }
@@ -21,3 +21,5 @@ tracing = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
 hostname = "0.4.2"
+sha2 = "0.10"
+base64 = "0.22"

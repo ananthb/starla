@@ -50,6 +50,21 @@ impl Measurement for Dns {
         // Get the source address that would be used for this destination
         let src_addr = get_source_addr_for_dest(self.config.target).ok();
 
+        // Format DNS result object to match C probe field order:
+        // { "rt":35.265, "size":62, "ID":12345, "ANCOUNT":1, "QDCOUNT":1, "NSCOUNT":0,
+        // "ARCOUNT":0 }
+        let result_str = format!(
+            "{{ \"rt\":{:.3}, \"size\":{}, \"ID\":{}, \"ANCOUNT\":{}, \"QDCOUNT\":{}, \
+             \"NSCOUNT\":{}, \"ARCOUNT\":{} }}",
+            results.rt,
+            results.size,
+            results.id,
+            results.ancount,
+            results.qdcount,
+            results.nscount,
+            results.arcount,
+        );
+
         Ok(MeasurementResult {
             fw: starla_common::FIRMWARE_VERSION,
             measurement_type: MeasurementType::Dns,
@@ -63,7 +78,7 @@ impl Measurement for Dns {
             proto: Some(proto.to_string()),
             ttl: None,
             size: None,
-            data: MeasurementData::Generic(serde_json::to_value(results)?),
+            data: MeasurementData::PreFormatted(result_str),
         })
     }
 }

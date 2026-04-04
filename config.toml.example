@@ -1,15 +1,16 @@
 # Starla Configuration
 #
-# This file should be installed at ~/.config/starla/config.toml
-# or /etc/starla/config.toml for system-wide installation
+# Place this file at one of:
+#   $CONFIGURATION_DIRECTORY/config.toml  (systemd)
+#   $XDG_CONFIG_HOME/starla/config.toml
+#   /etc/starla/config.toml               (root)
+#   ~/.config/starla/config.toml          (non-root)
+#
+# State directory (databases, keys, probe_id) is resolved separately:
+#   --state-dir CLI flag > $STATE_DIRECTORY > $XDG_STATE_HOME/starla
+#   Root: /var/lib/starla, non-root: ~/.local/state/starla
 
 [probe]
-# Probe ID (auto-assigned during registration)
-id = "auto"
-
-# Firmware version
-firmware_version = 6000
-
 # Log level: trace, debug, info, warn, error
 log_level = "info"
 
@@ -26,8 +27,8 @@ rxtxrpt = false
 [controller]
 # Registration servers
 registration_servers = [
-    "woolsey.atlas.ripe.net:443",
-    "cla.atlas.ripe.net:443"
+    "reg03.atlas.ripe.net:443",
+    "reg04.atlas.ripe.net:443"
 ]
 
 # SSH connection timeout (seconds)
@@ -37,9 +38,6 @@ ssh_timeout = 30
 keepalive_interval = 60
 
 [storage]
-# Data directory for results and state
-data_dir = "/var/lib/starla/data"
-
 # Maximum queue size in MB
 max_queue_size_mb = 100
 

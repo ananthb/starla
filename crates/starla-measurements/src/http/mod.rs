@@ -56,6 +56,22 @@ impl Measurement for Http {
             ("0.0.0.0".parse().unwrap(), 0, None)
         };
 
+        // C probe HTTP: all fields inside result array, minimal envelope
+        let src_str = src_addr.map(|ip| ip.to_string()).unwrap_or_default();
+        let result_str = format!(
+            "[ {{ \"method\":\"{}\", \"af\": {}, \"dst_addr\":\"{}\", \"src_addr\":\"{}\", \
+             \"rt\":{:.6}, \"res\":{}, \"ver\":\"{}\", \"hsize\":{}, \"bsize\":{} }} ]",
+            results.method,
+            af,
+            dst_addr,
+            src_str,
+            results.rt,
+            results.status,
+            results.ver,
+            results.header_size,
+            results.body_size,
+        );
+
         Ok(MeasurementResult {
             fw: starla_common::FIRMWARE_VERSION,
             measurement_type: MeasurementType::Http,
@@ -64,12 +80,12 @@ impl Measurement for Http {
             timestamp: Timestamp::now(),
             af,
             dst_addr,
-            dst_name: Some(host.to_string()),
-            src_addr,
-            proto: Some("TCP".to_string()),
+            dst_name: None,
+            src_addr: None,
+            proto: None,
             ttl: None,
             size: None,
-            data: MeasurementData::Generic(serde_json::to_value(results)?),
+            data: MeasurementData::PreFormatted(result_str),
         })
     }
 }

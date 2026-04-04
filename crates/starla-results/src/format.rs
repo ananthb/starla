@@ -8,6 +8,39 @@ use serde::{Deserialize, Serialize};
 use starla_common::{MeasurementData, MeasurementResult, MeasurementType};
 use std::net::IpAddr;
 
+/// Format a serde_json::Value for the "result" field to match C probe spacing.
+///
+/// The C probe writes arrays as `[ { ... }, { ... } ]` with spaces inside
+/// brackets and spaces inside braces. Objects are written as `{ "key":value }`.
+fn format_result_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Array(items) => {
+            if items.is_empty() {
+                return "[ ]".to_string();
+            }
+            let entries: Vec<String> = items.iter().map(format_result_value).collect();
+            format!("[ {} ]", entries.join(", "))
+        }
+        serde_json::Value::Object(map) => {
+            if map.is_empty() {
+                return "{ }".to_string();
+            }
+            let entries: Vec<String> = map
+                .iter()
+                .map(|(k, v)| {
+                    let v_str = match v {
+                        serde_json::Value::String(s) => format!("\"{}\"", s),
+                        _ => v.to_string(),
+                    };
+                    format!("\"{}\":{}", k, v_str)
+                })
+                .collect();
+            format!("{{ {} }}", entries.join(", "))
+        }
+        other => other.to_string(),
+    }
+}
+
 /// Wrapper for RIPE Atlas result format
 ///
 /// This structure matches the official RIPE Atlas result JSON format
@@ -21,12 +54,13 @@ use std::net::IpAddr;
 /// - `result` is NOT flattened - it's a nested object or array
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AtlasResult {
-    /// Probe ID (required for result identification)
+    /// Probe ID (not serialized — controller knows this from the URL)
+    #[serde(skip_serializing)]
     pub prb_id: u32,
 
-    /// Measurement ID
-    #[serde(rename = "msm_id")]
-    pub msm_id: u64,
+    /// Measurement ID (serialized as string to match official probe format)
+    #[serde(rename = "id")]
+    pub id: String,
 
     /// Firmware version (e.g., 5120)
     pub fw: u32,
@@ -140,7 +174,7 @@ impl AtlasResult {
 
         Self {
             prb_id: result.prb_id.0,
-            msm_id: result.msm_id.0,
+            id: result.msm_id.0.to_string(),
             fw: result.fw,
             mver: Some("2.6.4".to_string()), // Match official probe version
             lts: 0,                          // Will be set by caller based on time sync status
@@ -159,6 +193,10 @@ impl AtlasResult {
             bundle: None,
             result: match result.data {
                 MeasurementData::Generic(v) => v,
+                MeasurementData::PreFormatted(s) => serde_json::Value::String(s),
+                MeasurementData::FullLine(s) => {
+                    serde_json::Value::String(format!("__FULLLINE__{}", s))
+                }
             },
         }
     }
@@ -204,6 +242,110 @@ impl AtlasResult {
         self.group_id = Some(group_id);
         self.bundle = Some(bundle);
         self
+    }
+
+    /// Format as a RESULT line matching the exact output of the official C
+    /// probe.
+    ///
+    /// The official probe uses fprintf with specific spacing:
+    /// `RESULT { "id":"<id>", "fw":<fw>, "mver": "<mver>", "lts":<lts>,
+    /// "time":<time>, ... }\n`
+    ///
+    /// Note the quirks: space after `{`, space before `}`, `"mver": ` has a
+    /// space after the colon (all other fields don't). We must match this
+    /// exactly because the controller may do rigid string parsing.
+    pub fn to_result_line(&self) -> String {
+        use std::fmt::Write;
+
+        // FullLine: the measurement provided the complete line body
+        if let serde_json::Value::String(ref v) = self.result {
+            if let Some(body) = v.strip_prefix("__FULLLINE__") {
+                return format!("RESULT {{ {} }}\n", body);
+            }
+        }
+
+        let mut s = String::with_capacity(512);
+
+        // Envelope fields (id, fw, mver, lts, time) — always present
+        write!(
+            s,
+            "RESULT {{ \"id\":\"{}\", \"fw\":{}, \"mver\": \"{}\", \"lts\":{}, \"time\":{}",
+            self.id,
+            self.fw,
+            self.mver.as_deref().unwrap_or("2.6.4"),
+            self.lts,
+            self.time,
+        )
+        .unwrap();
+
+        // Optional bundle
+        if let Some(ref bundle) = self.bundle {
+            write!(s, ", \"bundle\":{}", bundle).unwrap();
+        }
+
+        // dst_name (always present for ping/traceroute, absent for DNS)
+        if let Some(ref name) = self.dst_name {
+            write!(s, ", \"dst_name\":\"{}\"", name).unwrap();
+        }
+
+        // af
+        write!(s, ", \"af\":{}", self.af).unwrap();
+
+        // dst_addr
+        if !self.dst_addr.is_empty() {
+            write!(s, ", \"dst_addr\":\"{}\"", self.dst_addr).unwrap();
+        }
+
+        // dst_port (DNS)
+        if let Some(ref port) = self.dst_port {
+            write!(s, ", \"dst_port\":\"{}\"", port).unwrap();
+        }
+
+        // src_addr
+        if !self.src_addr.is_empty() {
+            write!(s, ", \"src_addr\":\"{}\"", self.src_addr).unwrap();
+        }
+
+        // proto
+        write!(s, ", \"proto\":\"{}\"", self.proto).unwrap();
+
+        // ttl
+        if let Some(ttl) = self.ttl {
+            write!(s, ", \"ttl\":{}", ttl).unwrap();
+        }
+
+        // size
+        if let Some(size) = self.size {
+            write!(s, ", \"size\":{}", size).unwrap();
+        }
+
+        // endtime (traceroute)
+        if let Some(endtime) = self.endtime {
+            write!(s, ", \"endtime\":{}", endtime).unwrap();
+        }
+
+        // paris_id (traceroute)
+        if let Some(paris_id) = self.paris_id {
+            write!(s, ", \"paris_id\":{}", paris_id).unwrap();
+        }
+
+        // result — if PreFormatted, use the string directly; otherwise format via
+        // format_result_value
+        match &self.result {
+            serde_json::Value::String(pre) => {
+                // PreFormatted result string — use verbatim
+                write!(s, ", \"result\": {}", pre).unwrap();
+            }
+            other => {
+                let result_json = format_result_value(other);
+                write!(s, ", \"result\": {}", result_json).unwrap();
+            }
+        }
+
+        // Close with space before brace, matching C probe's fprintf
+        s.push_str(" }\n");
+
+        s
     }
 }
 
@@ -252,86 +394,229 @@ mod tests {
     use super::*;
     use starla_common::{MeasurementId, ProbeId, Timestamp};
 
-    fn make_measurement_result() -> MeasurementResult {
+    fn make_ping_result() -> MeasurementResult {
         MeasurementResult {
-            fw: 6000,
+            fw: 5080,
             measurement_type: MeasurementType::Ping,
             prb_id: ProbeId(12345),
             msm_id: MeasurementId(1001),
-            timestamp: Timestamp::now(),
+            timestamp: Timestamp(999999999),
             af: 4,
-            dst_addr: "8.8.8.8".parse().unwrap(),
-            dst_name: None,
-            src_addr: None,
+            dst_addr: "193.0.14.129".parse().unwrap(),
+            dst_name: Some("193.0.14.129".to_string()),
+            src_addr: Some("10.0.0.1".parse().unwrap()),
             proto: Some("ICMP".to_string()),
-            ttl: Some(64),
+            ttl: Some(56),
             size: Some(32),
-            // For ping, result is just an array (not wrapped in an object)
             data: MeasurementData::Generic(serde_json::json!([
-                { "rtt": 10.5 },
-                { "rtt": 15.2 },
-                { "rtt": 12.3 }
+                { "rtt": 10.500000 },
+                { "rtt": 11.200000 },
+                { "rtt": 10.800000 }
             ])),
         }
     }
 
-    #[test]
-    fn test_atlas_result_format() {
-        let result = make_measurement_result();
-        let atlas = AtlasResult::from_measurement(result, Some("192.168.1.1".parse().unwrap()));
-
-        assert_eq!(atlas.fw, 6000);
-        assert_eq!(atlas.prb_id, 12345);
-        assert_eq!(atlas.msm_id, 1001);
-        assert_eq!(atlas.af, 4);
-        assert_eq!(atlas.src_addr, "192.168.1.1");
-        assert_eq!(atlas.dst_addr, "8.8.8.8");
-        assert_eq!(atlas.proto, "ICMP"); // Ping uses ICMP
+    fn make_dns_result() -> MeasurementResult {
+        MeasurementResult {
+            fw: 5080,
+            measurement_type: MeasurementType::Dns,
+            prb_id: ProbeId(12345),
+            msm_id: MeasurementId(8310237),
+            timestamp: Timestamp(999999999),
+            af: 4,
+            dst_addr: "8.8.8.8".parse().unwrap(),
+            dst_name: None, // DNS uses dst_addr directly, no dst_name
+            src_addr: Some("10.0.0.1".parse().unwrap()),
+            proto: Some("UDP".to_string()),
+            ttl: None,
+            size: None, // DNS doesn't use envelope size
+            data: MeasurementData::Generic(serde_json::json!({
+                "rt": 35.265,
+                "size": 62,
+                "ID": 12345,
+                "ANCOUNT": 1,
+                "QDCOUNT": 1,
+                "NSCOUNT": 0,
+                "ARCOUNT": 0
+            })),
+        }
     }
 
     #[test]
-    fn test_atlas_result_serialization() {
-        let result = make_measurement_result();
-        let atlas =
-            AtlasResult::from_measurement(result.clone(), Some("10.15.16.123".parse().unwrap()))
-                .with_ttl(64)
-                .with_size(32)
-                .with_lts(10);
+    fn test_ping_result_line_format() {
+        let result = make_ping_result();
+        let atlas = AtlasResult::from_measurement(result, None).with_lts(10);
+        let line = atlas.to_result_line();
 
-        let json = serde_json::to_string_pretty(&atlas).unwrap();
-        eprintln!("AtlasResult format:\n{}", json);
+        // Must start with RESULT { and end with }\n
+        assert!(line.starts_with("RESULT { "));
+        assert!(line.ends_with(" }\n"));
 
-        // Should contain result array with RTT values (official format)
-        assert!(json.contains("\"result\":"));
-        assert!(json.contains("\"rtt\":"));
-        // Should have prb_id and msm_id
-        assert!(json.contains("\"prb_id\":"));
-        assert!(json.contains("\"msm_id\":"));
-        // Should have time (not timestamp)
-        assert!(json.contains("\"time\":"));
-        // Should have proto
-        assert!(json.contains("\"proto\":"));
-        assert!(json.contains("\"ICMP\""));
-        // Should have ttl and size
-        assert!(json.contains("\"ttl\":"));
-        assert!(json.contains("\"size\":"));
+        // Must have correct field order: id, fw, mver, lts, time, dst_name, af, ...
+        let id_pos = line.find("\"id\":").unwrap();
+        let fw_pos = line.find("\"fw\":").unwrap();
+        let mver_pos = line.find("\"mver\":").unwrap();
+        let lts_pos = line.find("\"lts\":").unwrap();
+        let time_pos = line.find("\"time\":").unwrap();
+        let dst_name_pos = line.find("\"dst_name\":").unwrap();
+        let af_pos = line.find("\"af\":").unwrap();
+        let result_pos = line.find("\"result\":").unwrap();
+        assert!(id_pos < fw_pos);
+        assert!(fw_pos < mver_pos);
+        assert!(mver_pos < lts_pos);
+        assert!(lts_pos < time_pos);
+        assert!(time_pos < dst_name_pos);
+        assert!(dst_name_pos < af_pos);
+        assert!(af_pos < result_pos);
+
+        // mver must have space after colon (C probe quirk)
+        assert!(line.contains("\"mver\": \""));
+
+        // Must NOT have prb_id
+        assert!(!line.contains("prb_id"));
+
+        // Must NOT have double commas
+        assert!(!line.contains(", ,"));
+
+        // Result field must have space after colon and C-probe array spacing
+        assert!(line.contains("\"result\": [ { \"rtt\":"));
     }
 
     #[test]
-    fn test_result_bundle() {
-        let result1 = make_measurement_result();
-        let result2 = make_measurement_result();
+    fn test_dns_result_line_no_double_comma() {
+        // DNS has no dst_name — this previously caused a double comma bug
+        let result = make_dns_result();
+        let atlas = AtlasResult::from_measurement(result, None).with_lts(10);
+        let line = atlas.to_result_line();
 
-        let atlas1 = AtlasResult::from_measurement(result1, None);
-        let atlas2 = AtlasResult::from_measurement(result2, None);
+        // Must NOT have double commas (the bug that prevented uploads)
+        assert!(
+            !line.contains(", ,"),
+            "Double comma found in DNS result line: {}",
+            line
+        );
 
-        let mut bundle = ResultBundle::new(999);
-        bundle.add(atlas1);
-        bundle.add(atlas2);
+        // DNS result is an object, not an array
+        assert!(line.contains("\"result\": { "));
 
-        assert_eq!(bundle.len(), 2);
-        assert_eq!(bundle.results[0].group_id, Some(999));
-        assert_eq!(bundle.results[0].bundle, Some(0));
-        assert_eq!(bundle.results[1].bundle, Some(1));
+        // Must have dst_port for DNS
+        assert!(line.contains("\"dst_port\":\"53\""));
+
+        // Must NOT have dst_name (DNS doesn't use it)
+        assert!(!line.contains("\"dst_name\":"));
+    }
+
+    #[test]
+    fn test_ping_result_line_no_ttl_on_timeout() {
+        // When all pings timeout, ttl should NOT be in the result line
+        let mut result = make_ping_result();
+        result.ttl = None; // No reply received
+        result.data = MeasurementData::Generic(serde_json::json!([
+            { "x": "*" },
+            { "x": "*" }
+        ]));
+
+        let atlas = AtlasResult::from_measurement(result, None).with_lts(10);
+        let line = atlas.to_result_line();
+
+        assert!(!line.contains("\"ttl\":"));
+        assert!(line.contains("\"x\":\"*\""));
+    }
+
+    #[test]
+    fn test_format_result_value_spacing() {
+        // Array of objects should use C-probe spacing
+        let val = serde_json::json!([{"rtt": 10.5}, {"rtt": 11.2}]);
+        let formatted = format_result_value(&val);
+        assert_eq!(formatted, "[ { \"rtt\":10.5 }, { \"rtt\":11.2 } ]");
+
+        // Single object
+        let val = serde_json::json!({"rt": 35.2, "size": 62});
+        let formatted = format_result_value(&val);
+        assert!(formatted.starts_with("{ "));
+        assert!(formatted.ends_with(" }"));
+
+        // Empty array
+        let val = serde_json::json!([]);
+        assert_eq!(format_result_value(&val), "[ ]");
+    }
+
+    #[test]
+    fn test_preformatted_result_used_verbatim() {
+        // PreFormatted result strings should appear verbatim in the RESULT line
+        let mut result = make_ping_result();
+        result.data = MeasurementData::PreFormatted(
+            "[ { \"rtt\":10.500000 }, { \"rtt\":11.200000 } ]".to_string(),
+        );
+        let atlas = AtlasResult::from_measurement(result, None).with_lts(10);
+        let line = atlas.to_result_line();
+
+        // Must contain the exact pre-formatted string
+        assert!(line.contains("\"result\": [ { \"rtt\":10.500000 }, { \"rtt\":11.200000 } ]"));
+        // Must NOT re-format through format_result_value
+        assert!(!line.contains("\"result\": [ { \"rtt\":10.5 }"));
+    }
+
+    #[test]
+    fn test_fullline_bypasses_envelope() {
+        // FullLine should produce the complete RESULT line body, bypassing the envelope
+        let mut result = make_ping_result();
+        result.data = MeasurementData::FullLine(
+            "\"id\":\"42\", \"fw\":5080, \"custom_field\":\"test\", \"cert\":[ \"PEM\" ]"
+                .to_string(),
+        );
+        let atlas = AtlasResult::from_measurement(result, None).with_lts(10);
+        let line = atlas.to_result_line();
+
+        // Must use the FullLine body directly
+        assert!(line.starts_with("RESULT { \"id\":\"42\""));
+        assert!(line.contains("\"custom_field\":\"test\""));
+        assert!(line.contains("\"cert\":[ \"PEM\" ]"));
+        assert!(line.ends_with(" }\n"));
+
+        // Must NOT contain the standard envelope fields from AtlasResult
+        assert!(!line.contains("\"mver\":"));
+        assert!(!line.contains("\"dst_name\":"));
+    }
+
+    #[test]
+    fn test_http_result_minimal_envelope() {
+        // HTTP result should have all fields inside the result array, not in envelope
+        let mut result = make_ping_result();
+        result.measurement_type = MeasurementType::Http;
+        result.dst_name = None;
+        result.proto = None;
+        result.ttl = None;
+        result.size = None;
+        result.data = MeasurementData::PreFormatted(
+            "[ { \"method\":\"GET\", \"af\": 4, \"dst_addr\":\"1.2.3.4\", \
+             \"src_addr\":\"5.6.7.8\", \"rt\":123.456000, \"res\":200, \"ver\":\"1.1\", \
+             \"hsize\":100, \"bsize\":500 } ]"
+                .to_string(),
+        );
+        let atlas = AtlasResult::from_measurement(result, None).with_lts(10);
+        let line = atlas.to_result_line();
+
+        // Must contain the HTTP result array
+        assert!(line.contains("\"method\":\"GET\""));
+        assert!(line.contains("\"res\":200"));
+    }
+
+    #[test]
+    fn test_traceroute_preformatted_hops() {
+        // Traceroute result should be just the hops array with 3-decimal RTTs
+        let mut result = make_ping_result();
+        result.measurement_type = MeasurementType::Traceroute;
+        result.data = MeasurementData::PreFormatted(
+            "[ { \"hop\":1, \"result\": [ { \"from\":\"10.0.0.1\", \"ttl\":64, \"size\":28, \
+             \"rtt\":1.234 } ] }, { \"hop\":2, \"result\": [ { \"x\":\"*\" } ] } ]"
+                .to_string(),
+        );
+        let atlas = AtlasResult::from_measurement(result, None).with_lts(10);
+        let line = atlas.to_result_line();
+
+        assert!(line.contains("\"hop\":1"));
+        assert!(line.contains("\"rtt\":1.234"));
+        assert!(line.contains("\"x\":\"*\""));
     }
 }

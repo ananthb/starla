@@ -16,16 +16,20 @@ Handles communication with the RIPE Atlas controller infrastructure.
 Manages the SSH tunnel to RIPE Atlas registration and controller servers:
 
 ```rust
-use starla_controller::{SshConnection, SshConfig, generate_key};
+use starla_controller::{SshConnection, SshConfig, KnownHosts, generate_key};
 
 // Generate or load SSH key
 let key = generate_key()?;
+
+// Load known host keys (TOFU verification)
+let known_hosts = KnownHosts::load(Path::new("data/known_hosts"));
 
 // Connect to registration servers
 let ssh = SshConnection::connect_to_servers(
     &["reg03.atlas.ripe.net:443", "reg04.atlas.ripe.net:443"],
     &key,
     SshConfig::default(),
+    known_hosts,
 ).await?;
 ```
 

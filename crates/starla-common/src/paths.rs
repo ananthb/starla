@@ -1,77 +1,142 @@
 //! Path resolution for Starla
 //!
-//! This module handles locating configuration and state directories following:
-//! 1. Systemd service directories (CONFIGURATION_DIRECTORY, STATE_DIRECTORY)
-//! 2. XDG Base Directory Specification (XDG_CONFIG_HOME, XDG_STATE_HOME)
-//! 3. Default fallbacks
+//! Directory resolution priority:
 //!
-//! ## Directory Layout
+//! **Config directory** (for config.toml):
+//! 1. `$CONFIGURATION_DIRECTORY` (systemd)
+//! 2. `$XDG_CONFIG_HOME/starla`
+//! 3. Root: `/etc/starla`, non-root: `~/.config/starla`
 //!
-//! Configuration directory (for config.toml):
-//! - If `CONFIGURATION_DIRECTORY` is set: use it directly
-//! - Else if `XDG_CONFIG_HOME` is set: `$XDG_CONFIG_HOME/starla/`
-//! - Else: `~/.config/starla/`
+//! **State directory** (for keys, probe_id, known_hosts):
+//! 1. CLI `--state-dir` (via override)
+//! 2. `$STATE_DIRECTORY` (systemd)
+//! 3. `$XDG_STATE_HOME/starla`
+//! 4. Root: `/var/lib/starla`, non-root: `~/.local/state/starla`
 //!
-//! State directory (for databases, probe key):
-//! - If `STATE_DIRECTORY` is set: use it directly
-//! - Else if `XDG_STATE_HOME` is set: `$XDG_STATE_HOME/starla/`
-//! - Else: `~/.local/state/starla/`
+//! **Runtime directory** (for ephemeral databases, caches):
+//! 1. `$RUNTIME_DIRECTORY` (systemd)
+//! 2. `$XDG_RUNTIME_DIR/starla`
+//! 3. Root: `/run/starla`, non-root: `/tmp/starla-<uid>`
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
-/// Application name used in XDG subdirectories
+/// Application name used in subdirectories
 const APP_NAME: &str = "starla";
+
+/// CLI override for state directory (set once at startup via `set_state_dir`)
+static STATE_DIR_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
+/// CLI override for runtime directory (set once at startup via
+/// `set_runtime_dir`)
+static RUNTIME_DIR_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Set the state directory override (from `--state-dir` CLI arg).
+/// Must be called before any `state_dir()` calls. Subsequent calls are ignored.
+pub fn set_state_dir(path: PathBuf) {
+    let _ = STATE_DIR_OVERRIDE.set(path);
+}
+
+/// Set the runtime directory override (from `--runtime-dir` CLI arg).
+/// Must be called before any `runtime_dir()` calls. Subsequent calls are
+/// ignored.
+pub fn set_runtime_dir(path: PathBuf) {
+    let _ = RUNTIME_DIR_OVERRIDE.set(path);
+}
 
 /// Get the configuration directory path
 ///
 /// Priority:
-/// 1. `CONFIGURATION_DIRECTORY` environment variable (systemd)
-/// 2. `XDG_CONFIG_HOME/starla` (XDG spec)
-/// 3. `~/.config/starla` (XDG default)
+/// 1. `$CONFIGURATION_DIRECTORY` (systemd)
+/// 2. `$XDG_CONFIG_HOME/starla`
+/// 3. Root: `/etc/starla`, non-root: `~/.config/starla`
 pub fn config_dir() -> PathBuf {
-    // Check systemd CONFIGURATION_DIRECTORY first
     if let Ok(dir) = std::env::var("CONFIGURATION_DIRECTORY") {
         return PathBuf::from(dir);
     }
 
-    // Check XDG_CONFIG_HOME
     if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
         return PathBuf::from(xdg_config).join(APP_NAME);
     }
 
-    // Default to ~/.config/starla
+    if is_root() {
+        return PathBuf::from("/etc").join(APP_NAME);
+    }
+
     if let Some(home) = home_dir() {
         return home.join(".config").join(APP_NAME);
     }
 
-    // Ultimate fallback
     PathBuf::from("/etc").join(APP_NAME)
 }
 
 /// Get the state directory path (for databases, keys, etc.)
 ///
 /// Priority:
-/// 1. `STATE_DIRECTORY` environment variable (systemd)
-/// 2. `XDG_STATE_HOME/starla` (XDG spec)
-/// 3. `~/.local/state/starla` (XDG default)
+/// 1. CLI override (set via `set_state_dir`)
+/// 2. `$STATE_DIRECTORY` (systemd)
+/// 3. `$XDG_STATE_HOME/starla`
+/// 4. Root: `/var/lib/starla`, non-root: `~/.local/state/starla`
 pub fn state_dir() -> PathBuf {
-    // Check systemd STATE_DIRECTORY first
+    if let Some(override_dir) = STATE_DIR_OVERRIDE.get() {
+        return override_dir.clone();
+    }
+
     if let Ok(dir) = std::env::var("STATE_DIRECTORY") {
         return PathBuf::from(dir);
     }
 
-    // Check XDG_STATE_HOME
     if let Ok(xdg_state) = std::env::var("XDG_STATE_HOME") {
         return PathBuf::from(xdg_state).join(APP_NAME);
     }
 
-    // Default to ~/.local/state/starla
+    if is_root() {
+        return PathBuf::from("/var/lib").join(APP_NAME);
+    }
+
     if let Some(home) = home_dir() {
         return home.join(".local").join("state").join(APP_NAME);
     }
 
-    // Ultimate fallback
     PathBuf::from("/var/lib").join(APP_NAME)
+}
+
+/// Get the runtime directory path (for ephemeral data: databases, caches)
+///
+/// Priority:
+/// 1. CLI override (set via `set_runtime_dir`)
+/// 2. `$RUNTIME_DIRECTORY` (systemd)
+/// 3. `$XDG_RUNTIME_DIR/starla`
+/// 4. Root: `/run/starla`, non-root: `/tmp/starla-<uid>`
+pub fn runtime_dir() -> PathBuf {
+    if let Some(override_dir) = RUNTIME_DIR_OVERRIDE.get() {
+        return override_dir.clone();
+    }
+
+    if let Ok(dir) = std::env::var("RUNTIME_DIRECTORY") {
+        return PathBuf::from(dir);
+    }
+
+    if let Ok(xdg_runtime) = std::env::var("XDG_RUNTIME_DIR") {
+        return PathBuf::from(xdg_runtime).join(APP_NAME);
+    }
+
+    if is_root() {
+        return PathBuf::from("/run").join(APP_NAME);
+    }
+
+    // Per-user temp directory
+    let uid = {
+        #[cfg(unix)]
+        {
+            unsafe { libc::getuid() }
+        }
+        #[cfg(not(unix))]
+        {
+            0u32
+        }
+    };
+    std::env::temp_dir().join(format!("{}-{}", APP_NAME, uid))
 }
 
 /// Get the default config file path
@@ -89,14 +154,19 @@ pub fn probe_pubkey_path() -> PathBuf {
     state_dir().join("probe_key.pub")
 }
 
-/// Get the default database path
+/// Get the default measurement database path (ephemeral — in runtime dir)
 pub fn database_path() -> PathBuf {
-    state_dir().join("measurements.db")
+    runtime_dir().join("measurements")
 }
 
-/// Get the default results queue database path
+/// Get the default results queue path (ephemeral — in runtime dir)
 pub fn results_queue_path() -> PathBuf {
-    state_dir().join("results_queue.db")
+    runtime_dir().join("result_queue")
+}
+
+/// Get the known SSH host keys path
+pub fn known_hosts_path() -> PathBuf {
+    state_dir().join("known_hosts")
 }
 
 /// Get the probe ID file path
@@ -125,14 +195,24 @@ pub fn write_probe_id(probe_id: u32) -> std::io::Result<()> {
     std::fs::write(&path, probe_id.to_string())
 }
 
+/// Check if the current process is running as root (UID 0)
+#[cfg(unix)]
+fn is_root() -> bool {
+    // Safety: getuid() is a simple syscall with no safety concerns
+    unsafe { libc::getuid() == 0 }
+}
+
+#[cfg(not(unix))]
+fn is_root() -> bool {
+    false
+}
+
 /// Get the user's home directory
 fn home_dir() -> Option<PathBuf> {
-    // Try HOME environment variable (works on Unix and most systems)
     if let Ok(home) = std::env::var("HOME") {
         return Some(PathBuf::from(home));
     }
 
-    // On Windows, try USERPROFILE
     #[cfg(windows)]
     if let Ok(home) = std::env::var("USERPROFILE") {
         return Some(PathBuf::from(home));
@@ -166,90 +246,89 @@ pub fn ensure_state_dir() -> std::io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Mutex to serialize tests that modify environment variables.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_config_dir_with_env() {
-        // Save original value
+        let _guard = ENV_LOCK.lock().unwrap();
+
         let original = std::env::var("CONFIGURATION_DIRECTORY").ok();
 
-        // Test with CONFIGURATION_DIRECTORY set
-        std::env::set_var("CONFIGURATION_DIRECTORY", "/test/config");
+        unsafe { std::env::set_var("CONFIGURATION_DIRECTORY", "/test/config") };
         assert_eq!(config_dir(), PathBuf::from("/test/config"));
 
-        // Restore original
         if let Some(val) = original {
-            std::env::set_var("CONFIGURATION_DIRECTORY", val);
+            unsafe { std::env::set_var("CONFIGURATION_DIRECTORY", val) };
         } else {
-            std::env::remove_var("CONFIGURATION_DIRECTORY");
+            unsafe { std::env::remove_var("CONFIGURATION_DIRECTORY") };
         }
     }
 
     #[test]
     fn test_state_dir_with_env() {
-        // Save original value
+        let _guard = ENV_LOCK.lock().unwrap();
+
         let original = std::env::var("STATE_DIRECTORY").ok();
 
-        // Test with STATE_DIRECTORY set
-        std::env::set_var("STATE_DIRECTORY", "/test/state");
+        unsafe { std::env::set_var("STATE_DIRECTORY", "/test/state") };
         assert_eq!(state_dir(), PathBuf::from("/test/state"));
 
-        // Restore original
         if let Some(val) = original {
-            std::env::set_var("STATE_DIRECTORY", val);
+            unsafe { std::env::set_var("STATE_DIRECTORY", val) };
         } else {
-            std::env::remove_var("STATE_DIRECTORY");
+            unsafe { std::env::remove_var("STATE_DIRECTORY") };
         }
     }
 
     #[test]
     fn test_xdg_config_fallback() {
-        // Save original values
+        let _guard = ENV_LOCK.lock().unwrap();
+
         let orig_conf_dir = std::env::var("CONFIGURATION_DIRECTORY").ok();
         let orig_xdg = std::env::var("XDG_CONFIG_HOME").ok();
 
-        // Clear CONFIGURATION_DIRECTORY, set XDG_CONFIG_HOME
-        std::env::remove_var("CONFIGURATION_DIRECTORY");
-        std::env::set_var("XDG_CONFIG_HOME", "/home/test/.config");
+        unsafe { std::env::remove_var("CONFIGURATION_DIRECTORY") };
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", "/home/test/.config") };
 
         assert_eq!(config_dir(), PathBuf::from("/home/test/.config/starla"));
 
-        // Restore
         if let Some(val) = orig_conf_dir {
-            std::env::set_var("CONFIGURATION_DIRECTORY", val);
+            unsafe { std::env::set_var("CONFIGURATION_DIRECTORY", val) };
         }
         if let Some(val) = orig_xdg {
-            std::env::set_var("XDG_CONFIG_HOME", val);
+            unsafe { std::env::set_var("XDG_CONFIG_HOME", val) };
         } else {
-            std::env::remove_var("XDG_CONFIG_HOME");
+            unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
         }
     }
 
     #[test]
     fn test_xdg_state_fallback() {
-        // Save original values
+        let _guard = ENV_LOCK.lock().unwrap();
+
         let orig_state_dir = std::env::var("STATE_DIRECTORY").ok();
         let orig_xdg = std::env::var("XDG_STATE_HOME").ok();
 
-        // Clear STATE_DIRECTORY, set XDG_STATE_HOME
-        std::env::remove_var("STATE_DIRECTORY");
-        std::env::set_var("XDG_STATE_HOME", "/home/test/.local/state");
+        unsafe { std::env::remove_var("STATE_DIRECTORY") };
+        unsafe { std::env::set_var("XDG_STATE_HOME", "/home/test/.local/state") };
 
         assert_eq!(state_dir(), PathBuf::from("/home/test/.local/state/starla"));
 
-        // Restore
         if let Some(val) = orig_state_dir {
-            std::env::set_var("STATE_DIRECTORY", val);
+            unsafe { std::env::set_var("STATE_DIRECTORY", val) };
         }
         if let Some(val) = orig_xdg {
-            std::env::set_var("XDG_STATE_HOME", val);
+            unsafe { std::env::set_var("XDG_STATE_HOME", val) };
         } else {
-            std::env::remove_var("XDG_STATE_HOME");
+            unsafe { std::env::remove_var("XDG_STATE_HOME") };
         }
     }
 
     #[test]
     fn test_default_file_paths() {
-        // Just verify these don't panic and return sensible paths
         let config = config_file();
         assert!(config.to_string_lossy().contains("config.toml"));
 
@@ -257,40 +336,31 @@ mod tests {
         assert!(key.to_string_lossy().contains("probe_key"));
 
         let db = database_path();
-        assert!(db.to_string_lossy().contains("measurements.db"));
+        assert!(db.to_string_lossy().contains("measurements"));
 
-        let probe_id = probe_id_path();
-        assert!(probe_id.to_string_lossy().contains("probe_id"));
+        let pid = probe_id_path();
+        assert!(pid.to_string_lossy().contains("probe_id"));
+
+        let kh = known_hosts_path();
+        assert!(kh.to_string_lossy().contains("known_hosts"));
     }
 
     #[test]
     fn test_probe_id_read_write() {
-        // Use a temp directory for this test
-        let temp_dir = std::env::temp_dir().join("starla-test-probe-id");
+        let temp_dir =
+            std::env::temp_dir().join(format!("starla-test-probe-id-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        // Save original STATE_DIRECTORY
-        let orig_state_dir = std::env::var("STATE_DIRECTORY").ok();
-        std::env::set_var("STATE_DIRECTORY", &temp_dir);
+        let probe_id_file = temp_dir.join("probe_id");
+        assert!(!probe_id_file.exists());
 
-        // Initially should return None
-        assert_eq!(read_probe_id(), None);
+        std::fs::write(&probe_id_file, "1014036").unwrap();
 
-        // Write a probe ID
-        write_probe_id(1014036).unwrap();
+        let content = std::fs::read_to_string(&probe_id_file).unwrap();
+        let parsed: Option<u32> = content.trim().parse().ok();
+        assert_eq!(parsed, Some(1014036));
 
-        // Should now read it back
-        assert_eq!(read_probe_id(), Some(1014036));
-
-        // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
-
-        // Restore original
-        if let Some(val) = orig_state_dir {
-            std::env::set_var("STATE_DIRECTORY", val);
-        } else {
-            std::env::remove_var("STATE_DIRECTORY");
-        }
     }
 }

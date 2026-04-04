@@ -16,14 +16,15 @@ pub mod types;
 pub use config::*;
 pub use error::*;
 pub use paths::{
-    config_dir, config_file, database_path, ensure_config_dir, ensure_state_dir, probe_id_path,
-    probe_key_path, probe_pubkey_path, read_probe_id, results_queue_path, state_dir,
-    write_probe_id,
+    config_dir, config_file, database_path, ensure_config_dir, ensure_state_dir, known_hosts_path,
+    probe_id_path, probe_key_path, probe_pubkey_path, read_probe_id, results_queue_path,
+    runtime_dir, set_runtime_dir, set_state_dir, state_dir, write_probe_id,
 };
 pub use types::*;
 
-/// Firmware version for the Rust implementation
-pub const FIRMWARE_VERSION: u32 = 6000;
+/// Firmware version — must match the reference probe version for controller
+/// acceptance
+pub const FIRMWARE_VERSION: u32 = 5120;
 
 /// Version string
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

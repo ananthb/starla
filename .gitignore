@@ -49,3 +49,4 @@ result-*
 
 # Reference implementation
 reference/
+.pre-commit-config.yaml

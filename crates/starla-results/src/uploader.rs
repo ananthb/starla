@@ -173,33 +173,20 @@ impl ResultUploader {
 
         self.ensure_probed().await;
 
-        // Convert to AtlasResult format matching official httppost format:
-        // 1. Header: "P_TO_C_REPORT\n" (probe-to-controller report header)
-        // 2. Stream marker: "RESULT 9907 ongoing\n"
-        // 3. Result lines: "RESULT <json>\n"
-        // 4. Footer: "SESSION_ID <session_id>\n" (note: SESSION_ID prefix required)
+        // Build POST body matching official httppost format:
+        // 1. Header: "P_TO_C_REPORT\n" (from p_to_c_report_header file)
+        // 2. Result lines: "RESULT <json>\n"
+        // 3. Footer: "\nSESSION_ID <session_id>\n" (from con_session_id.txt file)
         let atlas_result = AtlasResult::from_measurement(result.clone(), None).with_lts(lts);
-        let json = serde_json::to_vec(&atlas_result)?;
+        let result_line = atlas_result.to_result_line();
 
-        let header = b"P_TO_C_REPORT\n";
-        let stream_marker = b"RESULT 9907 ongoing\n";
-        // Footer format: "SESSION_ID <session_id>\n" (matches con_session_id.txt
-        // format)
-        let footer_len = session_id
-            .map(|s| "SESSION_ID ".len() + s.len() + 1)
-            .unwrap_or(0);
-        let mut body = Vec::with_capacity(
-            header.len() + stream_marker.len() + b"RESULT ".len() + json.len() + 1 + footer_len,
-        );
-        body.extend_from_slice(header);
-        body.extend_from_slice(stream_marker);
-        body.extend_from_slice(b"RESULT ");
-        body.extend_from_slice(&json);
-        body.push(b'\n');
+        let mut body = Vec::with_capacity(b"P_TO_C_REPORT\n".len() + result_line.len() + 64);
+        body.extend_from_slice(b"P_TO_C_REPORT\n");
+        body.extend_from_slice(result_line.as_bytes());
 
-        // Append session ID as footer (per official httppost --post-footer behavior)
-        // Format must be "SESSION_ID <session_id>\n" to match con_session_id.txt
+        // Footer matches con_session_id.txt format: "\nSESSION_ID <session_id>\n"
         if let Some(sid) = session_id {
+            body.push(b'\n');
             body.extend_from_slice(b"SESSION_ID ");
             body.extend_from_slice(sid.as_bytes());
             body.push(b'\n');
@@ -274,33 +261,23 @@ impl ResultUploader {
 
         self.ensure_probed().await;
 
-        // RIPE Atlas expects results in a specific format matching official httppost:
-        // 1. Header: "P_TO_C_REPORT\n" (probe-to-controller report header)
-        // 2. Stream marker: "RESULT 9907 ongoing\n"
-        // 3. Each result line prefixed with "RESULT " followed by JSON
-        // 4. Footer: "SESSION_ID <session_id>\n" (note: SESSION_ID prefix required)
+        // Build POST body matching official httppost format:
+        // 1. Header: "P_TO_C_REPORT\n" (from p_to_c_report_header file)
+        // 2. Result lines: "RESULT <json>\n"
+        // 3. Footer: "\nSESSION_ID <session_id>\n" (from con_session_id.txt file)
         let mut body = Vec::new();
 
-        // Add probe-to-controller report header (from p_to_c_report_header file)
         body.extend_from_slice(b"P_TO_C_REPORT\n");
 
-        // Add stream marker header (Stream 9907 = measurement results)
-        body.extend_from_slice(b"RESULT 9907 ongoing\n");
-
-        // Add each result as "RESULT <json>\n"
         for queued in results {
-            // Convert to AtlasResult format and set lts
             let atlas_result =
                 AtlasResult::from_measurement(queued.result.clone(), None).with_lts(lts);
-            body.extend_from_slice(b"RESULT ");
-            let json = serde_json::to_vec(&atlas_result)?;
-            body.extend_from_slice(&json);
-            body.push(b'\n');
+            body.extend_from_slice(atlas_result.to_result_line().as_bytes());
         }
 
-        // Append session ID as footer (per official httppost --post-footer behavior)
-        // Format must be "SESSION_ID <session_id>\n" to match con_session_id.txt
+        // Footer matches con_session_id.txt format: "\nSESSION_ID <session_id>\n"
         if let Some(sid) = session_id {
+            body.push(b'\n');
             body.extend_from_slice(b"SESSION_ID ");
             body.extend_from_slice(sid.as_bytes());
             body.push(b'\n');
@@ -313,7 +290,7 @@ impl ResultUploader {
             self.config.endpoint,
             session_id.is_some()
         );
-        // Log first 2KB and last 200 bytes of request body at trace level for debugging
+        // Log body for debugging
         let body_str = String::from_utf8_lossy(&body);
         if body.len() > 2200 {
             trace!("Upload request body (first 2KB):\n{}", &body_str[..2048]);

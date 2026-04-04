@@ -12,14 +12,37 @@ use std::time::{Duration, Instant};
 use tokio::time::timeout;
 
 /// Individual ping reply result (per packet)
-/// Official format: { "rtt": 1.672125 } or { "x": "*" } for timeout
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+/// Official format: { "rtt":1.672125 } or { "x":"*" } for timeout
+///
+/// RTT uses 6 decimal places to match the C probe's %f format.
+#[derive(Debug, Clone, Deserialize)]
 pub enum PingReplyOrTimeout {
-    /// Successful reply with RTT
     Reply { rtt: f64 },
-    /// Timeout indicator
-    Timeout { x: String },
+    Timeout,
+}
+
+impl Serialize for PingReplyOrTimeout {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            PingReplyOrTimeout::Reply { rtt } => {
+                // Format RTT with 6 decimal places to match C probe's %f
+                let mut map = serializer.serialize_map(Some(1))?;
+                let rtt_str = format!("{:.6}", rtt);
+                // Serialize as a raw number (not a string)
+                map.serialize_entry(
+                    "rtt",
+                    &serde_json::value::RawValue::from_string(rtt_str).unwrap(),
+                )?;
+                map.end()
+            }
+            PingReplyOrTimeout::Timeout => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("x", "*")?;
+                map.end()
+            }
+        }
+    }
 }
 
 /// Ping measurement results - a vector of RTT measurements
@@ -45,7 +68,7 @@ pub fn ping_stats(results: &PingResults) -> (f64, f64, f64, u32, u32) {
         .iter()
         .filter_map(|r| match r {
             PingReplyOrTimeout::Reply { rtt } => Some(*rtt),
-            PingReplyOrTimeout::Timeout { .. } => None,
+            PingReplyOrTimeout::Timeout => None,
         })
         .collect();
 
@@ -144,11 +167,11 @@ pub async fn execute_ping(config: &PingConfig) -> anyhow::Result<PingResults> {
             }
             Ok(Err(_e)) => {
                 // Socket error - treat as timeout
-                results.push(PingReplyOrTimeout::Timeout { x: "*".to_string() });
+                results.push(PingReplyOrTimeout::Timeout);
             }
             Err(_) => {
                 // Timeout
-                results.push(PingReplyOrTimeout::Timeout { x: "*".to_string() });
+                results.push(PingReplyOrTimeout::Timeout);
             }
         }
 

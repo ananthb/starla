@@ -10,31 +10,15 @@ use async_trait::async_trait;
 use russh::client::{self, Handle, Msg};
 use russh::{kex, Channel, ChannelMsg, Preferred};
 use russh_keys::key::{KeyPair, PublicKey};
+use russh_keys::PublicKeyBase64;
 use std::borrow::Cow;
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, trace, warn};
-
-/// Default registration servers for RIPE Atlas (production)
-/// These are the official registration servers from the RIPE Atlas probe
-/// source. The probe tries each in order until one succeeds.
-pub const DEFAULT_REGISTRATION_SERVERS: &[&str] = &[
-    // Primary registration server (hostname)
-    "reg03.atlas.ripe.net:443",
-    // Primary registration server (IPv4)
-    "193.0.19.246:443",
-    // Primary registration server (IPv6)
-    "[2001:67c:2e8:11::c100:13f6]:443",
-    // Secondary registration server (hostname)
-    "reg04.atlas.ripe.net:443",
-    // Secondary registration server (IPv4)
-    "193.0.19.247:443",
-    // Secondary registration server (IPv6)
-    "[2001:67c:2e8:11::c100:13f7]:443",
-];
 
 /// SSH connection configuration
 #[derive(Debug, Clone)]
@@ -93,12 +77,10 @@ pub enum InitResponse {
 /// Probe information sent during registration INIT
 #[derive(Debug, Clone)]
 pub struct ProbeInitInfo {
-    /// Firmware version (e.g., 6000)
+    /// Firmware version (e.g., 5120)
     pub firmware_version: u32,
     /// Reason for registration (e.g., "NEW", "REREG_TIMER_EXPIRED")
     pub reason: String,
-    /// Optional MAC address for identification
-    pub mac_address: Option<String>,
 }
 
 impl ProbeInitInfo {
@@ -107,7 +89,6 @@ impl ProbeInitInfo {
         Self {
             firmware_version,
             reason: "NEW".to_string(),
-            mac_address: None,
         }
     }
 
@@ -116,53 +97,132 @@ impl ProbeInitInfo {
         Self {
             firmware_version,
             reason: reason.to_string(),
-            mac_address: None,
         }
     }
 
-    /// Set the MAC address
-    pub fn with_mac(mut self, mac: &str) -> Self {
-        self.mac_address = Some(mac.to_string());
-        self
-    }
-
     /// Format as P_TO_R_INIT message for INIT command stdin
+    ///
+    /// Uses the software probe format matching the official generic
+    /// software probe: `TOKEN_SPECS fluffy 1000 <fw> <sub_arch>`
     pub fn to_init_message(&self) -> String {
         let mut msg = String::new();
         msg.push_str("P_TO_R_INIT\n");
 
-        // TOKEN_SPECS format: probev1 <kernel_version>[-<mac>] <firmware_version>
-        // We use a generic kernel version since we're not on the probe hardware
-        let kernel_version = "6.0.0-rust";
-        if let Some(ref mac) = self.mac_address {
-            msg.push_str(&format!(
-                "TOKEN_SPECS probev1 {}-{} {}\n",
-                kernel_version, mac, self.firmware_version
-            ));
-        } else {
-            msg.push_str(&format!(
-                "TOKEN_SPECS probev1 {} {}\n",
-                kernel_version, self.firmware_version
-            ));
-        }
+        let arch = std::env::consts::ARCH;
+        let sub_arch = format!("generic/unknown/{}", arch);
+
+        msg.push_str(&format!(
+            "TOKEN_SPECS fluffy 1000 {} {}\n",
+            self.firmware_version, sub_arch
+        ));
 
         msg.push_str(&format!("REASON_FOR_REGISTRATION {}\n", self.reason));
         msg
     }
 }
 
-/// Client handler for russh
-struct AtlasClientHandler {
-    /// Channel for receiving forwarded connections
-    #[allow(dead_code)]
-    forward_tx: mpsc::Sender<ForwardedConnection>,
+/// Known SSH host keys for server verification (TOFU model)
+///
+/// On first connection to a server, the key is saved to a known_hosts file.
+/// On subsequent connections, the presented key is verified against the saved
+/// one. This prevents MITM attacks after the initial connection.
+#[derive(Clone)]
+pub struct KnownHosts {
+    path: PathBuf,
+    hosts: Arc<Mutex<HashMap<String, String>>>,
 }
 
-/// A forwarded TCP connection
-pub struct ForwardedConnection {
-    pub address: String,
-    pub port: u32,
-    pub channel: Channel<Msg>,
+impl KnownHosts {
+    /// Load known hosts from file, or create empty if file doesn't exist
+    pub fn load(path: &Path) -> Self {
+        let mut hosts = HashMap::new();
+
+        if path.exists() {
+            if let Ok(contents) = std::fs::read_to_string(path) {
+                for line in contents.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with('#') {
+                        continue;
+                    }
+                    // Format: "host:port key_type base64_key"
+                    let parts: Vec<&str> = line.splitn(3, ' ').collect();
+                    if parts.len() == 3 {
+                        let host_port = parts[0].to_string();
+                        let key_str = format!("{} {}", parts[1], parts[2]);
+                        hosts.insert(host_port, key_str);
+                    }
+                }
+            }
+        }
+
+        Self {
+            path: path.to_path_buf(),
+            hosts: Arc::new(Mutex::new(hosts)),
+        }
+    }
+
+    /// Check a server's public key against known hosts.
+    /// Returns Ok(true) if the key matches or was newly saved (TOFU).
+    /// Returns Ok(false) if the key does NOT match a previously saved key
+    /// (possible MITM).
+    pub async fn verify(
+        &self,
+        host: &str,
+        port: u16,
+        key: &PublicKey,
+    ) -> Result<bool, anyhow::Error> {
+        let host_port = format!("{}:{}", host, port);
+        let key_type = key.name();
+        let key_b64 = key.public_key_base64();
+        let presented = format!("{} {}", key_type, key_b64);
+
+        let mut hosts = self.hosts.lock().await;
+
+        if let Some(saved) = hosts.get(&host_port) {
+            if *saved == presented {
+                debug!("Host key for {} matches known key", host_port);
+                Ok(true)
+            } else {
+                error!(
+                    "HOST KEY MISMATCH for {}! Possible MITM attack.\nExpected: {}\nGot:      {}",
+                    host_port, saved, presented
+                );
+                Ok(false)
+            }
+        } else {
+            // TOFU: first time seeing this host, save the key
+            info!(
+                "New host key for {} ({}), saving to known_hosts (TOFU)",
+                host_port, key_type
+            );
+            hosts.insert(host_port.clone(), presented);
+
+            // Write back to file
+            if let Some(parent) = self.path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let mut lines: Vec<String> = Vec::new();
+            lines.push("# Starla known hosts - do not edit manually".to_string());
+            for (hp, k) in hosts.iter() {
+                lines.push(format!("{} {}", hp, k));
+            }
+            if let Err(e) = std::fs::write(&self.path, lines.join("\n") + "\n") {
+                warn!("Failed to save known_hosts file: {}", e);
+            }
+
+            Ok(true)
+        }
+    }
+}
+
+/// Client handler for russh
+struct AtlasClientHandler {
+    /// Known hosts for server key verification
+    known_hosts: KnownHosts,
+    /// The host we're connecting to (for key verification)
+    connect_host: String,
+    /// The port we're connecting to
+    connect_port: u16,
 }
 
 #[async_trait]
@@ -171,11 +231,11 @@ impl client::Handler for AtlasClientHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        // TODO: In production, verify against known RIPE Atlas server keys
-        // For now, accept all
-        Ok(true)
+        self.known_hosts
+            .verify(&self.connect_host, self.connect_port, server_public_key)
+            .await
     }
 
     async fn server_channel_open_forwarded_tcpip(
@@ -187,7 +247,7 @@ impl client::Handler for AtlasClientHandler {
         originator_port: u32,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
-        info!(
+        debug!(
             "Forwarded connection from {}:{} to {}:{}",
             originator_address, originator_port, connected_address, connected_port
         );
@@ -198,7 +258,7 @@ impl client::Handler for AtlasClientHandler {
         let address = connected_address.to_string();
 
         tokio::spawn(async move {
-            info!("Bridging forwarded connection {}:{}", address, local_port);
+            debug!("Bridging forwarded connection {}:{}", address, local_port);
 
             // Connect to local telnet
             let local_addr = format!("127.0.0.1:{}", local_port);
@@ -283,18 +343,6 @@ impl client::Handler for AtlasClientHandler {
     }
 }
 
-/// Receiver for forwarded connections from SSH tunnel
-pub struct ForwardedConnectionReceiver {
-    rx: mpsc::Receiver<ForwardedConnection>,
-}
-
-impl ForwardedConnectionReceiver {
-    /// Receive next forwarded connection
-    pub async fn recv(&mut self) -> Option<ForwardedConnection> {
-        self.rx.recv().await
-    }
-}
-
 /// SSH connection to RIPE Atlas controller
 pub struct SshConnection {
     session: Arc<Mutex<Handle<AtlasClientHandler>>>,
@@ -302,7 +350,6 @@ pub struct SshConnection {
     config: SshConfig,
     host: String,
     port: u16,
-    forward_rx: Option<mpsc::Receiver<ForwardedConnection>>,
 }
 
 impl SshConnection {
@@ -312,6 +359,7 @@ impl SshConnection {
         port: u16,
         key: &KeyPair,
         config: SshConfig,
+        known_hosts: KnownHosts,
     ) -> anyhow::Result<Self> {
         // RIPE Atlas registration servers only support diffie-hellman-group1-sha1
         // and diffie-hellman-group-exchange-sha256. Since russh doesn't support
@@ -333,11 +381,14 @@ impl SshConnection {
             ..Default::default()
         };
 
-        let (forward_tx, forward_rx) = mpsc::channel(16);
-        let handler = AtlasClientHandler { forward_tx };
+        let handler = AtlasClientHandler {
+            known_hosts: known_hosts.clone(),
+            connect_host: host.to_string(),
+            connect_port: port,
+        };
 
         let addr = format!("{}:{}", host, port);
-        info!("Connecting to SSH controller at {}", addr);
+        debug!("Connecting to SSH controller at {}", addr);
 
         let session = timeout(
             config.connect_timeout,
@@ -357,14 +408,13 @@ impl SshConnection {
             anyhow::bail!("SSH authentication failed");
         }
 
-        info!("SSH authentication successful");
+        debug!("SSH authentication successful");
 
         Ok(Self {
             session: Arc::new(Mutex::new(session)),
             config,
             host: host.to_string(),
             port,
-            forward_rx: Some(forward_rx),
         })
     }
 
@@ -374,6 +424,7 @@ impl SshConnection {
         port: u16,
         key: &KeyPair,
         config: SshConfig,
+        known_hosts: KnownHosts,
     ) -> anyhow::Result<Self> {
         let mut attempts = 0u32;
         let mut delay = config.reconnect_delay;
@@ -381,7 +432,7 @@ impl SshConnection {
         loop {
             attempts += 1;
 
-            match Self::connect(host, port, key, config.clone()).await {
+            match Self::connect(host, port, key, config.clone(), known_hosts.clone()).await {
                 Ok(conn) => return Ok(conn),
                 Err(e) => {
                     if config.max_reconnect_attempts > 0
@@ -413,16 +464,33 @@ impl SshConnection {
         servers: &[&str],
         key: &KeyPair,
         config: SshConfig,
+        known_hosts: KnownHosts,
     ) -> anyhow::Result<Self> {
-        for server in servers {
-            let parts: Vec<&str> = server.split(':').collect();
-            let (host, port) = if parts.len() == 2 {
-                (parts[0], parts[1].parse().unwrap_or(443))
-            } else {
-                (*server, 443u16)
-            };
+        fn parse_server(server: &str) -> (&str, u16) {
+            if let Some(rest) = server.strip_prefix('[') {
+                if let Some((host, tail)) = rest.split_once(']') {
+                    if let Some(port_str) = tail.strip_prefix(':') {
+                        if let Ok(port) = port_str.parse() {
+                            return (host, port);
+                        }
+                    }
+                    return (host, 443);
+                }
+            }
 
-            match Self::connect(host, port, key, config.clone()).await {
+            if let Some((host, port_str)) = server.rsplit_once(':') {
+                if let Ok(port) = port_str.parse() {
+                    return (host, port);
+                }
+            }
+
+            (server, 443)
+        }
+
+        for server in servers {
+            let (host, port) = parse_server(server);
+
+            match Self::connect(host, port, key, config.clone(), known_hosts.clone()).await {
                 Ok(conn) => {
                     info!("Connected to {}", server);
                     return Ok(conn);
@@ -551,57 +619,40 @@ impl SshConnection {
         }
     }
 
-    /// Start the KEEP session
-    /// This opens a channel with the KEEP command and keeps it open
-    /// The session remains active to maintain the SSH connection and tunnels
+    /// Start the KEEP session and monitor it.
     ///
-    /// Spawns a background task to monitor the KEEP channel for any data
-    pub async fn start_keep_session(&self) -> anyhow::Result<()> {
+    /// Opens a channel with the KEEP command and blocks until the channel
+    /// closes (which means the controller disconnected). Returns when the
+    /// connection is lost. The caller should use this as the connection
+    /// health signal.
+    pub async fn run_keep_session(&self) -> anyhow::Result<()> {
         debug!("Starting KEEP session");
         let session = self.session.lock().await;
         let mut channel = session.channel_open_session().await?;
         channel.exec(true, "KEEP").await?;
+        drop(session); // Release lock so other operations can use the session
 
-        debug!("KEEP session started");
+        debug!("KEEP session started, monitoring channel");
 
-        // Spawn a task to monitor the KEEP channel
-        // This keeps the channel alive and logs any data received
-        tokio::spawn(async move {
-            trace!("KEEP channel monitor started");
-            while let Some(msg) = channel.wait().await {
-                match msg {
-                    ChannelMsg::Data { data } => {
-                        trace!("KEEP channel data: {} bytes", data.len());
-                    }
-                    ChannelMsg::Eof => {
-                        debug!("KEEP channel EOF");
-                        break;
-                    }
-                    ChannelMsg::ExitStatus { exit_status } => {
-                        debug!("KEEP channel exit status: {}", exit_status);
-                    }
-                    other => {
-                        trace!("KEEP channel message: {:?}", other);
-                    }
+        // Block until the KEEP channel closes — this is our connection health signal
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                ChannelMsg::Data { data } => {
+                    trace!("KEEP channel data: {} bytes", data.len());
                 }
+                ChannelMsg::Eof => {
+                    debug!("KEEP channel EOF — connection lost");
+                    break;
+                }
+                ChannelMsg::ExitStatus { exit_status } => {
+                    debug!("KEEP channel exit status: {}", exit_status);
+                }
+                _ => {}
             }
-            debug!("KEEP channel monitor ended");
-        });
-
-        Ok(())
-    }
-
-    /// Execute the KEEP command (legacy - use start_keep_session instead)
-    pub async fn keep(&self) -> anyhow::Result<()> {
-        let output = self.execute("KEEP").await?;
-        let output = output.trim();
-
-        if output != "OK" {
-            warn!("Unexpected KEEP response: {}", output);
         }
 
-        debug!("KEEP acknowledged");
-        Ok(())
+        warn!("KEEP session ended — controller disconnected");
+        anyhow::bail!("KEEP session ended")
     }
 
     /// Request reverse port forwarding
@@ -700,7 +751,7 @@ impl SshConnection {
         use tokio::net::TcpListener;
 
         let listener = TcpListener::bind(format!("127.0.0.1:{}", local_port)).await?;
-        info!(
+        debug!(
             "HTTP proxy started: localhost:{} -> controller:{}",
             local_port, remote_port
         );
@@ -716,7 +767,10 @@ impl SshConnection {
             loop {
                 match listener.accept().await {
                     Ok((mut local_stream, peer_addr)) => {
-                        info!("HTTP proxy forwarding connection from {}", peer_addr);
+                        debug!(
+                            "HTTP proxy accepted connection from {} (local:{} -> remote:{})",
+                            peer_addr, local_port, remote_port
+                        );
 
                         let session = session.clone();
                         let failures = consecutive_failures.clone();
@@ -726,6 +780,23 @@ impl SshConnection {
                             // Open SSH direct-tcpip channel to controller's localhost:remote_port
                             debug!("Opening SSH channel for HTTP forward");
                             let session_guard = session.lock().await;
+                            if session_guard.is_closed() {
+                                error!(
+                                    "SSH session closed before opening HTTP channel (local:{} -> \
+                                     remote:{})",
+                                    local_port, remote_port
+                                );
+                                let count = failures.fetch_add(1, Ordering::SeqCst) + 1;
+                                if count >= MAX_CONSECUTIVE_FAILURES {
+                                    error!(
+                                        "Too many channel failures ({}), signaling reconnection \
+                                         needed",
+                                        count
+                                    );
+                                    reconnect.cancel();
+                                }
+                                return;
+                            }
 
                             // Add timeout to channel open to detect dead SSH sessions
                             let channel_result = tokio::time::timeout(
@@ -775,102 +846,58 @@ impl SshConnection {
                             };
                             drop(session_guard);
 
-                            // Bridge local stream with SSH channel
-                            // Add timeouts to detect stuck connections
+                            // Bridge local stream with SSH channel.
+                            // Supports TCP half-close: when the local client finishes
+                            // sending (read returns 0), we send EOF to the SSH side
+                            // but keep reading the SSH response back to the client.
                             let mut local_buf = [0u8; 8192];
-                            let mut bytes_sent = 0usize;
-                            let mut bytes_received = 0usize;
+                            let mut local_done = false;
 
                             loop {
                                 tokio::select! {
-                                    // Read from local -> send to SSH (with timeout)
-                                    result = tokio::time::timeout(
-                                        std::time::Duration::from_secs(30),
-                                        local_stream.read(&mut local_buf)
-                                    ) => {
-                                        match result {
-                                            Ok(Ok(0)) => {
-                                                // Local connection closed (HTTP client disconnected/timed out)
-                                                debug!("Local connection closed after sending {} bytes, receiving {} bytes", bytes_sent, bytes_received);
-                                                let _ = channel.eof().await;
+                                    biased; // Prioritize SSH data over local reads
 
-                                                // If we sent data but got no response, count as failure
-                                                // This detects when SSH tunnel is open but controller isn't responding
-                                                if bytes_sent > 0 && bytes_received == 0 {
-                                                    warn!("HTTP request got no response (sent {} bytes) - SSH tunnel may be broken", bytes_sent);
-                                                    let count = failures.fetch_add(1, Ordering::SeqCst) + 1;
-                                                    if count >= MAX_CONSECUTIVE_FAILURES {
-                                                        error!("Too many no-response failures ({}), signaling reconnection needed", count);
-                                                        reconnect.cancel();
-                                                    }
-                                                }
-                                                break;
-                                            }
-                                            Ok(Ok(n)) => {
-                                                // Add timeout to SSH send
-                                                match tokio::time::timeout(
-                                                    std::time::Duration::from_secs(10),
-                                                    channel.data(&local_buf[..n])
-                                                ).await {
-                                                    Ok(Ok(())) => {
-                                                        bytes_sent += n;
-                                                    }
-                                                    Ok(Err(e)) => {
-                                                        error!("Failed to send {} bytes to SSH channel: {}", n, e);
-                                                        let count = failures.fetch_add(1, Ordering::SeqCst) + 1;
-                                                        if count >= MAX_CONSECUTIVE_FAILURES {
-                                                            error!("Too many send failures ({}), signaling reconnection needed", count);
-                                                            reconnect.cancel();
-                                                        }
-                                                        break;
-                                                    }
-                                                    Err(_) => {
-                                                        error!("Timeout sending data to SSH channel - connection stalled");
-                                                        let count = failures.fetch_add(1, Ordering::SeqCst) + 1;
-                                                        if count >= MAX_CONSECUTIVE_FAILURES {
-                                                            error!("Too many send timeouts ({}), signaling reconnection needed", count);
-                                                            reconnect.cancel();
-                                                        }
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                            Ok(Err(e)) => {
-                                                error!("Local read error: {}", e);
-                                                break;
-                                            }
-                                            Err(_) => {
-                                                // Timeout on local read is normal if waiting for response
-                                                // But if we've sent data and gotten no response, something is wrong
-                                                if bytes_sent > 0 && bytes_received == 0 {
-                                                    error!("Timeout waiting for SSH response after sending {} bytes", bytes_sent);
-                                                    let count = failures.fetch_add(1, Ordering::SeqCst) + 1;
-                                                    if count >= MAX_CONSECUTIVE_FAILURES {
-                                                        error!("Too many response timeouts ({}), signaling reconnection needed", count);
-                                                        reconnect.cancel();
-                                                    }
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
                                     // Read from SSH -> send to local
                                     msg = channel.wait() => {
                                         match msg {
                                             Some(ChannelMsg::Data { data }) => {
-                                                bytes_received += data.len();
-                                                // Reset failure counter on successful data receive
                                                 failures.store(0, Ordering::SeqCst);
                                                 if let Err(e) = local_stream.write_all(&data).await {
-                                                    error!("Local write error: {}", e);
+                                                    debug!("Local write error: {}", e);
                                                     break;
                                                 }
                                             }
                                             Some(ChannelMsg::Eof) | None => {
-                                                debug!("SSH channel closed after sending {} bytes, receiving {} bytes", bytes_sent, bytes_received);
+                                                debug!("SSH channel closed");
                                                 break;
                                             }
                                             _ => {}
+                                        }
+                                    }
+
+                                    // Read from local -> send to SSH
+                                    result = local_stream.read(&mut local_buf), if !local_done => {
+                                        match result {
+                                            Ok(0) => {
+                                                // Local finished sending — half-close the SSH side
+                                                // but keep looping to read the response
+                                                let _ = channel.eof().await;
+                                                local_done = true;
+                                            }
+                                            Ok(n) => {
+                                                if let Err(e) = channel.data(&local_buf[..n]).await {
+                                                    debug!("SSH write error: {}", e);
+                                                    let count = failures.fetch_add(1, Ordering::SeqCst) + 1;
+                                                    if count >= MAX_CONSECUTIVE_FAILURES {
+                                                        reconnect.cancel();
+                                                    }
+                                                    break;
+                                                }
+                                            }
+                                            Err(e) => {
+                                                debug!("Local read error: {}", e);
+                                                break;
+                                            }
                                         }
                                     }
                                 }
@@ -946,26 +973,6 @@ impl SshConnection {
         Ok(output)
     }
 
-    /// Take the forwarded connection receiver
-    /// This can only be called once - subsequent calls return None
-    pub fn take_forward_receiver(&mut self) -> Option<ForwardedConnectionReceiver> {
-        self.forward_rx
-            .take()
-            .map(|rx| ForwardedConnectionReceiver { rx })
-    }
-
-    /// Run keepalive loop
-    pub async fn keepalive_loop(&self, interval: Duration) -> anyhow::Result<()> {
-        loop {
-            sleep(interval).await;
-
-            if let Err(e) = self.keep().await {
-                error!("Keepalive failed: {}", e);
-                return Err(e);
-            }
-        }
-    }
-
     /// Check if connection is still alive
     pub async fn is_connected(&self) -> bool {
         let session = self.session.lock().await;
@@ -981,6 +988,25 @@ impl SshConnection {
     pub fn port(&self) -> u16 {
         self.port
     }
+}
+
+/// Compute the SHA256 fingerprint of a public key (e.g., "SHA256:abc123...")
+pub fn key_fingerprint(key: &KeyPair) -> anyhow::Result<String> {
+    use sha2::{Digest, Sha256};
+
+    let public_key = key.clone_public_key()?;
+    let key_type = public_key.name();
+    let key_b64 = public_key.public_key_base64();
+
+    // The SSH fingerprint is SHA256 of the raw public key wire format
+    // (type string length + type string + key data), which is what base64 decodes
+    // to
+    use base64::Engine;
+    let raw_bytes = base64::engine::general_purpose::STANDARD.decode(&key_b64)?;
+    let hash = Sha256::digest(&raw_bytes);
+    let fingerprint = base64::engine::general_purpose::STANDARD_NO_PAD.encode(hash);
+
+    Ok(format!("{} SHA256:{}", key_type, fingerprint))
 }
 
 /// Load SSH key from file
@@ -1017,7 +1043,7 @@ pub async fn save_key(key: &KeyPair, path: &Path) -> anyhow::Result<()> {
         public_key.public_key_base64()
     );
     tokio::fs::write(&pub_path, pub_key_str.as_bytes()).await?;
-    info!("Public key: {}", pub_key_str);
+    debug!("Public key: {}", pub_key_str);
 
     // For the private key, we'll use OpenSSH format via ssh-key crate
     match key {

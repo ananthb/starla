@@ -7,7 +7,7 @@ authors.workspace = true
 readme = "README.md"
 
 [dependencies]
-starla-common = { path = "../starla-common", version = "6000.0.0" }
+starla-common = { path = "../starla-common", version = "0.1.0" }
 rocksdb = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

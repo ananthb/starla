@@ -7,6 +7,7 @@ use hickory_client::tcp::TcpClientStream;
 use hickory_client::udp::UdpClientStream;
 use hickory_proto::iocompat::AsyncIoTokioAsStd;
 use hickory_proto::rr::{DNSClass, Name, RecordType};
+use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -14,79 +15,41 @@ use std::time::{Duration, Instant};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio::time::timeout;
 
-/// DNS measurement result in RIPE Atlas format
+/// DNS measurement result matching the official C probe format.
+///
+/// The C probe's result object contains only: rt, size, ID, ANCOUNT, QDCOUNT,
+/// NSCOUNT, ARCOUNT. Flags (AA, TC, RD, RA, AD, CD), RCODE, qname, qtype are
+/// decoded from `abuf` by the API layer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsResult {
     /// Round-trip time in ms
     pub rt: f64,
-    /// Number of answers
-    #[serde(rename = "ancount")]
-    pub answer_count: usize,
-    /// Number of authority records
-    #[serde(rename = "nscount")]
-    pub authority_count: usize,
-    /// Number of additional records
-    #[serde(rename = "arcount")]
-    pub additional_count: usize,
-    /// Response code (NOERROR=0, NXDOMAIN=3, etc.)
-    #[serde(rename = "RCODE")]
-    pub rcode: u16,
-    /// Response size in bytes (estimated)
+    /// Response size in bytes
     pub size: usize,
-    /// Query type
-    #[serde(rename = "qtype")]
-    pub query_type: String,
-    /// Query name
-    #[serde(rename = "qname")]
-    pub query_name: String,
-    /// Authoritative answer flag
-    #[serde(rename = "AA")]
-    pub authoritative: bool,
-    /// Truncated flag
-    #[serde(rename = "TC")]
-    pub truncated: bool,
-    /// Recursion desired flag
-    #[serde(rename = "RD")]
-    pub recursion_desired: bool,
-    /// Recursion available flag
-    #[serde(rename = "RA")]
-    pub recursion_available: bool,
-    /// Authenticated data flag
-    #[serde(rename = "AD")]
-    pub authenticated_data: bool,
-    /// Checking disabled flag
-    #[serde(rename = "CD")]
-    pub checking_disabled: bool,
-    /// Base64 encoded wire format response (if available)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub abuf: Option<String>,
-    /// Answers in human-readable format
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub answers: Vec<DnsAnswer>,
+    /// DNS transaction ID
+    #[serde(rename = "ID")]
+    pub id: u16,
+    /// Number of answer records
+    #[serde(rename = "ANCOUNT")]
+    pub ancount: usize,
+    /// Number of question records
+    #[serde(rename = "QDCOUNT")]
+    pub qdcount: usize,
+    /// Number of authority records
+    #[serde(rename = "NSCOUNT")]
+    pub nscount: usize,
+    /// Number of additional records
+    #[serde(rename = "ARCOUNT")]
+    pub arcount: usize,
     /// Error message if query failed
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
-/// Individual DNS answer
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DnsAnswer {
-    /// Record name
-    pub name: String,
-    /// Record type
-    #[serde(rename = "type")]
-    pub rtype: String,
-    /// Record class
-    pub class: String,
-    /// TTL
-    pub ttl: u32,
-    /// Record data
-    pub rdata: String,
-}
-
 pub async fn execute_dns_query(config: &DnsConfig) -> anyhow::Result<DnsResult> {
     // Parse name and type
-    let name = Name::from_str(&config.query_name)?;
+    let query_name = expand_random_label(&config.query_name);
+    let name = Name::from_str(&query_name)?;
     let record_type = RecordType::from_str(&config.query_type).unwrap_or(RecordType::A);
     let dns_class = DNSClass::from_str(&config.query_class).unwrap_or(DNSClass::IN);
 
@@ -129,43 +92,47 @@ pub async fn execute_dns_query(config: &DnsConfig) -> anyhow::Result<DnsResult> 
 
     let rtt = start.elapsed().as_secs_f64() * 1000.0;
 
-    // Extract answers in readable format
-    let answers: Vec<DnsAnswer> = response
-        .answers()
-        .iter()
-        .map(|record| DnsAnswer {
-            name: record.name().to_string(),
-            rtype: record.record_type().to_string(),
-            class: record.dns_class().to_string(),
-            ttl: record.ttl(),
-            rdata: record.data().map(|d| format!("{}", d)).unwrap_or_default(),
-        })
-        .collect();
-
-    // Estimate response size based on record count
-    // Real wire format size would need raw bytes access
+    // Estimate response size (wire format)
     let estimated_size = 12 // DNS header
-        + response.answers().len() * 50  // Average answer size
+        + response.answers().len() * 50
         + response.name_servers().len() * 50
         + response.additionals().len() * 50;
 
     Ok(DnsResult {
         rt: rtt,
-        answer_count: response.answers().len(),
-        authority_count: response.name_servers().len(),
-        additional_count: response.additionals().len(),
-        rcode: response.response_code().low() as u16,
         size: estimated_size,
-        query_type: config.query_type.clone(),
-        query_name: config.query_name.clone(),
-        authoritative: response.authoritative(),
-        truncated: response.truncated(),
-        recursion_desired: response.recursion_desired(),
-        recursion_available: response.recursion_available(),
-        authenticated_data: response.authentic_data(),
-        checking_disabled: response.checking_disabled(),
-        abuf: None, // Would need raw wire bytes for base64 encoding
-        answers,
+        id: response.id(),
+        ancount: response.answers().len(),
+        qdcount: response.queries().len(),
+        nscount: response.name_servers().len(),
+        arcount: response.additionals().len(),
         error: None,
     })
+}
+
+fn expand_random_label(query_name: &str) -> String {
+    if query_name == "." {
+        return query_name.to_string();
+    }
+
+    query_name
+        .split('.')
+        .map(|label| {
+            if label.contains("$r") {
+                label.replace("$r", &random_label())
+            } else {
+                label.to_string()
+            }
+        })
+        .collect::<Vec<String>>()
+        .join(".")
+}
+
+fn random_label() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(8)
+        .map(char::from)
+        .collect::<String>()
+        .to_lowercase()
 }
