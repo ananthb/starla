@@ -116,7 +116,7 @@ pub struct MeasurementResult {
 
 /// Protocol-specific measurement data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "type", content = "data")]
 pub enum MeasurementData {
     /// Structured data (serialized via serde_json::Value)
     Generic(serde_json::Value),

@@ -28,42 +28,39 @@ impl Measurement for Tls {
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
         let results = cert::execute_tls_check(&self.config).await?;
 
-        // Get the source address that would be used for this destination
         let src_addr = get_source_addr_for_dest(self.config.target).ok();
-
-        // TLS has a non-standard envelope — all fields are flat, no nested "result"
-        // C probe format: "id":"...", "fw":..., "mver": "...", "lts":..., "time":...,
-        //   "dst_name":"...", "dst_port":"443", "method":"TLS", "ver":"1.2",
-        //   "dst_addr":"...", "af": 4, "src_addr":"...", "ttc": ..., "rt": ...,
-        //   "server_cipher": "0xc030", "cert":[ "PEM...", "PEM..." ]
         let af = if self.config.target.is_ipv4() { 4 } else { 6 };
         let src_str = src_addr.map(|ip| ip.to_string()).unwrap_or_default();
         let timestamp = starla_common::Timestamp::now().0;
 
-        // Build cert array as PEM strings — C probe sends raw PEM
-        // We don't have raw PEM from rustls, so send cert info as-is for now
+        // Build cert array as PEM strings matching C probe
         let cert_strs: Vec<String> = results
-            .cert
+            .pem_certs
             .iter()
-            .map(|c| format!("\"{}\"", c.subject))
+            .map(|pem| {
+                // Escape newlines in PEM for JSON
+                let escaped = pem.replace('\n', "\\n");
+                format!("\"{}\"", escaped)
+            })
             .collect();
 
         let body = format!(
             "\"id\":\"{}\", \"fw\":{}, \"mver\": \"2.6.4\", \"lts\":0, \"time\":{}, \
-             \"dst_name\":\"{}\", \"dst_port\":\"{}\", \"method\":\"TLS\", \"ver\":\"{}\", \
-             \"dst_addr\":\"{}\", \"af\": {}, \"src_addr\":\"{}\", \"ttc\": {:.6}, \"rt\": {:.6}, \
-             \"server_cipher\":\"{}\", \"cert\":[ {} ]",
+             \"dst_name\":\"{}\", \"dst_port\":\"{}\", \"ttr\":{:.6}, \"method\":\"TLS\", \
+             \"ver\":\"{}\", \"dst_addr\":\"{}\", \"af\": {}, \"src_addr\":\"{}\", \"ttc\":{:.6}, \
+             \"rt\":{:.6}, \"server_cipher\":\"{}\", \"cert\":[ {} ]",
             self.msm_id.0,
             starla_common::FIRMWARE_VERSION,
             timestamp,
             self.config.hostname,
             self.config.port,
+            results.rt / 1000.0, // ttr in seconds
             results.ver,
             self.config.target,
             af,
             src_str,
-            results.tcp_connect_time,
-            results.rt,
+            results.tcp_connect_time / 1000.0, // ttc in seconds
+            results.rt / 1000.0,               // rt in seconds
             results.cipher,
             cert_strs.join(", "),
         );

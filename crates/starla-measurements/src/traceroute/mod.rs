@@ -11,6 +11,7 @@ use starla_common::{
     MeasurementData, MeasurementId, MeasurementResult, MeasurementType, ProbeId, Timestamp,
 };
 use starla_network::get_source_addr_for_dest;
+use std::fmt::Write;
 use std::net::IpAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +59,7 @@ fn format_traceroute_hops(hops: &[icmp::TracerouteHop]) -> String {
                             s.push_str(&format!("\"size\":{}, ", size));
                         }
                         if let Some(rtt) = p.rtt {
-                            s.push_str(&format!("\"rtt\":{:.3}", rtt));
+                            write!(s, "\"rtt\":{:.3}", rtt).unwrap();
                         }
                         s.push_str(" }");
                         s
@@ -84,11 +85,15 @@ pub struct Traceroute {
 #[async_trait]
 impl Measurement for Traceroute {
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
+        let start_time = Timestamp::now().0;
+
         let results = match self.config.protocol {
             TracerouteProtocol::ICMP => icmp::execute_traceroute(&self.config).await?,
             TracerouteProtocol::UDP => udp::execute_traceroute(&self.config).await?,
             TracerouteProtocol::TCP => tcp::execute_traceroute(&self.config).await?,
         };
+
+        let endtime = Timestamp::now().0;
 
         let proto = match self.config.protocol {
             TracerouteProtocol::ICMP => "ICMP",
@@ -96,28 +101,46 @@ impl Measurement for Traceroute {
             TracerouteProtocol::TCP => "TCP",
         };
 
-        // Get the source address that would be used for this destination
         let src_addr = get_source_addr_for_dest(self.config.target).ok();
 
-        // Format the hops array to match C probe output exactly:
-        // [ { "hop":1, "result": [ { "from":"1.2.3.4", "ttl":64, "size":28, "rtt":1.234
-        // }, ... ] }, ... ]
-        let result_str = format_traceroute_hops(&results.result);
+        // Use FullLine to include endtime and paris_id in the envelope
+        let af = if self.config.target.is_ipv4() { 4 } else { 6 };
+        let src_str = src_addr.map(|ip| ip.to_string()).unwrap_or_default();
+        let dst_str = self.config.target.to_string();
+        let hops_str = format_traceroute_hops(&results.result);
+
+        let body = format!(
+            "\"id\":\"{}\", \"fw\":{}, \"mver\": \"2.6.4\", \"lts\":0, \"time\":{}, \
+             \"endtime\":{}, \"dst_name\":\"{}\", \"dst_addr\":\"{}\", \"src_addr\":\"{}\", \
+             \"proto\":\"{}\", \"af\": {}, \"size\":{}, \"paris_id\":{}, \"result\": {}",
+            self.msm_id.0,
+            starla_common::FIRMWARE_VERSION,
+            start_time,
+            endtime,
+            dst_str,
+            dst_str,
+            src_str,
+            proto,
+            af,
+            self.config.size,
+            self.config.paris,
+            hops_str,
+        );
 
         Ok(MeasurementResult {
             fw: starla_common::FIRMWARE_VERSION,
             measurement_type: MeasurementType::Traceroute,
             prb_id: self.probe_id,
             msm_id: self.msm_id,
-            timestamp: Timestamp::now(),
-            af: if self.config.target.is_ipv4() { 4 } else { 6 },
+            timestamp: Timestamp(start_time),
+            af,
             dst_addr: self.config.target,
-            dst_name: None,
+            dst_name: Some(dst_str),
             src_addr,
             proto: Some(proto.to_string()),
             ttl: None,
             size: Some(self.config.size),
-            data: MeasurementData::PreFormatted(result_str),
+            data: MeasurementData::FullLine(body),
         })
     }
 }
