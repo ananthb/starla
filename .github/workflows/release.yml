@@ -23,6 +23,16 @@ jobs:
 
       - uses: sigstore/cosign-installer@v3
 
+      # Wait for Garnix CI to finish — it builds and caches aarch64
+      # packages that we can't build on the x86_64 runner
+      - name: Wait for Garnix
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: "All Garnix checks"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 30
+
       # Build release tarballs (binary + service + config per arch)
       - name: Build x86_64 release
         run: nix build .#packages.x86_64-linux.release -o result-x86_64
