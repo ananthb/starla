@@ -146,7 +146,7 @@ state/config/runtime directories.</p>
 <tr><td><code>storage.maxQueueSizeMB</code></td><td><code>100</code></td><td>Max result queue size</td></tr>
 <tr><td><code>storage.retentionDays</code></td><td><code>30</code></td><td>Result retention period</td></tr>
 <tr><td><code>metrics.enable</code></td><td><code>true</code></td><td>Prometheus metrics export</td></tr>
-<tr><td><code>metrics.listenAddr</code></td><td><code>"127.0.0.1:9090"</code></td><td>Metrics listen address</td></tr>
+<tr><td><code>metrics.listenAddr</code></td><td><code>"127.0.0.1:9695"</code></td><td>Metrics listen address</td></tr>
 <tr><td><code>logging.format</code></td><td><code>"json"</code></td><td>Log format (json/text)</td></tr>
 <tr><td><code>logging.output</code></td><td><code>"stdout"</code></td><td>Log destination (stdout/file/syslog)</td></tr>
 </table>
@@ -155,7 +155,7 @@ state/config/runtime directories.</p>
 <pre><code>services.starla = {
   enable = true;
   logLevel = "debug";
-  metrics.listenAddr = "0.0.0.0:9090";
+  metrics.listenAddr = "0.0.0.0:9695";
   storage.retentionDays = 7;
 };</code></pre>
 
@@ -227,37 +227,7 @@ for all available options. The config file is optional &mdash; all settings have
   <li><code>/etc/starla/config.toml</code> (root) or <code>~/.config/starla/config.toml</code> (user)</li>
 </ol>
 
-<h2>Verifying Downloads</h2>
-
-<p>All release artifacts are signed with
-<a href="https://docs.sigstore.dev/cosign/overview/">cosign</a> keyless signing
-via GitHub Actions OIDC. No GPG keys to manage.</p>
-
-<h3>Verify a binary or package</h3>
-<pre><code># Install cosign: https://docs.sigstore.dev/system_config/installation/
-
-# Download the artifact, its .sig and .pem from the release
-cosign verify-blob \
-  --signature starla-x86_64-linux.sig \
-  --certificate starla-x86_64-linux.pem \
-  --certificate-identity-regexp 'https://github.com/ananthb/starla/' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  starla-x86_64-linux</code></pre>
-
-<h3>Verify a container image</h3>
-<pre><code>cosign verify \
-  --certificate-identity-regexp 'https://github.com/ananthb/starla/' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  ghcr.io/ananthb/starla:latest</code></pre>
-
-<h3>Verify checksums</h3>
-<pre><code>cosign verify-blob \
-  --signature SHA256SUMS.sig \
-  --certificate SHA256SUMS.pem \
-  --certificate-identity-regexp 'https://github.com/ananthb/starla/' \
-  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-  SHA256SUMS
-sha256sum -c SHA256SUMS</code></pre>
+<p>See <a href="verify.html">Verifying Downloads</a> to check artifact signatures.</p>
 
 </div>
 </body>

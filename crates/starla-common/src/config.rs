@@ -175,7 +175,7 @@ fn default_metrics_enabled() -> bool {
     true
 }
 fn default_metrics_listen_addr() -> String {
-    "127.0.0.1:9090".to_string()
+    "127.0.0.1:9695".to_string()
 }
 fn default_log_format() -> String {
     "json".to_string()

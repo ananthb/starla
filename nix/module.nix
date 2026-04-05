@@ -109,7 +109,7 @@ in
 
       listenAddr = lib.mkOption {
         type = lib.types.str;
-        default = "127.0.0.1:9090";
+        default = "127.0.0.1:9695";
         description = "Metrics server listen address.";
       };
     };
