@@ -544,6 +544,8 @@ async fn main() -> Result<()> {
 
     let controller_info = loop {
         // Connect to registration server
+        #[cfg(feature = "metrics-export")]
+        metrics.record_connection_attempt();
         let reg_ssh = match starla_controller::SshConnection::connect_to_servers(
             &servers,
             &key,
@@ -820,6 +822,8 @@ async fn main() -> Result<()> {
                 );
 
                 info!("Controller connection established successfully");
+                #[cfg(feature = "metrics-export")]
+                metrics.set_connected(true);
 
                 // Start the result upload loop once (on first successful connection)
                 if !upload_loop_started {
@@ -864,6 +868,8 @@ async fn main() -> Result<()> {
                             Err(e) => warn!("KEEP task panicked: {}", e),
                             _ => warn!("KEEP session ended"),
                         }
+                        #[cfg(feature = "metrics-export")]
+                        metrics.set_connected(false);
                         // Clear SSH connection so uploads fail fast
                         *ssh_for_upload.lock().await = None;
                         true // Reconnect

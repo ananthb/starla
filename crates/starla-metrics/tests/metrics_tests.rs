@@ -1,6 +1,4 @@
 //! Integration tests for starla-metrics
-//!
-//! These tests verify the metrics implementation.
 
 #[cfg(feature = "export")]
 mod with_export {
@@ -13,14 +11,13 @@ mod with_export {
     fn test_metrics_registry_creation() {
         let registry = MetricsRegistry::new().expect("Failed to create registry");
 
-        // Record some initial metrics to ensure they appear in gather()
         registry.record_measurement_started("ping");
-        registry.update_pending_count(0);
+        registry.update_queue_depth(0);
 
         let metrics = registry.gather();
         let names: Vec<_> = metrics.iter().map(|m| m.get_name()).collect();
-        assert!(names.contains(&"starla_measurements_total"));
-        assert!(names.contains(&"starla_measurements_pending"));
+        assert!(names.contains(&"starla_measurements_started_total"));
+        assert!(names.contains(&"starla_upload_queue_depth"));
     }
 
     #[test]
@@ -30,27 +27,31 @@ mod with_export {
         registry.record_measurement_failed("traceroute", 0.5);
 
         let metrics = registry.gather();
-        let total = metrics
+        let completed = metrics
             .iter()
-            .find(|m| m.get_name() == "starla_measurements_total")
+            .find(|m| m.get_name() == "starla_measurements_completed_total")
             .unwrap();
-        // ping completed and traceroute failed = at least 2 different label
-        // combinations
-        assert!(total.get_metric().len() >= 2);
+        assert!(!completed.get_metric().is_empty());
     }
 
     #[test]
     fn test_gauge_updates() {
         let registry = MetricsRegistry::new().unwrap();
-        registry.update_pending_count(10);
-        registry.update_database_size(1024);
+        registry.update_queue_depth(10);
+        registry.set_connected(true);
 
         let metrics = registry.gather();
-        let pending = metrics
+        let queue = metrics
             .iter()
-            .find(|m| m.get_name() == "starla_measurements_pending")
+            .find(|m| m.get_name() == "starla_upload_queue_depth")
             .unwrap();
-        assert_eq!(pending.get_metric()[0].get_gauge().get_value(), 10.0);
+        assert_eq!(queue.get_metric()[0].get_gauge().get_value(), 10.0);
+
+        let conn = metrics
+            .iter()
+            .find(|m| m.get_name() == "starla_controller_connected")
+            .unwrap();
+        assert_eq!(conn.get_metric()[0].get_gauge().get_value(), 1.0);
     }
 
     #[tokio::test]
@@ -79,10 +80,8 @@ mod without_export {
     fn test_no_op_registry() {
         let registry = MetricsRegistry::new().expect("Failed to create registry");
         registry.record_measurement_completed("ping", 0.1);
-        registry.update_pending_count(5);
         registry.record_upload_success();
-        registry.record_cleanup_run(1, 2, 3);
-        registry.record_cleanup_duration(0.1);
-        // Should not panic and do nothing
+        registry.set_connected(true);
+        registry.record_queue_drop();
     }
 }
