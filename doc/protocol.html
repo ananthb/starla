@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Protocol Reference - Starla</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --accent: #2b6cb0; --code-bg: #f5f5f5; --border: #e2e2e2; --max-w: 740px; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a1a; --fg: #e0e0e0; --muted: #999; --accent: #63b3ed; --code-bg: #2d2d2d; --border: #404040; } }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; }
+  .container { max-width: var(--max-w); margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.3rem; margin-top: 2.5rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.3rem; }
+  h4 { font-size: 1rem; margin-top: 1.2rem; margin-bottom: 0.2rem; }
+  p { margin: 0.5rem 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul, ol { margin: 0.5rem 0 0.5rem 1.5rem; }
+  li { margin: 0.25rem 0; }
+  code { background: var(--code-bg); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9em; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; font-size: 0.82em; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  nav { margin: 0.5rem 0 1.5rem; }
+  table { border-collapse: collapse; margin: 0.75rem 0; width: 100%; font-size: 0.9em; }
+  th, td { text-align: left; padding: 0.3rem 0.6rem; border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; }
+  .warn { background: #fff3cd; border-left: 3px solid #ffc107; padding: 0.5rem 0.75rem; margin: 0.75rem 0; border-radius: 0 4px 4px 0; }
+  @media (prefers-color-scheme: dark) { .warn { background: #3d3200; border-color: #ffc107; } }
+</style>
+</head>
+<body>
+<div class="container">
+<nav><a href="index.html">&larr; Starla</a></nav>
+<h1>Protocol Reference</h1>
+
+<p>This document describes the RIPE Atlas probe-controller communication protocol
+as implemented by starla. It was reverse-engineered from the official C probe
+(<code>busybox</code>) and verified against live RIPE Atlas controllers.</p>
+
+<h2>1. Connection Lifecycle</h2>
+
+<h3>Registration</h3>
+
+<p>On startup, the probe connects via SSH to a registration server
+(e.g., <code>reg03.atlas.ripe.net:443</code>) and executes the <code>INIT</code>
+command with probe identification on stdin:</p>
+
+<pre><code>P_TO_R_INIT
+TOKEN_SPECS fluffy 1000 5120 generic/unknown/x86_64
+REASON_FOR_REGISTRATION NEW</code></pre>
+
+<p>The server responds with a controller assignment:</p>
+
+<pre><code>OK
+CONTROLLER ctr-dub-sw01.atlas.prod.ripe.net 443 ssh-rsa AAAA...
+REREGISTER 3000
+PROBE_ID 1015186</code></pre>
+
+<p>If the probe is not yet registered, the server responds with plain
+<code>OK</code> (no CONTROLLER line). The probe retries with backoff until
+approved at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.</p>
+
+<h3>Controller INIT</h3>
+
+<p>After receiving the controller assignment, the probe connects to the controller
+via SSH and sends another <code>INIT</code> (no stdin data this time):</p>
+
+<pre><code>OK
+SESSION_ID fa0b28e5f26291ad4a41ceecffc73457cbb4180291f53abdcda5667357440a9f
+REMOTE_PORT 2023</code></pre>
+
+<p>The <code>SESSION_ID</code> is used for telnet authentication and result upload
+footer. <code>REMOTE_PORT</code> is the port the controller listens on for the
+reverse tunnel.</p>
+
+<h3>KEEP Session</h3>
+
+<p>The probe opens a long-lived SSH connection and executes <code>KEEP</code>.
+This channel blocks indefinitely and serves as a health monitor &mdash; if the
+channel closes, the connection is lost and the probe reconnects.</p>
+
+<p>On this same SSH connection:</p>
+<ul>
+  <li><strong>Reverse tunnel</strong> (<code>tcpip_forward</code>): controller connects
+    to REMOTE_PORT to send measurement commands via telnet</li>
+  <li><strong>Direct-tcpip channels</strong>: probe opens channels to
+    <code>127.0.0.1:8080</code> on the controller for result uploads</li>
+</ul>
+
+<h2>2. Telnet Command Protocol</h2>
+
+<h3>Authentication</h3>
+
+<p>When the controller connects via the reverse tunnel, the probe sends:</p>
+
+<pre><code>IAC DO ECHO
+IAC DO NAWS
+IAC WILL ECHO
+IAC WILL SGA
+
+Atlas probe, see http://atlas.ripe.net/
+
+Probe 1015186 (hostname) login: </code></pre>
+
+<p>The controller sends <code>C_TO_P_TEST_V1</code> as the login name, then
+the <code>SESSION_ID</code> as the password. On success: <code>OK\r\n\r\n</code>.
+On failure: <code>BAD_PASSWORD\r\n\r\n</code> and disconnect.</p>
+
+<h3>Command Formats</h3>
+
+<h4>CRONLINE (recurring measurements)</h4>
+
+<pre><code>CRONLINE &lt;interval&gt; &lt;offset&gt; &lt;end_time&gt; &lt;spread_type&gt; &lt;spread&gt; &lt;command&gt; [args...]</code></pre>
+
+<table>
+<tr><th>Field</th><th>Type</th><th>Description</th></tr>
+<tr><td>interval</td><td>u64</td><td>Seconds between executions (0 = one-shot)</td></tr>
+<tr><td>offset</td><td>u64</td><td>Initial delay offset (ignored by starla)</td></tr>
+<tr><td>end_time</td><td>i64</td><td>Unix timestamp to stop (0 = never)</td></tr>
+<tr><td>spread_type</td><td>string</td><td>Usually <code>UNIFORM</code></td></tr>
+<tr><td>spread</td><td>u32</td><td>Random spread in seconds</td></tr>
+<tr><td>command</td><td>string</td><td>Measurement tool name</td></tr>
+</table>
+
+<p>Example:</p>
+<pre><code>CRONLINE 240 269 1777902395 UNIFORM 3 evping -4 -c 3 -A "1001" -O /home/atlas/data/new/7 193.0.14.129</code></pre>
+
+<h4>ONEOFF (one-shot measurements)</h4>
+
+<pre><code>ONEOFF &lt;path&gt; &lt;command&gt; [args...]</code></pre>
+
+<p>User-triggered via the RIPE Atlas API. The path is ignored (it's where
+the C probe writes results). Internally converted to CRONLINE with interval=0.</p>
+
+<h4>JSON commands</h4>
+
+<pre><code>{"type":"ping","msm_id":1001,"target":"8.8.8.8","af":4,"packets":3}</code></pre>
+
+<h4>Ignored commands</h4>
+
+<p><code>CRONTAB</code>, <code>httppost</code>, <code>condmv</code>,
+<code>rptaddrs</code>, <code>buddyinfo</code>, <code>conntrack</code>,
+<code>dfrm</code> &mdash; internal Atlas utilities that starla doesn't need.</p>
+
+<h2>3. Measurement Commands</h2>
+
+<h3>Ping (<code>evping</code>)</h3>
+
+<pre><code>evping [-4|-6] [-c count] [-s size] [-A msm_id] [-O output] [-I interval] &lt;target&gt;</code></pre>
+
+<table>
+<tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+<tr><td><code>-4/-6</code></td><td>Address family</td><td>4</td></tr>
+<tr><td><code>-c</code></td><td>Packet count</td><td>3</td></tr>
+<tr><td><code>-s</code></td><td>Packet size (bytes)</td><td>64</td></tr>
+<tr><td><code>-A</code></td><td>Measurement ID</td><td>required</td></tr>
+</table>
+
+<p>Result (PreFormatted array):</p>
+<pre><code>RESULT { "id":"1001", "fw":5120, "mver": "2.6.4", "lts":10,
+  "time":1700000000, "dst_name":"193.0.14.129", "af":4,
+  "dst_addr":"193.0.14.129", "src_addr":"10.0.0.1",
+  "proto":"ICMP", "ttl":56, "size":64,
+  "result": [ { "rtt":10.500000 }, { "rtt":11.200000 }, { "rtt":10.800000 } ] }</code></pre>
+
+<p>Timeouts: <code>{ "x":"*" }</code>. RTT has 6 decimal places. <code>ttl</code> is
+omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
+
+<h3>Traceroute (<code>evtraceroute</code>)</h3>
+
+<pre><code>evtraceroute [-4|-6] [-I|-U|-T] [-f first_hop] [-m max_hops]
+  [-p paris_id] [-S size] [-A msm_id] [-O output] &lt;target&gt;</code></pre>
+
+<table>
+<tr><th>Flag</th><th>Description</th><th>Default</th></tr>
+<tr><td><code>-I/-U/-T</code></td><td>ICMP/UDP/TCP protocol</td><td>UDP</td></tr>
+<tr><td><code>-f</code></td><td>First hop</td><td>1</td></tr>
+<tr><td><code>-m</code></td><td>Max hops</td><td>32</td></tr>
+<tr><td><code>-p</code></td><td>Paris traceroute ID</td><td>0</td></tr>
+<tr><td><code>-S</code></td><td>Packet size</td><td>40</td></tr>
+</table>
+
+<p>Result (FullLine &mdash; custom envelope with <code>endtime</code> and <code>paris_id</code>):</p>
+<pre><code>RESULT { "id":"5001", "fw":5120, "mver": "2.6.4", "lts":0,
+  "time":1700000000, "endtime":1700000030,
+  "dst_name":"192.112.36.4", "dst_addr":"192.112.36.4",
+  "src_addr":"10.0.0.1", "proto":"UDP", "af": 4,
+  "size":40, "paris_id":5,
+  "result": [
+    { "hop":1, "result": [ { "from":"10.0.0.1", "ttl":255, "size":76, "rtt":3.723 } ] },
+    { "hop":2, "result": [ { "x":"*" }, { "x":"*" }, { "x":"*" } ] },
+    { "hop":13, "result": [ { "from":"192.112.36.4", "ttl":54, "rtt":31.981, "size":88 } ] }
+  ] }</code></pre>
+
+<p>RTT has 3 decimal places. 3 probes per hop. Requires <code>CAP_NET_RAW</code>.</p>
+
+<h3>DNS (<code>evtdig</code>)</h3>
+
+<pre><code>evtdig [-4|-6] [-t qtype] [-c qclass] [-T] [-r] [-d] [-e bufsize]
+  [-R] [-h] [-b] [-i] [--soa] [--resolv] [--type N] [--class N]
+  [--query NAME] [-A msm_id] [-O output] [@server] [query]</code></pre>
+
+<table>
+<tr><th>Flag</th><th>Description</th></tr>
+<tr><td><code>-T</code></td><td>Use TCP (default: UDP)</td></tr>
+<tr><td><code>-h</code></td><td>Query <code>hostname.bind CH TXT</code></td></tr>
+<tr><td><code>-b</code></td><td>Query <code>version.bind CH TXT</code></td></tr>
+<tr><td><code>-i</code></td><td>Query <code>id.server CH TXT</code></td></tr>
+<tr><td><code>--soa</code></td><td>Query SOA for <code>.</code></td></tr>
+<tr><td><code>-r/-d/+dnssec</code></td><td>Enable DNSSEC (DO bit)</td></tr>
+<tr><td><code>-R</code></td><td>Disable recursion desired</td></tr>
+<tr><td><code>-e</code></td><td>EDNS buffer size</td></tr>
+<tr><td><code>--type N</code></td><td>Numeric query type (1=A, 28=AAAA, 16=TXT, etc.)</td></tr>
+<tr><td><code>--class N</code></td><td>Numeric class (1=IN, 3=CH)</td></tr>
+<tr><td><code>--query NAME</code></td><td>Query name</td></tr>
+<tr><td><code>@server</code></td><td>Target DNS server IP</td></tr>
+</table>
+
+<h4>Template variables in query names</h4>
+<table>
+<tr><th>Variable</th><th>Expansion</th><th>Purpose</th></tr>
+<tr><td><code>$r</code></td><td>8-char random alphanumeric</td><td>Prevent DNS caching</td></tr>
+<tr><td><code>$p</code></td><td>Probe ID (decimal)</td><td>Per-probe uniqueness</td></tr>
+<tr><td><code>$t</code></td><td>Unix timestamp (decimal)</td><td>Per-query uniqueness</td></tr>
+</table>
+
+<p>Result (PreFormatted object with <code>abuf</code>):</p>
+<pre><code>RESULT { "id":"10310", "fw":5120, "mver": "2.6.4", "lts":51,
+  "time":1775314719, "af":4, "dst_addr":"170.247.170.2",
+  "dst_port":"53", "src_addr":"204.168.188.81", "proto":"UDP",
+  "result": { "rt":29.846,"size":50,
+    "abuf":"qr2AAAABAAEAAAAACGhvc3RuYW1lBGJpbmQAABAAA8AMABAAAwAAAAAABwZiNC1mcmE=",
+    "ID":43709, "ANCOUNT":1, "QDCOUNT":1, "NSCOUNT":0, "ARCOUNT":0,
+    "answers":[ {"TYPE":"TXT", "NAME":"hostname.bind.", "RDATA":[ "b4-fra" ]} ] } }</code></pre>
+
+<p>On timeout: <code>"result": { "error":{"timeout":5000} }</code></p>
+
+<div class="warn"><code>abuf</code> is the base64-encoded raw DNS wire response. This is the
+most important field &mdash; the RIPE Atlas API parses it server-side for detailed
+analysis. Without it, results are accepted but incomplete.</div>
+
+<h3>HTTP (<code>evhttpget</code>)</h3>
+
+<pre><code>evhttpget [-4|-6] [-A msm_id] [-O output] [-M max_body] &lt;url&gt;</code></pre>
+
+<p>Result (PreFormatted array):</p>
+<pre><code>RESULT { "id":"12023", "fw":5120, "mver": "2.6.4", "lts":19,
+  "time":1775317966, "dst_name":"example.com", "af":4,
+  "dst_addr":"93.184.216.34", "proto":"TCP",
+  "result": [ { "method":"GET", "af": 6,
+    "dst_addr":"2600:140f:3::17df:2fba",
+    "src_addr":"10.0.0.1", "rt":106.612889,
+    "res":200, "ver":"1.1", "hsize":296, "bsize":0 } ] }</code></pre>
+
+<h3>TLS (<code>evsslgetcert</code>)</h3>
+
+<pre><code>evsslgetcert [-4|-6] [-p port] [-h hostname] [-A msm_id] [-O output] &lt;target&gt;</code></pre>
+
+<p>Result (FullLine &mdash; custom envelope):</p>
+<pre><code>RESULT { "id":"14002", "fw":5120, "mver": "2.6.4", "lts":0,
+  "time":1775325499, "dst_name":"atlas.ripe.net", "dst_port":"443",
+  "ttr":0.390310, "method":"TLS", "ver":"1.3",
+  "dst_addr":"193.0.11.37", "af": 4, "src_addr":"10.0.0.1",
+  "ttc":0.191244, "rt":0.390310, "server_cipher":"0x1302",
+  "cert":[ "-----BEGIN CERTIFICATE-----\nMIIG...\n-----END CERTIFICATE-----",
+           "-----BEGIN CERTIFICATE-----\nMIIF...\n-----END CERTIFICATE-----" ] }</code></pre>
+
+<p>Times (<code>ttr</code>, <code>ttc</code>, <code>rt</code>) in seconds.
+<code>ver</code> is <code>"1.2"</code> or <code>"1.3"</code> (not <code>"Tls12"</code>).
+<code>server_cipher</code> is hex (<code>"0xc030"</code>).
+Certificates are full PEM with escaped newlines.</p>
+
+<h3>NTP (<code>evntp</code>)</h3>
+
+<pre><code>evntp [-4|-6] [-c count] [-A msm_id] [-O output] &lt;target&gt;</code></pre>
+
+<p>Result (FullLine with 3 samples):</p>
+<pre><code>RESULT { "id":"99998", "fw":5120, "mver": "2.6.4", "lts":12,
+  "time":1775323252, "dst_addr":"213.239.234.28",
+  "src_addr":"204.168.188.81", "proto":"UDP", "af": 4,
+  "li":"no", "version":4, "mode":"server", "stratum":2,
+  "poll":8, "precision":5.96046e-08,
+  "root-delay":0.00956726, "root-dispersion":0.0142212,
+  "ref-id":"7cd8a40e", "ref-ts":3984311600.292619705,
+  "result": [
+    { "origin-ts":3984312052.977718830, "receive-ts":3984312052.989268303,
+      "transmit-ts":3984312052.989336491, "final-ts":3984312053.002320766,
+      "rtt":0.024534, "offset":0.011981 },
+    ...
+  ] }</code></pre>
+
+<table>
+<tr><th>Field</th><th>Format</th></tr>
+<tr><td><code>li</code></td><td><code>"no"</code>, <code>"61"</code>, <code>"59"</code>, <code>"unknown"</code></td></tr>
+<tr><td><code>poll</code></td><td>Raw exponent (NOT 2^n)</td></tr>
+<tr><td><code>precision</code></td><td>Scientific notation (2^n seconds)</td></tr>
+<tr><td><code>ref-id</code></td><td>ASCII for stratum &le; 1, hex for stratum &ge; 2</td></tr>
+<tr><td>Timestamps</td><td>NTP epoch (seconds since 1900-01-01) with 9 decimal places</td></tr>
+</table>
+
+<h2>4. Result Upload Protocol</h2>
+
+<p>Results are uploaded via HTTP POST through SSH direct-tcpip channels to
+<code>127.0.0.1:8080</code> on the controller side.</p>
+
+<pre><code>POST /?PROBE_ID=1015186&amp;SESSION_ID=fa0b28e5... HTTP/1.1
+Host: 127.0.0.1
+Content-Type: application/x-www-form-urlencoded
+User-Agent: httppost for atlas.ripe.net
+Connection: close
+Content-Length: 1234
+
+P_TO_C_REPORT
+RESULT { ... }
+RESULT { ... }
+
+SESSION_ID fa0b28e5...</code></pre>
+
+<p>The controller responds <code>200 OK</code> with body <code>OK\n</code> on success.
+<code>429</code> means rate limiting &mdash; honor the <code>Retry-After</code>
+header. The official <code>httppost</code> uploads once per 60 seconds.</p>
+
+<h2>5. RESULT Line Format Quirks</h2>
+
+<div class="warn">The controller may do rigid string parsing. These quirks
+<strong>must</strong> be matched exactly.</div>
+
+<ul>
+  <li><strong>mver spacing</strong>: <code>"mver": "2.6.4"</code> has a space after
+    the colon. All other fields use <code>"key":value</code> (no space). This matches
+    the C probe's <code>fprintf</code> format string.</li>
+  <li><strong>Field order</strong>: id, fw, mver, lts, time, [bundle], [dst_name], af,
+    [dst_addr], [dst_port], [src_addr], proto, [ttl], [size], [endtime], [paris_id], result</li>
+  <li><strong>Array spacing</strong>: <code>[ { "rtt":10.5 }, { "rtt":11.2 } ]</code>
+    (spaces inside brackets and braces)</li>
+  <li><strong>prb_id</strong>: NOT in the RESULT line &mdash; controller gets it from
+    the URL query parameter</li>
+  <li><strong>fw</strong>: Must be <code>5120</code> (or a real deployed version).
+    Arbitrary values may be rejected.</li>
+  <li><strong>FullLine bypass</strong>: TLS, NTP, and traceroute use the FullLine data
+    variant which provides the complete body between <code>RESULT { </code> and
+    <code> }</code>, bypassing the standard envelope formatter.</li>
+</ul>
+
+<h2>6. Known Issues and Lessons Learned</h2>
+
+<h3>Serialization: tagged vs untagged enums</h3>
+<p>The <code>MeasurementData</code> enum must use <code>#[serde(tag, content)]</code>
+(tagged), not <code>#[serde(untagged)]</code>. With untagged serialization,
+<code>FullLine("body")</code> deserializes back as <code>Generic(String("body"))</code>,
+losing the variant discriminator. This caused TLS/NTP/traceroute results to
+silently produce invalid RESULT lines.</p>
+
+<h3>HTTP af:0</h3>
+<p>The HTTP measurement computed the address family correctly but hardcoded
+<code>af: 0</code> in the result struct. The controller silently drops results
+with <code>af:0</code> while returning <code>OK</code>.</p>
+
+<h3>DNS timeouts must be results, not errors</h3>
+<p>When a DNS query times out (e.g., ISP blocks outbound UDP 53), the official
+probe reports <code>{"error":{"timeout":5000}}</code> as a valid measurement
+result that gets uploaded. Treating timeouts as execution errors causes them to
+be lost.</p>
+
+<h3>Upload rate: 60 seconds, not 10</h3>
+<p>The official <code>httppost</code> runs once per 60 seconds. Uploading more
+frequently triggers 429 rate limiting from the controller. The penalty is
+per-probe (tied to SSH key/probe ID) and persists across reconnections.</p>
+
+<h3>DNS template variables</h3>
+<p>Query names may contain <code>$r</code>, <code>$p</code>, and <code>$t</code>
+templates. Failing to expand <code>$p</code> causes <code>hickory-dns</code> to
+reject the label as malformed (measurement 30001 uses these).</p>
+
+</div>
+</body>
+</html>
