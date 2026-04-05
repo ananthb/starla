@@ -116,10 +116,13 @@ jobs:
             --template "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-ARCH" \
             --target "ghcr.io/ananthb/starla:latest"
 
-      # Sign OCI images
+      # Sign OCI images (cosign uses COSIGN_REGISTRY_* or docker config for auth)
       - name: Sign container images
+        env:
+          COSIGN_YES: "true"
         run: |
-          cosign sign --yes "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-amd64"
-          cosign sign --yes "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-arm64"
-          cosign sign --yes "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
-          cosign sign --yes "ghcr.io/ananthb/starla:latest"
+          cosign login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
+          cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-amd64"
+          cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-arm64"
+          cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
+          cosign sign "ghcr.io/ananthb/starla:latest"
