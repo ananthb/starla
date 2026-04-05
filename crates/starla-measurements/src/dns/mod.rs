@@ -41,57 +41,61 @@ pub struct Dns {
 #[async_trait]
 impl Measurement for Dns {
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
-        let results = resolver::execute_dns_query(&self.config, self.probe_id.0).await?;
-
         let proto = match self.config.protocol {
             DnsProtocol::TCP => "TCP",
             DnsProtocol::UDP => "UDP",
         };
-
         let src_addr = get_source_addr_for_dest(self.config.target).ok();
 
-        // Format DNS result object to match C probe field order:
-        // { "rt":35.265,"size":62, "abuf":"base64...","ID":12345,
-        //   "ANCOUNT":1, "QDCOUNT":1, "NSCOUNT":0, "ARCOUNT":0,
-        //   "answers":[ {"TYPE":"TXT", "NAME":"hostname.bind", "RDATA":["value"]} ] }
-        let mut result_str = String::with_capacity(512);
-        write!(
-            result_str,
-            "{{ \"rt\":{:.3},\"size\":{}, \"abuf\":\"{}\",\"ID\":{}, \"ANCOUNT\":{}, \
-             \"QDCOUNT\":{}, \"NSCOUNT\":{}, \"ARCOUNT\":{}",
-            results.rt,
-            results.size,
-            results.abuf,
-            results.id,
-            results.ancount,
-            results.qdcount,
-            results.nscount,
-            results.arcount,
-        )
-        .unwrap();
-
-        // Add parsed answers if present
-        if let Some(answers) = resolver::decode_answers(&results.abuf) {
-            write!(result_str, ",\"answers\":[ ").unwrap();
-            for (i, ans) in answers.iter().enumerate() {
-                if i > 0 {
-                    write!(result_str, ", ").unwrap();
-                }
-                let rdata_json: Vec<String> =
-                    ans.rdata.iter().map(|s| format!("\"{}\"", s)).collect();
+        // Execute DNS query — handle timeout as a valid result with error field
+        // (matching official C probe behavior)
+        let result_str = match resolver::execute_dns_query(&self.config, self.probe_id.0).await {
+            Ok(results) => {
+                let mut s = String::with_capacity(512);
                 write!(
-                    result_str,
-                    "{{\"TYPE\":\"{}\", \"NAME\":\"{}\", \"RDATA\":[ {} ]}}",
-                    ans.record_type,
-                    ans.name,
-                    rdata_json.join(", ")
+                    s,
+                    "{{ \"rt\":{:.3},\"size\":{}, \"abuf\":\"{}\",\"ID\":{}, \"ANCOUNT\":{}, \
+                     \"QDCOUNT\":{}, \"NSCOUNT\":{}, \"ARCOUNT\":{}",
+                    results.rt,
+                    results.size,
+                    results.abuf,
+                    results.id,
+                    results.ancount,
+                    results.qdcount,
+                    results.nscount,
+                    results.arcount,
                 )
                 .unwrap();
-            }
-            write!(result_str, " ]").unwrap();
-        }
 
-        write!(result_str, " }}").unwrap();
+                if let Some(answers) = resolver::decode_answers(&results.abuf) {
+                    write!(s, ",\"answers\":[ ").unwrap();
+                    for (i, ans) in answers.iter().enumerate() {
+                        if i > 0 {
+                            write!(s, ", ").unwrap();
+                        }
+                        let rdata_json: Vec<String> =
+                            ans.rdata.iter().map(|s| format!("\"{}\"", s)).collect();
+                        write!(
+                            s,
+                            "{{\"TYPE\":\"{}\", \"NAME\":\"{}\", \"RDATA\":[ {} ]}}",
+                            ans.record_type,
+                            ans.name,
+                            rdata_json.join(", ")
+                        )
+                        .unwrap();
+                    }
+                    write!(s, " ]").unwrap();
+                }
+
+                write!(s, " }}").unwrap();
+                s
+            }
+            Err(_) => {
+                // Timeout or network error — report as result with error field
+                // matching official C probe: {"error":{"timeout":5000}}
+                format!("{{ \"error\":{{\"timeout\":{}}} }}", self.config.timeout_ms)
+            }
+        };
 
         Ok(MeasurementResult {
             fw: starla_common::FIRMWARE_VERSION,
