@@ -197,17 +197,24 @@ impl KnownHosts {
             );
             hosts.insert(host_port.clone(), presented);
 
-            // Write back to file
+            // Write back to file atomically (write temp then rename)
             if let Some(parent) = self.path.parent() {
                 let _ = std::fs::create_dir_all(parent);
-            }
-            let mut lines: Vec<String> = Vec::new();
-            lines.push("# Starla known hosts - do not edit manually".to_string());
-            for (hp, k) in hosts.iter() {
-                lines.push(format!("{} {}", hp, k));
-            }
-            if let Err(e) = std::fs::write(&self.path, lines.join("\n") + "\n") {
-                warn!("Failed to save known_hosts file: {}", e);
+                let tmp_path = parent.join(".known_hosts.tmp");
+                let mut lines: Vec<String> = Vec::new();
+                lines.push("# Starla known hosts - do not edit manually".to_string());
+                for (hp, k) in hosts.iter() {
+                    lines.push(format!("{} {}", hp, k));
+                }
+                match std::fs::write(&tmp_path, lines.join("\n") + "\n") {
+                    Ok(()) => {
+                        if let Err(e) = std::fs::rename(&tmp_path, &self.path) {
+                            warn!("Failed to rename known_hosts: {}", e);
+                            let _ = std::fs::remove_file(&tmp_path);
+                        }
+                    }
+                    Err(e) => warn!("Failed to save known_hosts: {}", e),
+                }
             }
 
             Ok(true)

@@ -132,6 +132,12 @@ async fn ntp_exchange(
     let rtt = (t4 - t1) - (t3 - t2);
     let offset = ((t2 - t1) + (t3 - t4)) / 2.0;
 
+    // Validate computed values — malicious servers could send timestamps
+    // that produce NaN or infinity
+    if !rtt.is_finite() || !offset.is_finite() {
+        anyhow::bail!("NTP response produced invalid RTT/offset");
+    }
+
     Ok((
         NtpSample {
             origin_ts: t1,

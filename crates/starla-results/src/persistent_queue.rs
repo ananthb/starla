@@ -167,12 +167,12 @@ impl PersistentResultQueue {
         Ok(queue)
     }
 
-    /// Build key for queue item
-    fn queue_key(queued_at: i64, id: u64) -> Vec<u8> {
-        let mut key = Vec::with_capacity(1 + 8 + 8);
-        key.push(b'q');
-        key.extend_from_slice(&encode_i64(queued_at));
-        key.extend_from_slice(&encode_u64(id));
+    /// Build key for queue item (stack-allocated, no heap)
+    fn queue_key(queued_at: i64, id: u64) -> [u8; 17] {
+        let mut key = [0u8; 17];
+        key[0] = b'q';
+        key[1..9].copy_from_slice(&encode_i64(queued_at));
+        key[9..17].copy_from_slice(&encode_u64(id));
         key
     }
 

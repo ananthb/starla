@@ -280,6 +280,10 @@ pub async fn handle_connection(
     let mut state = ConnectionState::AwaitingLoginName;
     let mut line_buffer = String::new();
 
+    // Maximum line buffer size to prevent unbounded memory growth
+    // from a malicious or malfunctioning controller
+    const MAX_LINE_LEN: usize = 256 * 1024; // 256KB
+
     loop {
         use tokio::io::AsyncReadExt;
         match reader.read(&mut raw_buf).await {
@@ -292,6 +296,13 @@ pub async fn handle_connection(
                 }
 
                 // Accumulate into line buffer
+                if line_buffer.len() + text.len() > MAX_LINE_LEN {
+                    error!(
+                        "Telnet line buffer exceeded {}KB, disconnecting",
+                        MAX_LINE_LEN / 1024
+                    );
+                    anyhow::bail!("Line buffer overflow");
+                }
                 line_buffer.push_str(&text);
 
                 // Process complete lines
@@ -507,7 +518,13 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
 
     // Parse CRONLINE header fields
     // tokens[0] = "CRONLINE"
-    let interval: u64 = tokens[1].parse().unwrap_or(0);
+    let interval: u64 = match tokens[1].parse() {
+        Ok(v) => v,
+        Err(_) => {
+            warn!("CRONLINE invalid interval '{}': {}", tokens[1], cmd);
+            return TelnetCommand::Unknown(cmd.to_string());
+        }
+    };
     let _offset: u64 = tokens[2].parse().unwrap_or(0);
     let end_time: i64 = tokens[3].parse().unwrap_or(0);
     let _spread_type = &tokens[4]; // UNIFORM, etc.

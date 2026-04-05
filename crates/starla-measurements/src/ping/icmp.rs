@@ -104,15 +104,15 @@ pub async fn execute_ping(config: &PingConfig) -> anyhow::Result<PingResults> {
     // We send to the target address on port 0
     let dest = SocketAddr::new(config.target, 0);
 
+    // Pre-allocate send buffer outside the loop
+    let total_size = if config.size < 8 { 64 } else { config.size };
+    let mut buffer = vec![0u8; total_size as usize];
+    let payload_len = total_size as usize - 8; // Subtract ICMP header size
+    let payload = vec![0u8; payload_len];
+
     for seq in 0..config.count {
         let sequence = seq as u16;
-        // Default size if too small
-        let total_size = if config.size < 8 { 64 } else { config.size };
-        let mut buffer = vec![0u8; total_size as usize];
-
-        // Fill payload
-        let payload_len = total_size as usize - 8; // Subtract ICMP header size
-        let payload = vec![0u8; payload_len];
+        buffer.fill(0);
 
         let packet_size = if config.target.is_ipv4() {
             build_icmpv4_echo_request(&mut buffer, identifier, sequence, &payload)?
