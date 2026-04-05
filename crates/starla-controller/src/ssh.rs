@@ -502,27 +502,37 @@ impl SshConnection {
                 // Registration server format: OK\nCONTROLLER <host> <port> ssh-rsa
                 // <key>\nREREGISTER <secs> Controller format: OK\nREMOTE_PORT
                 // <port>\nSESSION_ID <id>
+                // Parse all registration response fields before returning
+                let mut controller_host: Option<String> = None;
+                let mut controller_port: Option<u16> = None;
+                let mut probe_id: u32 = 0;
+
                 for line in lines.iter().skip(1) {
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     if parts.is_empty() {
                         continue;
                     }
 
-                    // Registration server response - controller assignment
                     if parts[0] == "CONTROLLER" && parts.len() >= 4 {
-                        let host = parts[1].to_string();
-                        let port: u16 = parts[2]
-                            .parse()
-                            .map_err(|_| anyhow::anyhow!("Invalid port"))?;
-
-                        debug!("Got controller: {}:{}", host, port);
-
-                        return Ok(InitResponse::Controller(ControllerInfo {
-                            host,
-                            port,
-                            probe_id: 0,
-                        }));
+                        controller_host = Some(parts[1].to_string());
+                        controller_port = parts[2].parse().ok();
                     }
+
+                    if parts[0] == "PROBE_ID" && parts.len() >= 2 {
+                        if let Ok(id) = parts[1].parse() {
+                            probe_id = id;
+                            debug!("Got probe ID: {}", id);
+                        }
+                    }
+                }
+
+                if let (Some(host), Some(port)) = (controller_host, controller_port) {
+                    debug!("Got controller: {}:{}", host, port);
+                    return Ok(InitResponse::Controller(ControllerInfo {
+                        host,
+                        port,
+                        probe_id,
+                    }));
                 }
 
                 // Parse controller response with REMOTE_PORT and SESSION_ID

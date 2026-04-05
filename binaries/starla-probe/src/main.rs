@@ -101,10 +101,6 @@ struct Args {
     /// 3. Root: /run/starla/, non-root: /tmp/starla-<uid>/
     #[arg(short, long)]
     runtime_dir: Option<PathBuf>,
-
-    /// Skip controller connection (for testing)
-    #[arg(long)]
-    standalone: bool,
 }
 
 #[tokio::main]
@@ -181,7 +177,7 @@ async fn main() -> Result<()> {
     debug!("Runtime directory: {}", runtime_dir.display());
 
     // Read probe ID from state directory (written after registration)
-    let probe_id = match starla_common::read_probe_id() {
+    let mut probe_id = match starla_common::read_probe_id() {
         Some(id) => starla_common::ProbeId(id),
         None => starla_common::ProbeId(0),
     };
@@ -525,68 +521,80 @@ async fn main() -> Result<()> {
 
     debug!("Probe initialization complete");
 
-    // Controller connection (if not standalone)
-    if !args.standalone {
-        debug!("Connecting to controller...");
+    // Controller connection
+    debug!("Connecting to controller...");
 
-        // Load or generate SSH key
-        let key_path = starla_common::probe_key_path();
-        let key = if key_path.exists() {
-            match starla_controller::load_key(&key_path).await {
-                Ok(k) => {
-                    debug!("Loaded SSH key from {}", key_path.display());
-                    k
+    // Load or generate SSH key
+    let key_path = starla_common::probe_key_path();
+    let key = if key_path.exists() {
+        match starla_controller::load_key(&key_path).await {
+            Ok(k) => {
+                debug!("Loaded SSH key from {}", key_path.display());
+                k
+            }
+            Err(e) => {
+                warn!("Failed to load SSH key: {}. Generating new key...", e);
+                let new_key = starla_controller::generate_key()?;
+                if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
+                    warn!("Failed to save SSH key: {}", e);
                 }
-                Err(e) => {
-                    warn!("Failed to load SSH key: {}. Generating new key...", e);
-                    let new_key = starla_controller::generate_key()?;
-                    if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
-                        warn!("Failed to save SSH key: {}", e);
-                    }
-                    new_key
-                }
-            }
-        } else {
-            debug!("No SSH key found, generating new key...");
-            let new_key = starla_controller::generate_key()?;
-            if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
-                warn!("Failed to save SSH key: {}", e);
-            }
-            if let Ok(fp) = starla_controller::key_fingerprint(&new_key) {
-                info!("Generated new probe key: {}", fp);
-            }
-            info!("Register your probe at: https://atlas.ripe.net/apply/swprobe/");
-            new_key
-        };
-
-        // Log probe identity when both probe ID and key are available
-        if probe_id.0 != 0 {
-            if let Ok(fp) = starla_controller::key_fingerprint(&key) {
-                info!("Probe {} ({})", probe_id.0, fp);
+                new_key
             }
         }
+    } else {
+        debug!("No SSH key found, generating new key...");
+        let new_key = starla_controller::generate_key()?;
+        if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
+            warn!("Failed to save SSH key: {}", e);
+        }
+        if let Ok(fp) = starla_controller::key_fingerprint(&new_key) {
+            info!("Generated new probe key: {}", fp);
+        }
+        // Print the public key so users can register it
+        let pubkey_path = starla_common::probe_pubkey_path();
+        match std::fs::read_to_string(&pubkey_path) {
+            Ok(contents) => info!("Public key:\n{}", contents.trim()),
+            Err(_) => info!("Public key file: {}", pubkey_path.display()),
+        }
+        info!("Register your probe at: https://atlas.ripe.net/apply/swprobe/");
+        new_key
+    };
 
-        // Load known SSH host keys for server verification
-        let known_hosts_path = starla_common::known_hosts_path();
-        let known_hosts = KnownHosts::load(&known_hosts_path);
+    // Log probe identity when both probe ID and key are available
+    if probe_id.0 != 0 {
+        if let Ok(fp) = starla_controller::key_fingerprint(&key) {
+            info!("Probe {} ({})", probe_id.0, fp);
+        }
+    }
 
-        // Try to connect to registration servers
-        let ssh_config = SshConfig {
-            connect_timeout: Duration::from_secs(config.controller.ssh_timeout),
-            keepalive_interval: Duration::from_secs(config.controller.keepalive_interval),
-            ..SshConfig::default()
-        };
-        let servers: Vec<&str> = config
-            .controller
-            .registration_servers
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
+    // Load known SSH host keys for server verification
+    let known_hosts_path = starla_common::known_hosts_path();
+    let known_hosts = KnownHosts::load(&known_hosts_path);
 
-        // Create probe info for registration
-        let probe_info = ProbeInitInfo::new(starla_common::FIRMWARE_VERSION);
+    // Try to connect to registration servers
+    let ssh_config = SshConfig {
+        connect_timeout: Duration::from_secs(config.controller.ssh_timeout),
+        keepalive_interval: Duration::from_secs(config.controller.keepalive_interval),
+        ..SshConfig::default()
+    };
+    let servers: Vec<&str> = config
+        .controller
+        .registration_servers
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
 
-        match starla_controller::SshConnection::connect_to_servers(
+    // Create probe info for registration
+    let probe_info = ProbeInitInfo::new(starla_common::FIRMWARE_VERSION);
+
+    // Registration loop — retries indefinitely with backoff
+    let mut reg_delay = Duration::from_secs(5);
+    let max_reg_delay = Duration::from_secs(300);
+    let mut printed_key = false;
+
+    let controller_info = loop {
+        // Connect to registration server
+        let reg_ssh = match starla_controller::SshConnection::connect_to_servers(
             &servers,
             &key,
             ssh_config.clone(),
@@ -594,429 +602,366 @@ async fn main() -> Result<()> {
         )
         .await
         {
-            Ok(mut reg_ssh) => {
-                debug!("Connected to registration server");
-
-                // Step 1: Get controller assignment
-                // Either received immediately or after waiting for registration approval
-                let controller_info = match reg_ssh.init(Some(&probe_info)).await {
-                    Ok(InitResponse::Controller(info)) => {
-                        info!("Got controller assignment: {}:{}", info.host, info.port);
-                        info
+            Ok(ssh) => {
+                reg_delay = Duration::from_secs(5);
+                ssh
+            }
+            Err(e) => {
+                debug!("Failed to connect to registration server: {}", e);
+                if !printed_key {
+                    let pubkey_path = starla_common::probe_pubkey_path();
+                    if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
+                        info!("Public key:\n{}", contents.trim());
                     }
-                    Ok(InitResponse::Ok) | Ok(InitResponse::Wait { .. }) => {
-                        // Probe is not yet fully registered - retry until approved
-                        info!("Probe not yet fully registered.");
-                        info!("Register at: https://atlas.ripe.net/apply/swprobe/");
-                        info!(
-                            "Public key: {}",
-                            starla_common::probe_pubkey_path().display()
-                        );
-                        info!(
-                            "After registration, save your probe ID to: {}",
-                            starla_common::probe_id_path().display()
-                        );
+                    info!("Retrying registration until probe is connected...");
+                    printed_key = true;
+                }
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {
+                        info!("Received Ctrl+C");
+                        scheduler_cancel.cancel();
+                        metrics_cancel_token.cancel();
+                        result_cancel_token.cancel();
+                        return Ok(());
+                    }
+                    _ = tokio::time::sleep(reg_delay) => {
+                        reg_delay = std::cmp::min(reg_delay * 2, max_reg_delay);
+                        continue;
+                    }
+                }
+            }
+        };
 
-                        let retry_interval = Duration::from_secs(60);
-                        loop {
-                            tokio::select! {
-                                _ = tokio::signal::ctrl_c() => {
-                                    info!("Received Ctrl+C");
-                                    metrics_cancel_token.cancel();
-                                    result_cancel_token.cancel();
+        // Send INIT
+        match reg_ssh.init(Some(&probe_info)).await {
+            Ok(InitResponse::Controller(info)) => {
+                info!("Got controller assignment: {}:{}", info.host, info.port);
+
+                // Save probe ID from registration if we got one
+                if info.probe_id != 0 && probe_id.0 == 0 {
+                    info!("Received probe ID: {}", info.probe_id);
+                    if let Err(e) = starla_common::write_probe_id(info.probe_id) {
+                        warn!("Failed to save probe ID: {}", e);
+                    }
+                    probe_id = starla_common::ProbeId(info.probe_id);
+                }
+
+                break info;
+            }
+            Ok(InitResponse::Ok) | Ok(InitResponse::Wait { .. }) => {
+                // Not yet registered — print key and keep retrying
+                if !printed_key {
+                    let pubkey_path = starla_common::probe_pubkey_path();
+                    if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
+                        info!("Public key:\n{}", contents.trim());
+                    }
+                    info!("Register at: https://atlas.ripe.net/apply/swprobe/");
+                    info!("Retrying registration until probe is approved...");
+                    printed_key = true;
+                }
+                debug!("Waiting for registration approval...");
+            }
+            Ok(InitResponse::ControllerReady { .. }) => {
+                debug!("Unexpected ControllerReady from registration server");
+            }
+            Err(e) => {
+                debug!("Registration INIT failed: {}", e);
+            }
+        }
+
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                info!("Received Ctrl+C");
+                scheduler_cancel.cancel();
+                metrics_cancel_token.cancel();
+                result_cancel_token.cancel();
+                return Ok(());
+            }
+            _ = tokio::time::sleep(reg_delay) => {
+                reg_delay = std::cmp::min(reg_delay * 2, max_reg_delay);
+            }
+        }
+    };
+
+    // Step 2: Connect to the assigned controller
+    let controller_addr = format!("{}:{}", controller_info.host, controller_info.port);
+    debug!("Connecting to controller at {}", controller_addr);
+
+    match starla_controller::SshConnection::connect(
+        &controller_info.host,
+        controller_info.port,
+        &key,
+        ssh_config.clone(),
+        known_hosts.clone(),
+        None,
+    )
+    .await
+    {
+        Ok(ctrl_ssh) => {
+            info!("Connected to controller");
+
+            // Step 3: Controller INIT - get REMOTE_PORT (may need to retry on
+            // WAIT/OK)
+            let (remote_port, session_id) = loop {
+                match ctrl_ssh.init(None).await {
+                    Ok(InitResponse::ControllerReady {
+                        remote_port,
+                        session_id,
+                    }) => {
+                        info!(
+                            "Controller ready, remote port: {}, session_id: {}",
+                            remote_port, session_id
+                        );
+                        break (remote_port, session_id);
+                    }
+                    Ok(InitResponse::Wait { timeout_secs }) => {
+                        debug!(
+                            "Controller requested wait, retrying in {} seconds",
+                            timeout_secs
+                        );
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => {
+                                info!("Received Ctrl+C during wait");
+                                metrics_cancel_token.cancel();
+                                result_cancel_token.cancel();
+                                return Ok(());
+                            }
+                            _ = tokio::time::sleep(Duration::from_secs(timeout_secs as u64)) => {
+                                // Check if connection is still alive before retrying
+                                if !ctrl_ssh.is_connected().await {
+                                    error!("Controller connection lost during wait");
+                                    error!("Please restart the probe to reconnect");
                                     return Ok(());
                                 }
-                                _ = tokio::time::sleep(retry_interval) => {
-                                    debug!("Retrying INIT...");
-                                    if !reg_ssh.is_connected().await {
-                                        warn!("Registration SSH session closed, reconnecting...");
-                                        match starla_controller::SshConnection::connect_to_servers(
-                                            &servers,
-                                            &key,
-                                            ssh_config.clone(),
-                                            known_hosts.clone(),
-                                        )
-                                        .await
-                                        {
-                                            Ok(new_reg) => {
-                                                debug!("Reconnected to registration server");
-                                                reg_ssh = new_reg;
-                                            }
-                                            Err(e) => {
-                                                warn!("Failed to reconnect to registration server: {}", e);
-                                                continue;
-                                            }
-                                        }
-                                    }
-
-                                    match reg_ssh.init(Some(&probe_info)).await {
-                                        Ok(InitResponse::Controller(info)) => {
-                                            info!(
-                                                "Got controller: {}:{}",
-                                                info.host, info.port
-                                            );
-                                            break info;
-                                        }
-                                        Ok(InitResponse::Ok)
-                                        | Ok(InitResponse::Wait { .. })
-                                        | Ok(InitResponse::ControllerReady { .. }) => {
-                                            debug!("Still waiting for registration...");
-                                        }
-                                        Err(e) => {
-                                            warn!("INIT retry failed: {}", e);
-                                        }
-                                    }
-                                }
+                                debug!("Retrying controller INIT...");
+                                continue;
                             }
                         }
                     }
-                    Ok(InitResponse::ControllerReady { .. }) => {
-                        error!("Unexpected ControllerReady from registration server");
-                        scheduler_cancel.cancel();
-                        metrics_cancel_token.cancel();
-                        result_cancel_token.cancel();
+                    Ok(InitResponse::Ok) => {
+                        // Controller said OK but no REMOTE_PORT - retry after
+                        // delay
+                        debug!("Controller said OK but no REMOTE_PORT, retrying in 30 seconds");
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => {
+                                info!("Received Ctrl+C during wait");
+                                metrics_cancel_token.cancel();
+                                result_cancel_token.cancel();
+                                return Ok(());
+                            }
+                            _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                                // Check if connection is still alive before retrying
+                                if !ctrl_ssh.is_connected().await {
+                                    error!("Controller connection lost during wait");
+                                    error!("Please restart the probe to reconnect");
+                                    return Ok(());
+                                }
+                                debug!("Retrying controller INIT...");
+                                continue;
+                            }
+                        }
+                    }
+                    Ok(InitResponse::Controller(_)) => {
+                        // This shouldn't happen from a controller
+                        error!("Got CONTROLLER response from controller (expected REMOTE_PORT)");
                         return Ok(());
                     }
                     Err(e) => {
-                        error!("Registration failed: {}", e);
-                        scheduler_cancel.cancel();
-                        metrics_cancel_token.cancel();
-                        result_cancel_token.cancel();
+                        // Connection may have dropped during the wait period
+                        // Exit so the probe can be restarted for a fresh
+                        // connection
+                        error!(
+                            "Controller INIT failed: {} (connection may have timed out during \
+                             wait)",
+                            e
+                        );
+                        error!("Please restart the probe to reconnect");
                         return Ok(());
                     }
-                };
+                }
+            };
 
-                // Step 2: Connect to the assigned controller
-                let controller_addr = format!("{}:{}", controller_info.host, controller_info.port);
-                debug!("Connecting to controller at {}", controller_addr);
+            // INIT connection served its purpose, drop it
+            drop(ctrl_ssh);
 
-                match starla_controller::SshConnection::connect(
+            // Session ID is set on TelnetState before each KEEP connection
+
+            // Get probe ID - should have been read from state dir at startup
+            // If not set (0), the probe hasn't been registered yet
+            // Re-read probe ID in case it was saved during registration
+            if probe_id.0 == 0 {
+                if let Some(id) = starla_common::read_probe_id() {
+                    probe_id = starla_common::ProbeId(id);
+                }
+            }
+            let actual_probe_id = probe_id.0;
+            if actual_probe_id == 0 {
+                warn!("Probe ID is 0 (not yet registered). Results may not upload correctly.");
+                warn!("Register your probe at https://atlas.ripe.net/apply/swprobe/");
+            }
+
+            // Set result upload endpoint path (query params for HTTP POST)
+            let endpoint_path = format!("/?PROBE_ID={}&SESSION_ID={}", actual_probe_id, session_id);
+            debug!("Result upload endpoint path: {}", endpoint_path);
+            result_handler
+                .set_endpoint_path(endpoint_path)
+                .await
+                .expect("endpoint path is always well-formed");
+
+            // Set session ID for upload body footer (per httppost --post-footer
+            // behavior)
+            result_handler.set_session_id(session_id.clone()).await;
+
+            // Step 4: Connection loop with automatic reconnection
+            let mut reconnect_delay = Duration::from_secs(5);
+            let max_reconnect_delay = Duration::from_secs(300);
+            let mut connection_attempt = 0u32;
+            let mut upload_loop_started = false;
+
+            'connection_loop: loop {
+                connection_attempt += 1;
+
+                // Create a NEW connection for KEEP with reverse tunnel
+                debug!(
+                    "Creating connection for KEEP session (attempt {})",
+                    connection_attempt
+                );
+                // Update telnet state with current probe ID and session ID
+                let mut keep_telnet = telnet_state.clone();
+                keep_telnet.probe_id = actual_probe_id;
+                *keep_telnet.session_id.write().await = Some(session_id.clone());
+
+                let keep_ssh = match starla_controller::SshConnection::connect(
                     &controller_info.host,
                     controller_info.port,
                     &key,
                     ssh_config.clone(),
                     known_hosts.clone(),
-                    None,
+                    Some(keep_telnet),
                 )
                 .await
                 {
-                    Ok(ctrl_ssh) => {
-                        info!("Connected to controller");
-
-                        // Step 3: Controller INIT - get REMOTE_PORT (may need to retry on
-                        // WAIT/OK)
-                        let (remote_port, session_id) = loop {
-                            match ctrl_ssh.init(None).await {
-                                Ok(InitResponse::ControllerReady {
-                                    remote_port,
-                                    session_id,
-                                }) => {
-                                    info!(
-                                        "Controller ready, remote port: {}, session_id: {}",
-                                        remote_port, session_id
-                                    );
-                                    break (remote_port, session_id);
-                                }
-                                Ok(InitResponse::Wait { timeout_secs }) => {
-                                    debug!(
-                                        "Controller requested wait, retrying in {} seconds",
-                                        timeout_secs
-                                    );
-                                    tokio::select! {
-                                        _ = tokio::signal::ctrl_c() => {
-                                            info!("Received Ctrl+C during wait");
-                                            metrics_cancel_token.cancel();
-                                            result_cancel_token.cancel();
-                                            return Ok(());
-                                        }
-                                        _ = tokio::time::sleep(Duration::from_secs(timeout_secs as u64)) => {
-                                            // Check if connection is still alive before retrying
-                                            if !ctrl_ssh.is_connected().await {
-                                                error!("Controller connection lost during wait");
-                                                error!("Please restart the probe to reconnect");
-                                                return Ok(());
-                                            }
-                                            debug!("Retrying controller INIT...");
-                                            continue;
-                                        }
-                                    }
-                                }
-                                Ok(InitResponse::Ok) => {
-                                    // Controller said OK but no REMOTE_PORT - retry after
-                                    // delay
-                                    debug!(
-                                        "Controller said OK but no REMOTE_PORT, retrying in 30 \
-                                         seconds"
-                                    );
-                                    tokio::select! {
-                                        _ = tokio::signal::ctrl_c() => {
-                                            info!("Received Ctrl+C during wait");
-                                            metrics_cancel_token.cancel();
-                                            result_cancel_token.cancel();
-                                            return Ok(());
-                                        }
-                                        _ = tokio::time::sleep(Duration::from_secs(30)) => {
-                                            // Check if connection is still alive before retrying
-                                            if !ctrl_ssh.is_connected().await {
-                                                error!("Controller connection lost during wait");
-                                                error!("Please restart the probe to reconnect");
-                                                return Ok(());
-                                            }
-                                            debug!("Retrying controller INIT...");
-                                            continue;
-                                        }
-                                    }
-                                }
-                                Ok(InitResponse::Controller(_)) => {
-                                    // This shouldn't happen from a controller
-                                    error!(
-                                        "Got CONTROLLER response from controller (expected \
-                                         REMOTE_PORT)"
-                                    );
-                                    return Ok(());
-                                }
-                                Err(e) => {
-                                    // Connection may have dropped during the wait period
-                                    // Exit so the probe can be restarted for a fresh
-                                    // connection
-                                    error!(
-                                        "Controller INIT failed: {} (connection may have timed \
-                                         out during wait)",
-                                        e
-                                    );
-                                    error!("Please restart the probe to reconnect");
-                                    return Ok(());
-                                }
-                            }
-                        };
-
-                        // INIT connection served its purpose, drop it
-                        drop(ctrl_ssh);
-
-                        // Session ID is set on TelnetState before each KEEP connection
-
-                        // Get probe ID - should have been read from state dir at startup
-                        // If not set (0), the probe hasn't been registered yet
-                        let actual_probe_id = probe_id.0;
-                        if actual_probe_id == 0 {
-                            warn!(
-                                "Probe ID is 0 (not yet registered). Results may not upload \
-                                 correctly."
-                            );
-                            warn!("Register your probe at https://atlas.ripe.net/apply/swprobe/");
-                            warn!(
-                                "After registration, save your probe ID to: {}",
-                                starla_common::probe_id_path().display()
-                            );
-                        }
-
-                        // Set result upload endpoint path (query params for HTTP POST)
-                        let endpoint_path =
-                            format!("/?PROBE_ID={}&SESSION_ID={}", actual_probe_id, session_id);
-                        debug!("Result upload endpoint path: {}", endpoint_path);
-                        result_handler
-                            .set_endpoint_path(endpoint_path)
-                            .await
-                            .expect("endpoint path is always well-formed");
-
-                        // Set session ID for upload body footer (per httppost --post-footer
-                        // behavior)
-                        result_handler.set_session_id(session_id.clone()).await;
-
-                        // Step 4: Connection loop with automatic reconnection
-                        let mut reconnect_delay = Duration::from_secs(5);
-                        let max_reconnect_delay = Duration::from_secs(300);
-                        let mut connection_attempt = 0u32;
-                        let mut upload_loop_started = false;
-
-                        'connection_loop: loop {
-                            connection_attempt += 1;
-
-                            // Create a NEW connection for KEEP with reverse tunnel
-                            debug!(
-                                "Creating connection for KEEP session (attempt {})",
-                                connection_attempt
-                            );
-                            // Update telnet state with current probe ID and session ID
-                            let mut keep_telnet = telnet_state.clone();
-                            keep_telnet.probe_id = actual_probe_id;
-                            *keep_telnet.session_id.write().await = Some(session_id.clone());
-
-                            let keep_ssh = match starla_controller::SshConnection::connect(
-                                &controller_info.host,
-                                controller_info.port,
-                                &key,
-                                ssh_config.clone(),
-                                known_hosts.clone(),
-                                Some(keep_telnet),
-                            )
-                            .await
-                            {
-                                Ok(ssh) => {
-                                    // Reset delay on successful connection
-                                    reconnect_delay = Duration::from_secs(5);
-                                    ssh
-                                }
-                                Err(e) => {
-                                    error!("Failed to connect for KEEP: {}", e);
-                                    warn!("Retrying connection in {:?}...", reconnect_delay);
-                                    tokio::select! {
-                                        _ = tokio::signal::ctrl_c() => {
-                                            info!("Received Ctrl+C during reconnect wait");
-                                            break 'connection_loop;
-                                        }
-                                        _ = tokio::time::sleep(reconnect_delay) => {
-                                            reconnect_delay = std::cmp::min(
-                                                reconnect_delay * 2,
-                                                max_reconnect_delay
-                                            );
-                                            continue 'connection_loop;
-                                        }
-                                    }
-                                }
-                            };
-
-                            // Setup reverse tunnel: controller connects to remote_port,
-                            // SSH handler routes directly to telnet command parser
-                            if let Err(e) = keep_ssh.request_reverse_tunnel(remote_port).await {
-                                error!("Failed to setup reverse tunnel: {}", e);
-                                warn!("Retrying connection in {:?}...", reconnect_delay);
-                                tokio::time::sleep(reconnect_delay).await;
-                                reconnect_delay =
-                                    std::cmp::min(reconnect_delay * 2, max_reconnect_delay);
-                                continue 'connection_loop;
-                            }
-                            debug!("Reverse tunnel established: remote port {}", remote_port);
-
-                            // Share the SSH connection for result uploads (direct-tcpip)
-                            // and KEEP session monitoring
-                            let keep_ssh = Arc::new(keep_ssh);
-                            *ssh_for_upload.lock().await = Some(
-                                // SAFETY: We need the inner SshConnection for both the
-                                // upload transport and run_keep_session. Clone the Arc.
-                                keep_ssh.clone(),
-                            );
-
-                            info!("Controller connection established successfully");
-
-                            // Start the result upload loop once (on first successful connection)
-                            if !upload_loop_started {
-                                upload_loop_started = true;
-                                let result_handler_loop = result_handler.clone();
-                                let result_cancel_clone = result_cancel_token.clone();
-                                tokio::spawn(async move {
-                                    if let Err(e) =
-                                        result_handler_loop.run(result_cancel_clone).await
-                                    {
-                                        error!("Result handler failed: {}", e);
-                                    }
-                                });
-                                debug!("Result upload loop started");
-                            }
-
-                            // Run KEEP session — blocks until connection drops.
-                            let keep_ssh_for_keep = {
-                                let guard = ssh_for_upload.lock().await;
-                                match guard.as_ref() {
-                                    Some(ssh) => ssh.clone(),
-                                    None => {
-                                        error!("SSH connection not set before KEEP session");
-                                        continue 'connection_loop;
-                                    }
-                                }
-                            };
-                            let keep_task =
-                                tokio::spawn(
-                                    async move { keep_ssh_for_keep.run_keep_session().await },
-                                );
-
-                            // Wait for shutdown or connection loss
-                            let should_reconnect = tokio::select! {
-                                _ = tokio::signal::ctrl_c() => {
-                                    info!("Received Ctrl+C");
-                                    false
-                                }
-                                _ = &mut scheduler_task => {
-                                    error!("Scheduler task ended unexpectedly");
-                                    false
-                                }
-                                result = keep_task => {
-                                    match result {
-                                        Ok(Err(e)) => warn!("KEEP session lost: {}", e),
-                                        Err(e) => warn!("KEEP task panicked: {}", e),
-                                        _ => warn!("KEEP session ended"),
-                                    }
-                                    // Clear SSH connection so uploads fail fast
-                                    *ssh_for_upload.lock().await = None;
-                                    true // Reconnect
-                                }
-                            };
-
-                            if !should_reconnect {
-                                break 'connection_loop;
-                            }
-
-                            // Wait before reconnecting
-                            debug!("Reconnecting in {:?}...", reconnect_delay);
-                            tokio::select! {
-                                _ = tokio::signal::ctrl_c() => {
-                                    info!("Received Ctrl+C during reconnect wait");
-                                    break 'connection_loop;
-                                }
-                                _ = tokio::time::sleep(reconnect_delay) => {
-                                    // Continue to reconnect
-                                }
-                            }
-                        }
-
-                        // Cancel all tasks gracefully
-                        info!("Initiating graceful shutdown...");
-                        scheduler_cancel.cancel();
-                        metrics_cancel_token.cancel();
-                        result_cancel_token.cancel();
+                    Ok(ssh) => {
+                        // Reset delay on successful connection
+                        reconnect_delay = Duration::from_secs(5);
+                        ssh
                     }
                     Err(e) => {
-                        error!("Failed to connect to controller: {}", e);
+                        error!("Failed to connect for KEEP: {}", e);
+                        warn!("Retrying connection in {:?}...", reconnect_delay);
+                        tokio::select! {
+                            _ = tokio::signal::ctrl_c() => {
+                                info!("Received Ctrl+C during reconnect wait");
+                                break 'connection_loop;
+                            }
+                            _ = tokio::time::sleep(reconnect_delay) => {
+                                reconnect_delay = std::cmp::min(
+                                    reconnect_delay * 2,
+                                    max_reconnect_delay
+                                );
+                                continue 'connection_loop;
+                            }
+                        }
                     }
-                }
-            }
-            Err(e) => {
-                error!("Failed to connect to any registration server: {}", e);
-                info!("Running in standalone mode...");
+                };
 
-                // Still wait for shutdown
-                tokio::select! {
+                // Setup reverse tunnel: controller connects to remote_port,
+                // SSH handler routes directly to telnet command parser
+                if let Err(e) = keep_ssh.request_reverse_tunnel(remote_port).await {
+                    error!("Failed to setup reverse tunnel: {}", e);
+                    warn!("Retrying connection in {:?}...", reconnect_delay);
+                    tokio::time::sleep(reconnect_delay).await;
+                    reconnect_delay = std::cmp::min(reconnect_delay * 2, max_reconnect_delay);
+                    continue 'connection_loop;
+                }
+                debug!("Reverse tunnel established: remote port {}", remote_port);
+
+                // Share the SSH connection for result uploads (direct-tcpip)
+                // and KEEP session monitoring
+                let keep_ssh = Arc::new(keep_ssh);
+                *ssh_for_upload.lock().await = Some(
+                    // SAFETY: We need the inner SshConnection for both the
+                    // upload transport and run_keep_session. Clone the Arc.
+                    keep_ssh.clone(),
+                );
+
+                info!("Controller connection established successfully");
+
+                // Start the result upload loop once (on first successful connection)
+                if !upload_loop_started {
+                    upload_loop_started = true;
+                    let result_handler_loop = result_handler.clone();
+                    let result_cancel_clone = result_cancel_token.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = result_handler_loop.run(result_cancel_clone).await {
+                            error!("Result handler failed: {}", e);
+                        }
+                    });
+                    debug!("Result upload loop started");
+                }
+
+                // Run KEEP session — blocks until connection drops.
+                let keep_ssh_for_keep = {
+                    let guard = ssh_for_upload.lock().await;
+                    match guard.as_ref() {
+                        Some(ssh) => ssh.clone(),
+                        None => {
+                            error!("SSH connection not set before KEEP session");
+                            continue 'connection_loop;
+                        }
+                    }
+                };
+                let keep_task =
+                    tokio::spawn(async move { keep_ssh_for_keep.run_keep_session().await });
+
+                // Wait for shutdown or connection loss
+                let should_reconnect = tokio::select! {
                     _ = tokio::signal::ctrl_c() => {
                         info!("Received Ctrl+C");
+                        false
                     }
-                    _ = scheduler_task => {
+                    _ = &mut scheduler_task => {
                         error!("Scheduler task ended unexpectedly");
+                        false
                     }
+                    result = keep_task => {
+                        match result {
+                            Ok(Err(e)) => warn!("KEEP session lost: {}", e),
+                            Err(e) => warn!("KEEP task panicked: {}", e),
+                            _ => warn!("KEEP session ended"),
+                        }
+                        // Clear SSH connection so uploads fail fast
+                        *ssh_for_upload.lock().await = None;
+                        true // Reconnect
+                    }
+                };
+
+                if !should_reconnect {
+                    break 'connection_loop;
                 }
 
-                // Cancel all tasks gracefully
-                scheduler_cancel.cancel();
-                metrics_cancel_token.cancel();
-                result_cancel_token.cancel();
+                // Wait before reconnecting
+                debug!("Reconnecting in {:?}...", reconnect_delay);
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {
+                        info!("Received Ctrl+C during reconnect wait");
+                        break 'connection_loop;
+                    }
+                    _ = tokio::time::sleep(reconnect_delay) => {
+                        // Continue to reconnect
+                    }
+                }
             }
-        }
-    } else {
-        info!("Running in standalone mode (no controller connection)");
 
-        // Keep running until interrupted
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                info!("Received Ctrl+C");
-            }
-            _ = scheduler_task => {
-                error!("Scheduler task ended unexpectedly");
-            }
+            // Cancel all tasks gracefully
+            info!("Initiating graceful shutdown...");
+            scheduler_cancel.cancel();
+            metrics_cancel_token.cancel();
+            result_cancel_token.cancel();
         }
-
-        // Cancel all tasks gracefully
-        scheduler_cancel.cancel();
-        metrics_cancel_token.cancel();
-        result_cancel_token.cancel();
+        Err(e) => {
+            error!("Failed to connect to controller: {}", e);
+        }
     }
 
     info!("Shutting down probe");

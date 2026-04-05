@@ -151,8 +151,10 @@ in
       serviceConfig = {
         Type = "simple";
         ExecStart = "${cfg.package}/bin/starla --config %E/starla/config.toml";
-        Restart = "on-failure";
+        Restart = "always";
         RestartSec = 10;
+        RestartMaxDelaySec = 300;
+        RestartSteps = 5;
 
         DynamicUser = true;
 
