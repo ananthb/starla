@@ -176,11 +176,8 @@ async fn main() -> Result<()> {
     }
     debug!("Runtime directory: {}", runtime_dir.display());
 
-    // Read probe ID from state directory (written after registration)
-    let mut probe_id = match starla_common::read_probe_id() {
-        Some(id) => starla_common::ProbeId(id),
-        None => starla_common::ProbeId(0),
-    };
+    // Probe ID is received from the registration server during INIT
+    let mut probe_id = starla_common::ProbeId(0);
 
     // Initialize Metrics (only when feature is enabled)
     #[cfg(feature = "metrics-export")]
@@ -637,13 +634,9 @@ async fn main() -> Result<()> {
             Ok(InitResponse::Controller(info)) => {
                 info!("Got controller assignment: {}:{}", info.host, info.port);
 
-                // Save probe ID from registration if we got one
-                if info.probe_id != 0 && probe_id.0 == 0 {
-                    info!("Received probe ID: {}", info.probe_id);
-                    if let Err(e) = starla_common::write_probe_id(info.probe_id) {
-                        warn!("Failed to save probe ID: {}", e);
-                    }
+                if info.probe_id != 0 {
                     probe_id = starla_common::ProbeId(info.probe_id);
+                    info!("Probe ID: {}", info.probe_id);
                 }
 
                 break info;
@@ -786,19 +779,7 @@ async fn main() -> Result<()> {
 
             // Session ID is set on TelnetState before each KEEP connection
 
-            // Get probe ID - should have been read from state dir at startup
-            // If not set (0), the probe hasn't been registered yet
-            // Re-read probe ID in case it was saved during registration
-            if probe_id.0 == 0 {
-                if let Some(id) = starla_common::read_probe_id() {
-                    probe_id = starla_common::ProbeId(id);
-                }
-            }
             let actual_probe_id = probe_id.0;
-            if actual_probe_id == 0 {
-                warn!("Probe ID is 0 (not yet registered). Results may not upload correctly.");
-                warn!("Register your probe at https://atlas.ripe.net/apply/swprobe/");
-            }
 
             // Set result upload endpoint path (query params for HTTP POST)
             let endpoint_path = format!("/?PROBE_ID={}&SESSION_ID={}", actual_probe_id, session_id);

@@ -6,10 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/starla --config /etc/starla/config.toml
-Restart=always
+Restart=on-failure
 RestartSec=10
-RestartMaxDelaySec=300
-RestartSteps=5
 
 DynamicUser=true
 ConfigurationDirectory=starla
