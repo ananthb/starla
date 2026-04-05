@@ -37,14 +37,10 @@
             pkg-config
             rustToolchain
             clang
-            llvmPackages.libclang
           ];
 
           buildInputs = with pkgs; [
             openssl
-            rocksdb
-            libclang.lib
-            llvmPackages.libclang
           ] ++ lib.optionals stdenv.isDarwin [
             darwin.apple_sdk.frameworks.Security
             darwin.apple_sdk.frameworks.SystemConfiguration
@@ -61,10 +57,6 @@
             openssl
             gcc
             gnumake
-
-            # Database tools
-            rocksdb
-            llvmPackages.libclang
 
             # Performance analysis
             hyperfine
@@ -136,8 +128,6 @@
               cargoLock.lockFile = ./Cargo.lock;
 
               inherit nativeBuildInputs buildInputs;
-              LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-              ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
 
               doCheck = false;
 
@@ -186,8 +176,6 @@
               cargoLock.lockFile = ./Cargo.lock;
 
               inherit nativeBuildInputs buildInputs;
-              LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-              ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
 
               buildNoDefaultFeatures = true;
               buildFeatures = [ "minimal" ];
@@ -215,8 +203,6 @@
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
               inherit nativeBuildInputs buildInputs;
-              LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-              ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
               buildPhase = ''
                 export HOME=$(mktemp -d)
                 cargo clippy --all-targets --all-features -- -D warnings
@@ -236,8 +222,6 @@
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
               inherit nativeBuildInputs buildInputs;
-              LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-              ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
               buildPhase = ''
                 export HOME=$(mktemp -d)
                 cargo clippy --all-targets --no-default-features --features minimal -- -D warnings
@@ -299,8 +283,6 @@
             RUST_LOG = "info";
             CARGO_INCREMENTAL = "1";
             RUST_TEST_THREADS = "4";
-            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-            ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
           };
         }
       ) // {

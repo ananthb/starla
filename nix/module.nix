@@ -15,8 +15,6 @@ let
     storage = {
       max_queue_size_mb = cfg.storage.maxQueueSizeMB;
       retention_days = cfg.storage.retentionDays;
-      max_database_size_mb = cfg.storage.maxDatabaseSizeMB;
-      cleanup_interval_hours = cfg.storage.cleanupIntervalHours;
     };
     metrics = {
       enabled = cfg.metrics.enable;
@@ -87,17 +85,6 @@ in
         description = "Result retention period in days.";
       };
 
-      maxDatabaseSizeMB = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 1;
-        description = "Maximum measurement database size in MB.";
-      };
-
-      cleanupIntervalHours = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 24;
-        description = "Database cleanup interval in hours.";
-      };
     };
 
     metrics = {

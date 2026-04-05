@@ -184,16 +184,6 @@ pub fn probe_pubkey_path() -> PathBuf {
     state_dir().join("probe_key.pub")
 }
 
-/// Get the default measurement database path (ephemeral — in runtime dir)
-pub fn database_path() -> PathBuf {
-    runtime_dir().join("measurements")
-}
-
-/// Get the default results queue path (ephemeral — in runtime dir)
-pub fn results_queue_path() -> PathBuf {
-    runtime_dir().join("result_queue")
-}
-
 /// Get the known SSH host keys path
 pub fn known_hosts_path() -> PathBuf {
     state_dir().join("known_hosts")
@@ -364,9 +354,6 @@ mod tests {
 
         let key = probe_key_path();
         assert!(key.to_string_lossy().contains("probe_key"));
-
-        let db = database_path();
-        assert!(db.to_string_lossy().contains("measurements"));
 
         let pid = probe_id_path();
         assert!(pid.to_string_lossy().contains("probe_id"));

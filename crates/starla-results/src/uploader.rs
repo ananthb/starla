@@ -4,7 +4,7 @@
 //! In production this is an SSH channel; for testing it can be anything.
 
 use super::format::AtlasResult;
-use super::persistent_queue::QueuedResult;
+use super::queue::QueuedResult;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;

@@ -38,12 +38,6 @@ max_queue_size_mb = 100
 # Result retention period in days
 retention_days = 30
 
-# Maximum measurement database size in MB
-max_database_size_mb = 1
-
-# Database cleanup interval in hours
-cleanup_interval_hours = 24
-
 [metrics]
 # Enable Prometheus metrics export (requires metrics-export feature)
 enabled = true

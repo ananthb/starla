@@ -1,24 +1,22 @@
 //! Results management and upload for RIPE Atlas probe
 //!
 //! This crate handles:
-//! - Queueing measurement results for upload (persistent RocksDB-backed queue)
+//! - Queueing measurement results for upload (in-memory queue)
 //! - Batching multiple results for efficient upload
 //! - Retry logic with exponential backoff
-//! - Gzip compression with auto-negotiation
 //! - RIPE Atlas result format wrapping
 
 pub mod format;
-mod persistent_queue;
+mod queue;
 mod time_sync;
 mod uploader;
 
 pub use format::{AtlasResult, ResultBundle};
-pub use persistent_queue::{PersistentResultQueue, QueueStats, QueuedResult};
+pub use queue::{QueueStats, QueuedResult, ResultQueue};
 pub use time_sync::TimeSyncTracker;
 pub use uploader::{ResultUploader, UploadStream, UploadTransport, UploaderConfig};
 
 use starla_common::MeasurementResult;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
@@ -38,6 +36,8 @@ pub struct ResultHandlerConfig {
     pub max_attempts: u32,
     /// Cleanup interval for expired/failed results
     pub cleanup_interval: Duration,
+    /// Maximum number of results in queue
+    pub max_queue_size: usize,
 }
 
 impl Default for ResultHandlerConfig {
@@ -48,42 +48,37 @@ impl Default for ResultHandlerConfig {
             max_result_age_secs: 3600, // 1 hour
             max_attempts: 5,
             cleanup_interval: Duration::from_secs(300), // 5 minutes
+            max_queue_size: 10000,
         }
     }
 }
 
 /// Main result handler that coordinates queuing and uploading
 pub struct ResultHandler {
-    /// Persistent queue (using Mutex for synchronous RocksDB access)
-    queue: Arc<Mutex<PersistentResultQueue>>,
-    /// Uploader
+    queue: Arc<Mutex<ResultQueue>>,
     uploader: Arc<Mutex<ResultUploader>>,
-    /// Configuration
     config: ResultHandlerConfig,
-    /// Time sync tracker for lts calculation
     time_sync: Arc<TimeSyncTracker>,
-    /// Session ID for upload footer (per httppost --post-footer behavior)
     session_id: Arc<Mutex<Option<String>>>,
 }
 
 impl ResultHandler {
-    /// Create a new result handler with persistent queue
+    /// Create a new result handler
     pub fn new(
-        db_path: &Path,
         transport: Box<dyn UploadTransport>,
         uploader_config: UploaderConfig,
         config: ResultHandlerConfig,
-    ) -> anyhow::Result<Self> {
-        let queue = PersistentResultQueue::new(db_path, 1000)?;
+    ) -> Self {
+        let queue = ResultQueue::new(config.max_queue_size);
         let uploader = ResultUploader::new(transport, uploader_config);
 
-        Ok(Self {
+        Self {
             queue: Arc::new(Mutex::new(queue)),
             uploader: Arc::new(Mutex::new(uploader)),
             config,
             time_sync: Arc::new(TimeSyncTracker::new()),
             session_id: Arc::new(Mutex::new(None)),
-        })
+        }
     }
 
     /// Set the upload endpoint path (call after controller connection)
@@ -94,8 +89,7 @@ impl ResultHandler {
         Ok(())
     }
 
-    /// Set the session ID (for upload body footer per httppost --post-footer
-    /// behavior)
+    /// Set the session ID (for upload body footer)
     pub async fn set_session_id(&self, session_id: String) {
         let mut sid = self.session_id.lock().await;
         *sid = Some(session_id);
@@ -108,12 +102,12 @@ impl ResultHandler {
         uploader.has_endpoint()
     }
 
-    /// Mark time as synchronized (call after NTP sync or similar)
+    /// Mark time as synchronized
     pub fn mark_time_synced(&self) {
         self.time_sync.mark_synced();
     }
 
-    /// Get the time sync tracker (for external use)
+    /// Get the time sync tracker
     pub fn time_sync(&self) -> Arc<TimeSyncTracker> {
         Arc::clone(&self.time_sync)
     }
@@ -124,34 +118,25 @@ impl ResultHandler {
     }
 
     /// Submit a result for upload
-    pub async fn submit(&self, result: MeasurementResult) -> anyhow::Result<()> {
+    pub async fn submit(&self, result: MeasurementResult) {
         let mut queue = self.queue.lock().await;
-        queue.enqueue(result)?;
-
-        let stats = queue.stats()?;
-        debug!(
-            "Result enqueued, queue: {} memory / {} disk",
-            stats.memory_count, stats.disk_count
-        );
-
-        Ok(())
+        queue.enqueue(result);
+        debug!("Result enqueued, queue: {}", queue.stats().count);
     }
 
     /// Get current queue statistics
-    pub async fn queue_stats(&self) -> anyhow::Result<QueueStats> {
+    pub async fn queue_stats(&self) -> QueueStats {
         let queue = self.queue.lock().await;
         queue.stats()
     }
 
     /// Try to upload pending results
     pub async fn upload_pending(&self) -> anyhow::Result<usize> {
-        // Check if we have an endpoint
         if !self.has_endpoint().await {
             debug!("No upload endpoint configured, skipping upload");
             return Ok(0);
         }
 
-        // Get batch from queue
         let results = {
             let mut queue = self.queue.lock().await;
             queue.drain_batch(self.config.batch_size)
@@ -161,7 +146,6 @@ impl ResultHandler {
             return Ok(0);
         }
 
-        // Filter out expired results
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
         let (valid, expired): (Vec<_>, Vec<_>) = results
@@ -176,7 +160,6 @@ impl ResultHandler {
             return Ok(0);
         }
 
-        // Filter out results that have exceeded max attempts
         let (uploadable, failed): (Vec<_>, Vec<_>) = valid
             .into_iter()
             .partition(|r| r.attempts < self.config.max_attempts);
@@ -195,59 +178,36 @@ impl ResultHandler {
         let count = uploadable.len();
         info!("Uploading {} results", count);
 
-        // Get current lts value
         let lts = self.time_sync.lts();
-
-        // Get session ID for footer
         let session_id = self.session_id.lock().await;
         let session_id_ref = session_id.as_deref();
 
-        // Try to upload
         let uploader = self.uploader.lock().await;
         match uploader
             .upload_batch(&uploadable, lts, session_id_ref)
             .await
         {
             Ok(()) => {
-                // Mark as uploaded (delete from disk)
-                let mut queue = self.queue.lock().await;
-                queue.mark_uploaded(&uploadable)?;
                 info!("Successfully uploaded {} results", count);
                 Ok(count)
             }
             Err(e) => {
-                // Re-queue failed results with incremented attempt counter
                 warn!("Upload failed: {}", e);
                 let mut queue = self.queue.lock().await;
-                queue.requeue_failed(uploadable)?;
+                queue.requeue_failed(uploadable);
                 Err(e)
             }
         }
     }
 
     /// Run cleanup to remove expired and failed results
-    pub async fn run_cleanup(&self) -> anyhow::Result<()> {
+    pub async fn run_cleanup(&self) {
         let mut queue = self.queue.lock().await;
-
-        // Clean expired
-        queue.cleanup_expired(self.config.max_result_age_secs)?;
-
-        // Clean failed
-        queue.cleanup_failed(self.config.max_attempts)?;
-
-        Ok(())
-    }
-
-    /// Flush queue to disk (for graceful shutdown)
-    pub async fn flush(&self) -> anyhow::Result<()> {
-        let mut queue = self.queue.lock().await;
-        queue.flush()
+        queue.cleanup_expired(self.config.max_result_age_secs);
+        queue.cleanup_failed(self.config.max_attempts);
     }
 
     /// Run the upload loop
-    ///
-    /// This is the main entry point for running the result handler.
-    /// It will periodically upload pending results and clean up expired ones.
     pub async fn run(&self, cancel: CancellationToken) -> anyhow::Result<()> {
         info!("Result handler starting");
 
@@ -271,17 +231,10 @@ impl ResultHandler {
                             consecutive_failures = 0;
                             backoff = Duration::from_secs(1);
                         }
-                        Ok(_) => {
-                            // No results to upload, that's fine
-                        }
+                        Ok(_) => {}
                         Err(e) => {
                             consecutive_failures += 1;
-                            warn!(
-                                "Upload failed (attempt {}): {}",
-                                consecutive_failures, e
-                            );
-
-                            // Apply backoff
+                            warn!("Upload failed (attempt {}): {}", consecutive_failures, e);
                             if consecutive_failures > 3 {
                                 debug!("Applying backoff: {:?}", backoff);
                                 tokio::time::sleep(backoff).await;
@@ -292,16 +245,9 @@ impl ResultHandler {
                 }
 
                 _ = cleanup_interval.tick() => {
-                    if let Err(e) = self.run_cleanup().await {
-                        error!("Cleanup failed: {}", e);
-                    }
+                    self.run_cleanup().await;
                 }
             }
-        }
-
-        // Final flush on shutdown
-        if let Err(e) = self.flush().await {
-            error!("Failed to flush queue on shutdown: {}", e);
         }
 
         Ok(())
@@ -313,11 +259,10 @@ mod tests {
     use super::*;
     use starla_common::{MeasurementData, MeasurementId, MeasurementType, ProbeId, Timestamp};
     use std::net::IpAddr;
-    use tempfile::tempdir;
 
     fn make_result(msm_id: u64) -> MeasurementResult {
         MeasurementResult {
-            fw: 6000,
+            fw: 5120,
             measurement_type: MeasurementType::Ping,
             prb_id: ProbeId(12345),
             msm_id: MeasurementId(msm_id),
@@ -333,7 +278,6 @@ mod tests {
         }
     }
 
-    /// Dummy transport that always fails (for tests that don't upload)
     struct NoopTransport;
     impl UploadTransport for NoopTransport {
         fn open(
@@ -349,42 +293,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_result_handler_creation() {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().join("results.db");
-
         let handler = ResultHandler::new(
-            &db_path,
             Box::new(NoopTransport),
             UploaderConfig::default(),
             ResultHandlerConfig::default(),
-        )
-        .unwrap();
+        );
 
-        // Should start empty
-        let stats = handler.queue_stats().await.unwrap();
-        assert_eq!(stats.memory_count, 0);
-        assert_eq!(stats.disk_count, 0);
+        let stats = handler.queue_stats().await;
+        assert_eq!(stats.count, 0);
     }
 
     #[tokio::test]
     async fn test_submit_and_stats() {
-        let dir = tempdir().unwrap();
-        let db_path = dir.path().join("results.db");
-
         let handler = ResultHandler::new(
-            &db_path,
             Box::new(NoopTransport),
             UploaderConfig::default(),
             ResultHandlerConfig::default(),
-        )
-        .unwrap();
+        );
 
-        // Submit a result
-        handler.submit(make_result(1001)).await.unwrap();
+        handler.submit(make_result(1001)).await;
 
-        // Check stats
-        let stats = handler.queue_stats().await.unwrap();
-        assert_eq!(stats.memory_count, 1);
-        assert_eq!(stats.disk_count, 1);
+        let stats = handler.queue_stats().await;
+        assert_eq!(stats.count, 1);
     }
 }

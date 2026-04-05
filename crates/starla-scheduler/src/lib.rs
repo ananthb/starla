@@ -14,9 +14,7 @@ pub use job::{
     TracerouteJobSpec,
 };
 
-use executor::Executor;
 use starla_common::ProbeId;
-use starla_database::Database;
 use starla_results::ResultHandler;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -40,8 +38,6 @@ pub enum SchedulerCommand {
 pub struct Scheduler {
     /// Scheduled tasks (recurring measurements)
     tasks: Arc<Mutex<HashMap<u64, ScheduledTask>>>,
-    /// Measurement executor
-    executor: Arc<Executor>,
     /// Probe ID for measurement results
     probe_id: ProbeId,
     /// Result handler for uploading results
@@ -56,11 +52,10 @@ pub struct Scheduler {
 
 impl Scheduler {
     /// Create a new scheduler
-    pub fn new(db: Arc<Database>, probe_id: ProbeId) -> Self {
+    pub fn new(probe_id: ProbeId) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
-            executor: Arc::new(Executor::new(db)),
             probe_id,
             result_handler: None,
             cmd_rx: Arc::new(Mutex::new(Some(cmd_rx))),
@@ -144,16 +139,8 @@ impl Scheduler {
             Ok(result) => {
                 debug!(msm_id = result.msm_id.0, "Measurement completed");
 
-                // Store in database
-                if let Err(e) = self.executor.store_result(&result) {
-                    error!("Failed to store result in database: {}", e);
-                }
-
-                // Submit to result handler for upload
                 if let Some(ref handler) = self.result_handler {
-                    if let Err(e) = handler.submit(result).await {
-                        error!("Failed to submit result for upload: {}", e);
-                    }
+                    handler.submit(result).await;
                 } else {
                     warn!("No result handler configured!");
                 }
@@ -269,7 +256,6 @@ impl Scheduler {
         // Execute due jobs concurrently
         for job in due_jobs {
             debug!(msm_id = job.msm_id, "Executing scheduled measurement");
-            let executor = self.executor.clone();
             let result_handler = self.result_handler.clone();
             let probe_id = self.probe_id;
             tokio::spawn(async move {
@@ -277,13 +263,8 @@ impl Scheduler {
                     Ok(measurement) => match measurement.execute().await {
                         Ok(result) => {
                             debug!(msm_id = result.msm_id.0, "Measurement completed");
-                            if let Err(e) = executor.store_result(&result) {
-                                error!("Failed to store result: {}", e);
-                            }
                             if let Some(ref handler) = result_handler {
-                                if let Err(e) = handler.submit(result).await {
-                                    error!("Failed to submit result: {}", e);
-                                }
+                                handler.submit(result).await;
                             }
                         }
                         Err(e) => {

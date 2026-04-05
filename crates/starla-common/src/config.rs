@@ -74,12 +74,6 @@ pub struct StorageSettings {
 
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
-
-    #[serde(default = "default_max_database_size_mb")]
-    pub max_database_size_mb: u64,
-
-    #[serde(default = "default_cleanup_interval_hours")]
-    pub cleanup_interval_hours: u64,
 }
 
 impl Default for StorageSettings {
@@ -87,8 +81,6 @@ impl Default for StorageSettings {
         Self {
             max_queue_size_mb: default_max_queue_size_mb(),
             retention_days: default_retention_days(),
-            max_database_size_mb: default_max_database_size_mb(),
-            cleanup_interval_hours: default_cleanup_interval_hours(),
         }
     }
 }
@@ -164,12 +156,6 @@ fn default_max_queue_size_mb() -> u64 {
 }
 fn default_retention_days() -> u32 {
     30
-}
-fn default_max_database_size_mb() -> u64 {
-    1
-}
-fn default_cleanup_interval_hours() -> u64 {
-    24
 }
 fn default_metrics_enabled() -> bool {
     true

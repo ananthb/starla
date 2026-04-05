@@ -212,75 +212,25 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Initialize Database
-    let db_path = starla_common::database_path();
-    let db = Arc::new(starla_database::Database::connect(&db_path)?);
-
-    // Initialize Results Handler with persistent queue
-    // The SSH transport is populated later when the KEEP connection is established
+    // Initialize Results Handler with in-memory queue
     let ssh_for_upload: Arc<tokio::sync::Mutex<Option<Arc<SshConnection>>>> =
         Arc::new(tokio::sync::Mutex::new(None));
-    let results_db_path = starla_common::results_queue_path();
-    let uploader_config = UploaderConfig::default();
-    let result_handler_config = ResultHandlerConfig::default();
     let transport = Box::new(SshUploadTransport {
         ssh: ssh_for_upload.clone(),
     });
     let result_handler = Arc::new(ResultHandler::new(
-        &results_db_path,
         transport,
-        uploader_config,
-        result_handler_config,
-    )?);
+        UploaderConfig::default(),
+        ResultHandlerConfig::default(),
+    ));
 
-    // Initialize Scheduler with result handler
-    let mut scheduler = starla_scheduler::Scheduler::new(db.clone(), probe_id);
+    // Initialize Scheduler
+    let mut scheduler = starla_scheduler::Scheduler::new(probe_id);
     scheduler.set_result_handler(result_handler.clone());
 
-    // Get command sender and cancellation token for the scheduler
     let scheduler_tx = scheduler.command_sender();
     let scheduler_cancel = scheduler.cancel_token();
 
-    // Start Background Cleanup Task
-    let db_cleanup = db.clone();
-    #[cfg(feature = "metrics-export")]
-    let metrics_cleanup = metrics.clone();
-    let cleanup_config = starla_database::CleanupConfig {
-        retention_days: config.storage.retention_days,
-        max_database_size_mb: config.storage.max_database_size_mb,
-        cleanup_interval_hours: config.storage.cleanup_interval_hours,
-    };
-    let cleanup_interval =
-        std::time::Duration::from_secs(config.storage.cleanup_interval_hours * 3600);
-
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(cleanup_interval);
-        loop {
-            interval.tick().await;
-            debug!("Running database cleanup");
-            match starla_database::cleanup::run_cleanup_cycle(&db_cleanup, &cleanup_config) {
-                Ok(stats) => {
-                    let freed_mb = stats.database_size_before_mb - stats.database_size_after_mb;
-                    debug!(
-                        "Cleanup: deleted {} measurements, freed {:.2} MB",
-                        stats.measurements_deleted_by_time + stats.measurements_deleted_by_size,
-                        freed_mb
-                    );
-                    #[cfg(feature = "metrics-export")]
-                    metrics_cleanup.record_cleanup_run(
-                        stats.measurements_deleted_by_time,
-                        stats.measurements_deleted_by_size,
-                        (freed_mb.max(0.0) * 1024.0 * 1024.0) as u64,
-                    );
-                }
-                Err(e) => error!("Cleanup error: {}", e),
-            }
-        }
-    });
-
-    // Result upload loop is started AFTER controller connection is established
-    // (endpoint and HTTP proxy must be ready before uploads can work).
-    // Results enqueued before that are held in the persistent queue.
     let result_cancel_token = CancellationToken::new();
 
     // Create channel for receiving telnet commands
@@ -946,13 +896,6 @@ async fn main() -> Result<()> {
     }
 
     info!("Shutting down probe");
-
-    // Flush result handler
-    if let Err(e) = result_handler.flush().await {
-        error!("Failed to flush result queue: {}", e);
-    }
-
-    db.close();
 
     Ok(())
 }

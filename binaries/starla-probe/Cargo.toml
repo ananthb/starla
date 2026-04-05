@@ -15,7 +15,6 @@ starla-network = { path = "../../crates/starla-network", version = "0.1.0" }
 starla-scheduler = { path = "../../crates/starla-scheduler", version = "0.1.0" }
 starla-controller = { path = "../../crates/starla-controller", version = "0.1.0" }
 starla-results = { path = "../../crates/starla-results", version = "0.1.0" }
-starla-database = { path = "../../crates/starla-database", version = "0.1.0" }
 starla-metrics = { path = "../../crates/starla-metrics", version = "0.1.0", optional = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
