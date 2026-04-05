@@ -41,7 +41,7 @@ pub struct Dns {
 #[async_trait]
 impl Measurement for Dns {
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
-        let results = resolver::execute_dns_query(&self.config).await?;
+        let results = resolver::execute_dns_query(&self.config, self.probe_id.0).await?;
 
         let proto = match self.config.protocol {
             DnsProtocol::TCP => "TCP",

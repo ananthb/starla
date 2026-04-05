@@ -9,7 +9,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 /// An async bidirectional stream for upload transport.
 pub trait UploadStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
@@ -168,7 +168,10 @@ impl ResultUploader {
 
         // Parse HTTP status
         if let Some(status_line) = response_str.lines().next() {
-            if status_line.contains("200") {
+            if status_line.contains("429") {
+                warn!("Controller rate-limiting uploads (429)");
+                anyhow::bail!("rate limited");
+            } else if status_line.contains("200") {
                 // Check body for OK/ERR
                 if let Some(body_start) = response_str.find("\r\n\r\n") {
                     let resp_body = response_str[body_start + 4..].trim();

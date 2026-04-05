@@ -46,8 +46,8 @@ pub struct DnsResult {
 }
 
 /// Build a DNS query message
-fn build_query(config: &DnsConfig) -> anyhow::Result<(Message, Vec<u8>)> {
-    let query_name = expand_random_label(&config.query_name);
+fn build_query(config: &DnsConfig, probe_id: u32) -> anyhow::Result<(Message, Vec<u8>)> {
+    let query_name = expand_query_templates(&config.query_name, probe_id);
     let name = Name::from_str(&query_name)?;
     let record_type = RecordType::from_str(&config.query_type).unwrap_or(RecordType::A);
     let dns_class = DNSClass::from_str(&config.query_class).unwrap_or(DNSClass::IN);
@@ -197,8 +197,8 @@ async fn query_tcp(
     Ok((buf, rtt))
 }
 
-pub async fn execute_dns_query(config: &DnsConfig) -> anyhow::Result<DnsResult> {
-    let (_msg, wire_query) = build_query(config)?;
+pub async fn execute_dns_query(config: &DnsConfig, probe_id: u32) -> anyhow::Result<DnsResult> {
+    let (_msg, wire_query) = build_query(config, probe_id)?;
     let dest = SocketAddr::new(config.target, 53);
     let timeout_dur = Duration::from_millis(config.timeout_ms);
 
@@ -230,19 +230,36 @@ pub fn decode_answers(abuf: &str) -> Option<Vec<AnswerRecord>> {
     parse_answers(&raw)
 }
 
-fn expand_random_label(query_name: &str) -> String {
+/// Expand RIPE Atlas DNS query name templates:
+/// - `$r` — random 8-char alphanumeric (prevents DNS caching)
+/// - `$p` — probe ID
+/// - `$t` — current Unix timestamp
+fn expand_query_templates(query_name: &str, probe_id: u32) -> String {
     if query_name == "." {
         return query_name.to_string();
     }
 
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string();
+    let probe_str = probe_id.to_string();
+
     query_name
         .split('.')
         .map(|label| {
-            if label.contains("$r") {
-                label.replace("$r", &random_label())
-            } else {
-                label.to_string()
+            let mut s = label.to_string();
+            if s.contains("$r") {
+                s = s.replace("$r", &random_label());
             }
+            if s.contains("$p") {
+                s = s.replace("$p", &probe_str);
+            }
+            if s.contains("$t") {
+                s = s.replace("$t", &timestamp);
+            }
+            s
         })
         .collect::<Vec<String>>()
         .join(".")

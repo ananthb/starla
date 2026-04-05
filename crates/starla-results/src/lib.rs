@@ -234,11 +234,19 @@ impl ResultHandler {
                         Ok(_) => {}
                         Err(e) => {
                             consecutive_failures += 1;
-                            warn!("Upload failed (attempt {}): {}", consecutive_failures, e);
-                            if consecutive_failures > 3 {
-                                debug!("Applying backoff: {:?}", backoff);
+                            let is_rate_limited = e.to_string().contains("rate limited");
+                            if is_rate_limited {
+                                // 429: back off aggressively
+                                backoff = std::cmp::min(backoff * 2, max_backoff).max(Duration::from_secs(60));
+                                warn!("Rate limited, backing off {:?}", backoff);
                                 tokio::time::sleep(backoff).await;
-                                backoff = std::cmp::min(backoff * 2, max_backoff);
+                            } else {
+                                warn!("Upload failed (attempt {}): {}", consecutive_failures, e);
+                                if consecutive_failures > 3 {
+                                    debug!("Applying backoff: {:?}", backoff);
+                                    tokio::time::sleep(backoff).await;
+                                    backoff = std::cmp::min(backoff * 2, max_backoff);
+                                }
                             }
                         }
                     }
