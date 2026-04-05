@@ -221,7 +221,7 @@ impl PersistentResultQueue {
 
         let key = Self::queue_key(queued.queued_at, id);
         let value = serde_json::to_vec(&record)?;
-        self.db.put(&key, &value)?;
+        self.db.put(key, &value)?;
 
         Ok(id)
     }
@@ -316,7 +316,7 @@ impl PersistentResultQueue {
         for queued in results {
             if let Some(id) = queued.id {
                 let key = Self::queue_key(queued.queued_at, id);
-                self.db.delete(&key)?;
+                self.db.delete(key)?;
             }
         }
 
@@ -334,12 +334,12 @@ impl PersistentResultQueue {
                 let key = Self::queue_key(queued.queued_at, id);
 
                 // Read existing record and update
-                if let Some(value) = self.db.get(&key)? {
+                if let Some(value) = self.db.get(key)? {
                     if let Ok(mut record) = serde_json::from_slice::<StoredQueueRecord>(&value) {
                         record.attempts = queued.attempts;
                         record.last_attempt_at = queued.last_attempt_at;
                         let new_value = serde_json::to_vec(&record)?;
-                        self.db.put(&key, &new_value)?;
+                        self.db.put(key, &new_value)?;
                     }
                 }
             }
