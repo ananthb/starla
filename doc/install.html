@@ -206,10 +206,11 @@ cat ~/.local/state/starla/probe_key.pub</code></pre>
 <h2>After Installation</h2>
 
 <ol>
-  <li>Start starla and wait for it to generate an SSH key pair</li>
-  <li>Copy the public key from the log output or <code>probe_key.pub</code></li>
+  <li>Start starla &mdash; on first run it generates an SSH key and logs the public key</li>
+  <li>Copy the public key from the log output (it's also saved to
+    <code>probe_key.pub</code> in the state directory)</li>
   <li>Register at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a></li>
-  <li>Once approved, starla will connect to a controller and begin measurements</li>
+  <li>Starla retries automatically &mdash; once approved, it connects and begins measurements</li>
 </ol>
 
 <h2>Configuration File</h2>
