@@ -12,7 +12,7 @@ use std::net::IpAddr;
 ///
 /// The C probe writes arrays as `[ { ... }, { ... } ]` with spaces inside
 /// brackets and spaces inside braces. Objects are written as `{ "key":value }`.
-fn format_result_value(value: &serde_json::Value) -> String {
+pub fn format_result_value(value: &serde_json::Value) -> String {
     let mut buf = String::new();
     write_result_value(&mut buf, value);
     buf

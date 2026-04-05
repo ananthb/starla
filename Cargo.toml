@@ -12,6 +12,7 @@ members = [
     "binaries/starla-probe",
     "tests/mock-controller",
 ]
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"

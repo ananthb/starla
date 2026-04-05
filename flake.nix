@@ -94,6 +94,9 @@
 
             # Signing
             cosign
+
+            # Fuzzing
+            cargo-fuzz
           ] ++ lib.optionals stdenv.isLinux [
             # Linux-specific
             iproute2
@@ -243,6 +246,31 @@
               checkPhase = ''
                 export HOME=$(mktemp -d)
                 cargo test --no-default-features --features minimal --workspace
+              '';
+              installPhase = "touch $out";
+            };
+
+            # AddressSanitizer — run tests with ASAN to detect memory errors.
+            # Uses minimal features to avoid RocksDB C++ FFI issues with ASAN.
+            asan = pkgs.rustPlatform.buildRustPackage {
+              pname = "starla-asan";
+              version = "0.0.0";
+              src = ./.;
+              cargoLock.lockFile = ./Cargo.lock;
+              inherit nativeBuildInputs buildInputs;
+              LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+              ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
+              RUSTFLAGS = "-Zsanitizer=address";
+              buildPhase = ''
+                export HOME=$(mktemp -d)
+                cargo test --no-default-features --features minimal --workspace \
+                  -Zbuild-std --target x86_64-unknown-linux-gnu --no-run
+              '';
+              doCheck = true;
+              checkPhase = ''
+                export HOME=$(mktemp -d)
+                cargo test --no-default-features --features minimal --workspace \
+                  -Zbuild-std --target x86_64-unknown-linux-gnu
               '';
               installPhase = "touch $out";
             };

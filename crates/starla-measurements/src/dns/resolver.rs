@@ -77,7 +77,7 @@ fn build_query(config: &DnsConfig) -> anyhow::Result<(Message, Vec<u8>)> {
 }
 
 /// Parse DNS response header fields from raw bytes
-fn parse_response(raw: &[u8]) -> anyhow::Result<(u16, u16, u16, u16, u16)> {
+pub fn parse_response(raw: &[u8]) -> anyhow::Result<(u16, u16, u16, u16, u16)> {
     // DNS header is 12 bytes: ID(2) + flags(2) + QDCOUNT(2) + ANCOUNT(2) +
     // NSCOUNT(2) + ARCOUNT(2)
     if raw.len() < 12 {

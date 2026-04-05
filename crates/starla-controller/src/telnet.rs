@@ -464,7 +464,7 @@ fn filter_telnet_commands(data: &[u8]) -> String {
 /// Parse a command line into a TelnetCommand
 ///
 /// Supports both JSON format and Atlas busybox CRONLINE format
-fn parse_command(cmd: &str) -> TelnetCommand {
+pub fn parse_command(cmd: &str) -> TelnetCommand {
     // Try to parse as JSON first
     if cmd.starts_with('{') {
         if let Ok(spec) = serde_json::from_str::<serde_json::Value>(cmd) {

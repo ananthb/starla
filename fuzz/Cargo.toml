@@ -1,0 +1,36 @@
+[package]
+name = "starla-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+starla-controller = { path = "../crates/starla-controller" }
+starla-measurements = { path = "../crates/starla-measurements" }
+starla-results = { path = "../crates/starla-results" }
+starla-common = { path = "../crates/starla-common" }
+serde_json = "1"
+
+[[bin]]
+name = "fuzz_telnet_command"
+path = "fuzz_targets/fuzz_telnet_command.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_dns_response"
+path = "fuzz_targets/fuzz_dns_response.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_ntp_response"
+path = "fuzz_targets/fuzz_ntp_response.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_result_format"
+path = "fuzz_targets/fuzz_result_format.rs"
+doc = false

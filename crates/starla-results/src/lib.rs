@@ -7,7 +7,7 @@
 //! - Gzip compression with auto-negotiation
 //! - RIPE Atlas result format wrapping
 
-mod format;
+pub mod format;
 mod persistent_queue;
 mod time_sync;
 mod uploader;
