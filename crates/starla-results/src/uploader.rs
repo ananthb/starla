@@ -169,8 +169,19 @@ impl ResultUploader {
         // Parse HTTP status
         if let Some(status_line) = response_str.lines().next() {
             if status_line.contains("429") {
-                warn!("Controller rate-limiting uploads (429)");
-                anyhow::bail!("rate limited");
+                // Parse Retry-After header if present
+                let retry_after = response_str
+                    .lines()
+                    .find(|l| l.to_lowercase().starts_with("retry-after:"))
+                    .and_then(|l| l.split(':').nth(1))
+                    .and_then(|v| v.trim().parse::<u64>().ok());
+                if let Some(secs) = retry_after {
+                    warn!("Rate limited (429), Retry-After: {}s", secs);
+                    anyhow::bail!("rate limited {}", secs);
+                } else {
+                    warn!("Rate limited (429)");
+                    anyhow::bail!("rate limited");
+                }
             } else if status_line.contains("200") {
                 // Check body for OK/ERR
                 if let Some(body_start) = response_str.find("\r\n\r\n") {

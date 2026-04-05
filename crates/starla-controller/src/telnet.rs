@@ -488,10 +488,21 @@ pub fn parse_command(cmd: &str) -> TelnetCommand {
             }
         }
         "CRONLINE" => parse_cronline(cmd),
+        "ONEOFF" => {
+            // ONEOFF <path> <measurement_command> <args...>
+            // One-shot measurement — parse as CRONLINE with interval=0
+            if parts.len() >= 3 {
+                // Reconstruct as a CRONLINE with interval=0 for the parser
+                let measurement_parts = &parts[2..]; // skip ONEOFF and path
+                let fake_cronline =
+                    format!("CRONLINE 0 0 0 UNIFORM 0 {}", measurement_parts.join(" "));
+                parse_cronline(&fake_cronline)
+            } else {
+                TelnetCommand::Unknown(cmd.to_string())
+            }
+        }
         "CRONTAB" => {
             // CRONTAB defines which cron directory following CRONLINEs belong to
-            // Format: CRONTAB <directory>
-            // We acknowledge it but don't need to do anything special
             trace!("CRONTAB command: {}", cmd);
             TelnetCommand::Ignored(cmd.to_string())
         }

@@ -44,7 +44,7 @@ impl Default for ResultHandlerConfig {
     fn default() -> Self {
         Self {
             batch_size: 10,
-            upload_interval: Duration::from_secs(10),
+            upload_interval: Duration::from_secs(60),
             max_result_age_secs: 3600, // 1 hour
             max_attempts: 5,
             cleanup_interval: Duration::from_secs(300), // 5 minutes
@@ -234,11 +234,15 @@ impl ResultHandler {
                         Ok(_) => {}
                         Err(e) => {
                             consecutive_failures += 1;
-                            let is_rate_limited = e.to_string().contains("rate limited");
-                            if is_rate_limited {
-                                // 429: back off aggressively
-                                backoff = std::cmp::min(backoff * 2, max_backoff).max(Duration::from_secs(60));
-                                warn!("Rate limited, backing off {:?}", backoff);
+                            let err_msg = e.to_string();
+                            if err_msg.contains("rate limited") {
+                                // Parse "rate limited N" for Retry-After seconds
+                                let retry_secs = err_msg
+                                    .strip_prefix("rate limited ")
+                                    .and_then(|s| s.parse::<u64>().ok())
+                                    .unwrap_or(60);
+                                backoff = Duration::from_secs(retry_secs).max(Duration::from_secs(60));
+                                warn!("Rate limited, retrying in {}s", backoff.as_secs());
                                 tokio::time::sleep(backoff).await;
                             } else {
                                 warn!("Upload failed (attempt {}): {}", consecutive_failures, e);
