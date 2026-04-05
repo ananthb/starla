@@ -1,230 +1,60 @@
 # Starla
 
-Starla is a network measurement probe tool that runs on end-user machines and talks
-to [RIPE Atlas](https://atlas.ripe.net).
-Its a drop-in replacement for the [RIPE Atlas Software Probe](https://atlas.ripe.net/docs/howtos/software-probes/).
+An alternative unofficial [RIPE Atlas](https://atlas.ripe.net) software probe written in Rust.
+
+[![License](https://img.shields.io/github/license/ananthb/starla)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/ananthb/starla)](https://github.com/ananthb/starla/releases)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://ananthb.github.io/starla/)
 
 ## Features
 
-- **All Measurement Types**: Ping, Traceroute, DNS, HTTP/HTTPS, TLS/SSL, NTP
-- **Pure Rust SSH**: No OpenSSH dependency, using `russh`
-- **Observability**:
-  - Prometheus metrics export (optional)
-  - Structured JSON logging (optional)
-- **RocksDB**: Persistent measurement history
-- **Feature Flags**: Minimal builds for embedded systems
+- **All measurement types** — Ping, Traceroute, DNS, HTTP, TLS, NTP
+- **Pure Rust SSH** — no OpenSSH dependency, uses `russh`
+- **No local ports** — all communication flows through the SSH tunnel
+- **Minimal container image** — just the binary + CA certs, multi-arch (amd64/arm64)
+- **NixOS module** — declarative configuration with systemd hardening
+- **Prometheus metrics** — optional observability export
+- **Persistent result queue** — survives restarts via RocksDB
 
 ## Quick Start
 
-### Using Nix (Recommended)
-
 ```bash
-# Install Nix (if not already installed)
-sh <(curl -L https://nixos.org/nix/install) --daemon
+# Docker / Podman
+docker run -d --name starla \
+  -v starla-state:/state \
+  --cap-add NET_RAW \
+  ghcr.io/ananthb/starla:latest
 
-# Clone and enter the development shell
-git clone https://github.com/ananthb/starla
-cd starla
-nix develop
+# NixOS
+services.starla.enable = true;
 
-# Build and run
-cargo build --all-features
-cargo run --bin starla
+# Ubuntu / Debian
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_0.1.0_amd64.deb
+sudo dpkg -i starla_*.deb
+sudo systemctl enable --now starla
+
+# Fedora / RHEL
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-0.1.0-1.x86_64.rpm
+sudo dnf install ./starla-*.rpm
+sudo systemctl enable --now starla
+
+# Release tarball
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz
+tar xzf starla-amd64.tar.gz && sudo ./starla/starla
 ```
 
-**With direnv (automatic environment loading):**
-```bash
-nix profile install nixpkgs#direnv
-echo 'eval "$(direnv hook bash)"' >> ~/.bashrc  # or ~/.zshrc
-direnv allow
-# Environment auto-loads when you cd into the directory!
-```
+After starting, register your probe at [atlas.ripe.net/apply/swprobe](https://atlas.ripe.net/apply/swprobe/)
+using the public key from `probe_key.pub` in the state directory.
 
-### Using Cargo Directly
+See the [full installation guide](https://ananthb.github.io/starla/install.html) for all options,
+configuration, and signature verification.
 
-If you prefer not to use Nix, you can use cargo directly, but you'll need to manually install dependencies:
+## Documentation
 
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Build with all features
-cargo build --release --all-features
-
-# Run the probe
-./target/release/starla --log-dir /var/log/starla
-```
-
-## Architecture
-
-```mermaid
-flowchart TB
-    subgraph starla["starla (main process)"]
-        controller["Controller<br/>(russh)"]
-        scheduler["Scheduler<br/>(tokio)"]
-        metrics["Metrics<br/>(optional)"]
-    end
-
-    controller --> ssh["SSH Tunnel"]
-    scheduler --> measurements["Measurements"]
-    metrics --> http["HTTP :9090"]
-
-    measurements --> ping["Ping"]
-    measurements --> dns["DNS"]
-    measurements --> httpM["HTTP"]
-    measurements --> more["..."]
-```
-
-## Building
-
-### Using Nix
-
-```bash
-# Enter the development shell
-nix develop
-
-# Build with all features
-cargo build --all-features
-
-# Build optimized release
-cargo build --release --all-features
-
-# Build minimal (no observability)
-cargo build --release --no-default-features --features minimal
-
-# Build using nix (produces result symlink)
-nix build              # default package
-nix build .#minimal    # minimal package
-```
-
-### Cross-Compilation
-
-```bash
-# Cross-compile for ARM64
-cargo build --release --target aarch64-unknown-linux-gnu
-
-# Cross-compile for ARMv7
-cargo build --release --target armv7-unknown-linux-gnueabihf
-```
-
-## Observability
-
-### Prometheus Metrics
-
-When built with `metrics-export` feature:
-
-```bash
-# Access metrics
-curl http://localhost:9090/metrics
-
-# Health check
-curl http://localhost:9090/health
-```
-
-### Logging
-
-```bash
-# Default: stdout (journalctl-friendly)
-starla
-
-# View logs with journalctl
-journalctl -u starla -f
-
-# Custom log directory
-starla --log-dir /var/log/starla
-
-# Set log level
-RUST_LOG=debug starla
-```
-
-## Testing
-
-```bash
-# Run all tests
-cargo test --workspace --all-features
-
-# Run tests for minimal build
-cargo test --workspace --no-default-features --features minimal
-
-# Run integration tests only
-cargo test --test '*' --all-features
-
-# Run mock controller tests
-cargo test --package mock-controller --all-features
-
-# Code coverage
-cargo tarpaulin --all-features --out Html
-```
-
-## Development
-
-### Nix Development Environment
-
-We use a Nix flake for a fully reproducible development environment:
-
-```bash
-# Enter the development shell
-nix develop
-
-# Or with direnv (auto-loads when entering directory)
-direnv allow
-```
-
-The dev shell includes:
-- Rust toolchain with clippy, rustfmt, rust-analyzer
-- Cross-compilation targets (x86_64, aarch64, armv7)
-- Development tools (cargo-watch, cargo-tarpaulin, cargo-audit)
-- Database tools (sqlite)
-- Documentation tools (mdbook, graphviz)
-
-### Common Commands
-
-**Building:**
-```bash
-cargo build --all-features              # Build all crates
-cargo build --release --all-features    # Release build
-cargo build --no-default-features --features minimal  # Minimal build
-```
-
-**Testing:**
-```bash
-cargo test --workspace --all-features   # All tests
-cargo test --test '*' --all-features    # Integration tests only
-```
-
-**Code Quality:**
-```bash
-cargo fmt --all                         # Format code
-cargo fmt --all -- --check              # Check formatting
-cargo clippy --all-features -- -D warnings  # Lints
-cargo audit                             # Security audit
-```
-
-**Running:**
-```bash
-cargo run --bin starla                  # Run the probe
-RUST_LOG=debug cargo run --bin starla   # With debug logging
-cargo watch -x check -x test            # Auto-rebuild on changes
-```
-
-### CI/CD
-
-- **Garnix**: Builds packages, runs checks, provides binary cache
-- **GitHub Actions**: Creates releases on version tags, publishes to crates.io
-
-```bash
-# Run checks locally (same as CI)
-nix flake check
-
-# Create a release
-git tag v6000.0.0
-git push origin v6000.0.0
-```
+- [Installation & Configuration](https://ananthb.github.io/starla/install.html)
+- [Architecture](https://ananthb.github.io/starla/architecture.html)
+- [API Reference](https://ananthb.github.io/starla/api/starla_common/)
 
 ## License
 
-Licensed under the AGPL v3 - See [LICENSE](LICENSE) file for full license text.
-
-## Acknowledgments
-
-Based on the original [RIPE Atlas Software Probe](https://github.com/RIPE-NCC/ripe-atlas-software-probe) (C implementation).
+AGPL-3.0-or-later — See [LICENSE](LICENSE).

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture - Starla</title>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --accent: #2b6cb0; --code-bg: #f5f5f5; --border: #e2e2e2; --max-w: 740px; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a1a; --fg: #e0e0e0; --muted: #999; --accent: #63b3ed; --code-bg: #2d2d2d; --border: #404040; } }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; }
+  .container { max-width: var(--max-w); margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.3rem; margin-top: 2rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.3rem; }
+  p { margin: 0.5rem 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul { margin: 0.5rem 0 0.5rem 1.5rem; }
+  li { margin: 0.3rem 0; }
+  code { background: var(--code-bg); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9em; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; font-size: 0.85em; }
+  pre code { background: none; padding: 0; }
+  nav { margin: 0.5rem 0 1.5rem; }
+  .diagram { background: var(--code-bg); padding: 1.5rem; border-radius: 6px; margin: 1rem 0; font-family: monospace; white-space: pre; overflow-x: auto; font-size: 0.8em; line-height: 1.4; }
+</style>
+</head>
+<body>
+<div class="container">
+<nav><a href="index.html">&larr; Starla</a></nav>
+<h1>Architecture</h1>
+
+<h2>Overview</h2>
+
+<div class="diagram">
+RIPE Atlas Infrastructure                          Starla Probe
+========================                          ============
+
+ Registration Server                    +---------------------------------+
+ (reg03/reg04:443)                      |                                 |
+       |                                |  +----------+    +-----------+  |
+       | 1. SSH INIT                    |  | Telnet   |    | Scheduler |  |
+       |    (get controller)            |  | Parser   |--->| (tokio)   |  |
+       v                                |  +----^-----+    +-----+-----+  |
+                                        |       |                |        |
+ Controller                             |       |          +-----v-----+  |
+ (ctr-*.atlas:443)                      |       |          | Measure-  |  |
+       |                                |       |          | ments     |  |
+       | 2. SSH INIT                    |       |          | ping,dns, |  |
+       |    (get session)               |       |          | trace,... |  |
+       |                                |       |          +-----+-----+  |
+       | 3. SSH KEEP                    |       |                |        |
+       |    (long-lived connection)     |       |          +-----v-----+  |
+       |                                |       |          | Result    |  |
+       +--[ reverse tunnel ]------------|-------+          | Queue     |  |
+       |   forwarded-tcpip              |                  | (RocksDB) |  |
+       |   (measurement commands)       |                  +-----+-----+  |
+       |                                |                        |        |
+       +--[ direct-tcpip ]<-------------|------------------------+        |
+          channel per upload            |   HTTP POST over SSH channel    |
+          (result uploads)              |                                 |
+                                        +---------------------------------+
+</div>
+
+<h2>Connection Flow</h2>
+
+<ol>
+  <li><strong>Registration</strong> &mdash; Starla connects via SSH to a registration server
+    (<code>reg03.atlas.ripe.net:443</code>), sends an <code>INIT</code> command with probe
+    identity, and receives a controller assignment.</li>
+  <li><strong>Controller INIT</strong> &mdash; Connects to the assigned controller via SSH,
+    sends another <code>INIT</code>, and receives a <code>SESSION_ID</code> and
+    <code>REMOTE_PORT</code>.</li>
+  <li><strong>KEEP session</strong> &mdash; Opens a long-lived SSH connection to the controller
+    running the <code>KEEP</code> command. This connection carries both measurement commands
+    (inbound) and result uploads (outbound).</li>
+</ol>
+
+<h2>No Local Ports</h2>
+
+<p>All communication flows through the SSH tunnel &mdash; starla binds no local TCP ports.</p>
+
+<ul>
+  <li><strong>Measurement commands</strong> arrive via SSH reverse tunnel
+    (<code>forwarded-tcpip</code>). The SSH handler pipes them directly to the telnet
+    command parser through an in-process <code>DuplexStream</code> bridge.</li>
+  <li><strong>Result uploads</strong> go out via SSH <code>direct-tcpip</code> channels.
+    Each upload opens a fresh channel to <code>127.0.0.1:8080</code> on the controller
+    side and writes a raw HTTP/1.1 POST with the measurement results.</li>
+</ul>
+
+<h2>Crate Structure</h2>
+
+<pre><code>starla-probe          Main binary — orchestrates everything
+starla-common         Shared types, config, paths, logging
+starla-controller     SSH connection, telnet parser, channel streams
+starla-measurements   Ping, DNS, traceroute, HTTP, TLS, NTP implementations
+starla-scheduler      Measurement scheduling and concurrent execution
+starla-results        Result formatting, persistent queue, upload transport
+starla-database       RocksDB measurement storage
+starla-network        Raw sockets, source address detection
+starla-metrics        Prometheus metrics export (optional)</code></pre>
+
+<h2>Measurement Execution</h2>
+
+<p>The controller sends measurement schedules as CRONLINE or JSON commands over the
+telnet interface. The scheduler parses these into <code>MeasurementJob</code>s and
+executes them concurrently via <code>tokio::spawn</code>.</p>
+
+<p>Each measurement type implements the <code>Measurement</code> trait:</p>
+
+<pre><code>pub trait Measurement: Send + Sync {
+    async fn execute(&self) -> anyhow::Result&lt;MeasurementResult&gt;;
+}</code></pre>
+
+<p>Results are formatted to match the official C probe's JSON output exactly
+(field order, spacing, numeric precision) and queued in the persistent
+RocksDB-backed result queue for upload.</p>
+
+<h2>Result Upload</h2>
+
+<p>The result handler periodically drains the queue and uploads batches via the
+<code>UploadTransport</code> trait. In production, this opens SSH
+<code>direct-tcpip</code> channels and writes raw HTTP/1.1:</p>
+
+<pre><code>POST /?PROBE_ID=12345&SESSION_ID=abc HTTP/1.1
+Content-Type: application/x-www-form-urlencoded
+
+P_TO_C_REPORT
+RESULT { "id":"1001", "fw":5120, ... }
+RESULT { "id":"1002", "fw":5120, ... }
+
+SESSION_ID abc</code></pre>
+
+<p>Failed uploads are re-queued with exponential backoff. Results older than
+1 hour or with more than 5 failed attempts are dropped.</p>
+
+<h2>State &amp; Directories</h2>
+
+<pre><code>State directory (persistent):
+  probe_key         SSH private key (generated on first run)
+  probe_key.pub     SSH public key (register this at atlas.ripe.net)
+  probe_id          Assigned probe ID
+  known_hosts       Controller SSH host keys (TOFU)
+
+Runtime directory (ephemeral):
+  measurements/     RocksDB measurement database
+  result_queue/     RocksDB result upload queue</code></pre>
+
+<p>Path resolution priority: CLI flag &gt; systemd env &gt; container paths
+(<code>/state</code>, <code>/config</code>) &gt; XDG &gt; standard Linux paths.
+See <a href="api/starla_common/paths/index.html">paths module</a> for details.</p>
+
+</div>
+</body>
+</html>
