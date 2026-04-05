@@ -149,12 +149,17 @@
             release =
               let
                 pkg = self.packages.${system}.default;
+                arch = if system == "x86_64-linux" then "amd64" else "arm64";
               in
-              pkgs.runCommand "starla-release" { } ''
-                mkdir -p $out
-                cp ${pkg}/bin/starla $out/starla-${system}
-                cp ${./config.toml.example} $out/config.toml.example
-                cp ${./starla.service} $out/starla.service
+              pkgs.runCommand "starla-${arch}.tar.gz"
+                {
+                  nativeBuildInputs = [ pkgs.gzip ];
+                } ''
+                mkdir -p starla
+                cp ${pkg}/bin/starla starla/
+                cp ${./config.toml.example} starla/
+                cp ${./starla.service} starla/
+                tar -czvf $out -C . starla
               '';
 
             oci = pkgs.dockerTools.buildLayeredImage {

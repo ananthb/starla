@@ -162,41 +162,41 @@ sudo dnf install ./starla-*.rpm
 # Enable and start
 sudo systemctl enable --now starla</code></pre>
 
-<h2>Release Binary</h2>
+<h2>Release Tarball</h2>
 
-<p>Download the latest release from
-<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.</p>
+<p>Download the latest release tarball from
+<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.
+Each tarball contains the binary, systemd service file, and example config.</p>
 
-<pre><code># Download binary and support files
-curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-x86_64-linux
-curl -LO https://github.com/ananthb/starla/releases/latest/download/config.toml.example
-curl -LO https://github.com/ananthb/starla/releases/latest/download/starla.service
+<pre><code># Download and extract (amd64)
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz
+tar xzf starla-amd64.tar.gz
 
 # For ARM64:
-# curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-aarch64-linux
-
-chmod +x starla-x86_64-linux</code></pre>
+# curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-arm64.tar.gz</code></pre>
 
 <h3>Install as a systemd service</h3>
-<pre><code># Install binary
-sudo install -m 755 starla-x86_64-linux /usr/bin/starla
+<pre><code>cd starla
+
+# Install binary
+sudo install -m 755 starla /usr/bin/starla
 
 # Install config
 sudo mkdir -p /etc/starla
 sudo install -m 644 config.toml.example /etc/starla/config.toml
 
 # Install and enable service
-sudo install -m 644 starla.service /etc/systemd/system/
+sudo install -m 644 starla.service /usr/lib/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now starla</code></pre>
 
 <h3>Run directly</h3>
 <pre><code># Needs CAP_NET_RAW for ping/traceroute
-sudo setcap cap_net_raw=eip ./starla-x86_64-linux
-./starla-x86_64-linux
+sudo setcap cap_net_raw=eip ./starla/starla
+./starla/starla
 
 # Or run as root
-sudo ./starla-x86_64-linux</code></pre>
+sudo ./starla/starla</code></pre>
 
 <h3>Probe key location</h3>
 <pre><code># As root: /var/lib/starla/probe_key.pub

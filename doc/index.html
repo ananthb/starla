@@ -70,9 +70,8 @@ docker run -d --name starla \
 services.starla.enable = true;
 
 # Binary
-curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-x86_64-linux
-chmod +x starla-x86_64-linux
-sudo ./starla-x86_64-linux</code></pre>
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz
+tar xzf starla-amd64.tar.gz && sudo ./starla/starla</code></pre>
 
 <p>See the <a href="install.html">full installation guide</a> for all options.</p>
 

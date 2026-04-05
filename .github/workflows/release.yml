@@ -23,7 +23,7 @@ jobs:
 
       - uses: sigstore/cosign-installer@v3
 
-      # Build binaries
+      # Build release tarballs (binary + service + config per arch)
       - name: Build x86_64 release
         run: nix build .#packages.x86_64-linux.release -o result-x86_64
 
@@ -39,27 +39,25 @@ jobs:
             IFS=: read -r nix_arch deb_arch rpm_arch <<< "$arch_pair"
             dir="pkg-${deb_arch}"
             mkdir -p "$dir"
-            cp "result-${nix_arch}/starla-${nix_arch}-linux" "${dir}/starla"
-            cp "result-${nix_arch}/starla.service" "${dir}/"
-            cp "result-${nix_arch}/config.toml.example" "${dir}/"
-            cp packaging/nfpm.yaml "${dir}/"
 
-            cd "$dir"
+            # Extract binary from tarball for nfpm
+            tar -xzf "$(readlink result-${nix_arch})" -C "${dir}"
+            cp packaging/nfpm.yaml "${dir}/starla/"
+
+            cd "${dir}/starla"
             ARCH="$deb_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
               nfpm package -p deb -f nfpm.yaml
             ARCH="$rpm_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
               nfpm package -p rpm -f nfpm.yaml
-            cd ..
+            cd ../..
           done
 
           # Collect all artifacts into dist/
           mkdir -p dist
-          cp result-x86_64/starla-x86_64-linux dist/
-          cp result-aarch64/starla-aarch64-linux dist/
-          cp result-x86_64/config.toml.example dist/
-          cp result-x86_64/starla.service dist/
-          mv pkg-amd64/*.deb pkg-amd64/*.rpm dist/
-          mv pkg-arm64/*.deb pkg-arm64/*.rpm dist/
+          cp "$(readlink result-x86_64)" dist/starla-amd64.tar.gz
+          cp "$(readlink result-aarch64)" dist/starla-arm64.tar.gz
+          mv pkg-amd64/starla/*.deb pkg-amd64/starla/*.rpm dist/
+          mv pkg-arm64/starla/*.deb pkg-arm64/starla/*.rpm dist/
 
       # Checksums and signing
       - name: Generate checksums and sign artifacts
