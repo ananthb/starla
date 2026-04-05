@@ -69,8 +69,9 @@ impl Default for ControllerSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageSettings {
-    #[serde(default = "default_max_queue_size_mb")]
-    pub max_queue_size_mb: u64,
+    /// Maximum number of results to hold in the upload queue
+    #[serde(default = "default_max_queue_size")]
+    pub max_queue_size: usize,
 
     #[serde(default = "default_retention_days")]
     pub retention_days: u32,
@@ -79,7 +80,7 @@ pub struct StorageSettings {
 impl Default for StorageSettings {
     fn default() -> Self {
         Self {
-            max_queue_size_mb: default_max_queue_size_mb(),
+            max_queue_size: default_max_queue_size(),
             retention_days: default_retention_days(),
         }
     }
@@ -151,8 +152,8 @@ fn default_ssh_timeout() -> u64 {
 fn default_keepalive_interval() -> u64 {
     60
 }
-fn default_max_queue_size_mb() -> u64 {
-    100
+fn default_max_queue_size() -> usize {
+    10000
 }
 fn default_retention_days() -> u32 {
     30

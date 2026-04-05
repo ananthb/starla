@@ -32,8 +32,8 @@ ssh_timeout = 30
 keepalive_interval = 60
 
 [storage]
-# Maximum result queue size in MB
-max_queue_size_mb = 100
+# Maximum number of results to hold in the upload queue
+max_queue_size = 10000
 
 # Result retention period in days
 retention_days = 30

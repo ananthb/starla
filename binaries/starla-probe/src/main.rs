@@ -221,7 +221,10 @@ async fn main() -> Result<()> {
     let result_handler = Arc::new(ResultHandler::new(
         transport,
         UploaderConfig::default(),
-        ResultHandlerConfig::default(),
+        ResultHandlerConfig {
+            max_queue_size: config.storage.max_queue_size,
+            ..ResultHandlerConfig::default()
+        },
     ));
 
     // Initialize Scheduler

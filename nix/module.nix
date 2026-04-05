@@ -13,7 +13,7 @@ let
       keepalive_interval = cfg.controller.keepaliveInterval;
     };
     storage = {
-      max_queue_size_mb = cfg.storage.maxQueueSizeMB;
+      max_queue_size = cfg.storage.maxQueueSize;
       retention_days = cfg.storage.retentionDays;
     };
     metrics = {
@@ -73,10 +73,10 @@ in
     };
 
     storage = {
-      maxQueueSizeMB = lib.mkOption {
+      maxQueueSize = lib.mkOption {
         type = lib.types.ints.positive;
-        default = 100;
-        description = "Maximum result queue size in MB.";
+        default = 10000;
+        description = "Maximum number of results to hold in the upload queue.";
       };
 
       retentionDays = lib.mkOption {
