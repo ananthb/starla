@@ -68,11 +68,29 @@ docker run -d --name starla \
   --cap-add NET_RAW \
   ghcr.io/ananthb/starla:latest</code></pre>
 
+<h3>Stateless / Kubernetes</h3>
+
+<p>For environments without persistent storage, pass the SSH private key
+via the <code>STARLA_SSH_KEY</code> environment variable. No volume mounts needed.</p>
+
+<pre><code># Generate a key locally
+ssh-keygen -t ed25519 -f starla-key -N ""
+
+# Run with key from env var (no persistent state)
+docker run -d --name starla \
+  -e STARLA_SSH_KEY="$(cat starla-key)" \
+  --cap-add NET_RAW \
+  ghcr.io/ananthb/starla:latest</code></pre>
+
+<p>Register the public key (<code>starla-key.pub</code>) at
+<a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.
+The key can be stored as a Kubernetes Secret and mounted as an env var.</p>
+
 <h3>View logs and probe key</h3>
 <pre><code># Follow logs
 docker logs -f starla
 
-# Get the probe public key (needed for registration)
+# Get the probe public key (when using persistent state)
 docker exec starla cat /state/probe_key.pub</code></pre>
 
 <h2>Ubuntu / Debian</h2>
@@ -138,6 +156,7 @@ state/config/runtime directories.</p>
 
 <table>
 <tr><th>Option</th><th>Default</th><th>Description</th></tr>
+<tr><td><code>sshKeyFile</code></td><td><code>null</code></td><td>Path to SSH private key file (for agenix/sops-nix)</td></tr>
 <tr><td><code>logLevel</code></td><td><code>"info"</code></td><td>Log verbosity (trace/debug/info/warn/error)</td></tr>
 <tr><td><code>reportInterfaceStats</code></td><td><code>false</code></td><td>Send network interface traffic statistics</td></tr>
 <tr><td><code>controller.registrationServers</code></td><td>reg03, reg04</td><td>RIPE Atlas registration servers</td></tr>
@@ -157,6 +176,23 @@ state/config/runtime directories.</p>
   logLevel = "debug";
   metrics.listenAddr = "0.0.0.0:9695";
   storage.retentionDays = 7;
+};</code></pre>
+
+<h3>Using a secret-managed SSH key</h3>
+<p>For agenix, sops-nix, or similar secret managers, point <code>sshKeyFile</code>
+to the decrypted key file. The key is loaded via systemd's <code>LoadCredential</code>.</p>
+<pre><code># With agenix
+age.secrets.starla-key.file = ./secrets/starla-key.age;
+services.starla = {
+  enable = true;
+  sshKeyFile = config.age.secrets.starla-key.path;
+};
+
+# With sops-nix
+sops.secrets.starla-key = { };
+services.starla = {
+  enable = true;
+  sshKeyFile = config.sops.secrets.starla-key.path;
 };</code></pre>
 
 <h3>Probe key location</h3>

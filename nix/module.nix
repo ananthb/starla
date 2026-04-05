@@ -43,6 +43,17 @@ in
       description = "Log verbosity level.";
     };
 
+    sshKeyFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        Path to a file containing the SSH private key (OpenSSH PEM format).
+        When set, starla reads the key from this file via the STARLA_SSH_KEY
+        environment variable instead of generating one in the state directory.
+        Use this to inject keys from secret managers like agenix or sops-nix.
+      '';
+    };
+
     reportInterfaceStats = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -137,7 +148,6 @@ in
 
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${cfg.package}/bin/starla --config %E/starla/config.toml";
         Restart = "on-failure";
         RestartSec = 10;
 
@@ -174,6 +184,9 @@ in
         SystemCallArchitectures = "native";
         RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" "AF_NETLINK" ];
         SystemCallFilter = [ "@system-service" "~@privileged" "@network-io" "@raw-io" ];
+        ExecStart = "${cfg.package}/bin/starla --config %E/starla/config.toml";
+      } // lib.optionalAttrs (cfg.sshKeyFile != null) {
+        LoadCredential = [ "ssh-key:${cfg.sshKeyFile}" ];
       };
     };
 

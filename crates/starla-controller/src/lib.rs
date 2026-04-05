@@ -15,8 +15,8 @@ pub use russh;
 
 pub use channel_stream::channel_to_stream;
 pub use ssh::{
-    generate_key, key_fingerprint, load_key, save_key, ControllerInfo, InitResponse, KnownHosts,
-    ProbeInitInfo, SshConfig, SshConnection, TelnetState,
+    generate_key, key_fingerprint, load_key, load_key_from_string, save_key, ControllerInfo,
+    InitResponse, KnownHosts, ProbeInitInfo, SshConfig, SshConnection, TelnetState,
 };
 pub use telnet::{
     DnsSpec, HttpSpec, NtpSpec, PingSpec, ScheduleSpec, TelnetCommand, TelnetServer, TlsSpec,

@@ -997,6 +997,12 @@ pub async fn load_key(path: &Path) -> anyhow::Result<KeyPair> {
     Ok(key)
 }
 
+/// Load SSH key pair from a PEM string (e.g. from an environment variable)
+pub fn load_key_from_string(pem: &str) -> anyhow::Result<KeyPair> {
+    let key = russh_keys::decode_secret_key(pem, None)?;
+    Ok(key)
+}
+
 /// Generate a new SSH key pair
 pub fn generate_key() -> anyhow::Result<KeyPair> {
     let key = KeyPair::generate_ed25519()

@@ -474,40 +474,70 @@ async fn main() -> Result<()> {
     // Controller connection
     debug!("Connecting to controller...");
 
-    // Load or generate SSH key
-    let key_path = starla_common::probe_key_path();
-    let key = if key_path.exists() {
-        match starla_controller::load_key(&key_path).await {
+    // Load SSH key from: env var > systemd credential > file > generate new
+    let key = if let Ok(pem) = std::env::var("STARLA_SSH_KEY") {
+        match starla_controller::load_key_from_string(&pem) {
             Ok(k) => {
-                debug!("Loaded SSH key from {}", key_path.display());
+                debug!("Loaded SSH key from STARLA_SSH_KEY env var");
                 k
             }
             Err(e) => {
-                warn!("Failed to load SSH key: {}. Generating new key...", e);
-                let new_key = starla_controller::generate_key()?;
-                if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
-                    warn!("Failed to save SSH key: {}", e);
-                }
-                new_key
+                error!("Failed to parse STARLA_SSH_KEY: {}", e);
+                anyhow::bail!("Invalid STARLA_SSH_KEY");
             }
         }
+    } else if let Ok(creds_dir) = std::env::var("CREDENTIALS_DIRECTORY") {
+        let cred_path = std::path::PathBuf::from(creds_dir).join("ssh-key");
+        if cred_path.exists() {
+            match starla_controller::load_key(&cred_path).await {
+                Ok(k) => {
+                    debug!("Loaded SSH key from systemd credential");
+                    k
+                }
+                Err(e) => {
+                    error!("Failed to load SSH key from credential: {}", e);
+                    anyhow::bail!("Invalid ssh-key credential");
+                }
+            }
+        } else {
+            // Credentials dir exists but no ssh-key — fall through to file
+            let key_path = starla_common::probe_key_path();
+            starla_controller::load_key(&key_path).await?
+        }
     } else {
-        debug!("No SSH key found, generating new key...");
-        let new_key = starla_controller::generate_key()?;
-        if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
-            warn!("Failed to save SSH key: {}", e);
+        let key_path = starla_common::probe_key_path();
+        if key_path.exists() {
+            match starla_controller::load_key(&key_path).await {
+                Ok(k) => {
+                    debug!("Loaded SSH key from {}", key_path.display());
+                    k
+                }
+                Err(e) => {
+                    warn!("Failed to load SSH key: {}. Generating new key...", e);
+                    let new_key = starla_controller::generate_key()?;
+                    if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
+                        warn!("Failed to save SSH key: {}", e);
+                    }
+                    new_key
+                }
+            }
+        } else {
+            debug!("No SSH key found, generating new key...");
+            let new_key = starla_controller::generate_key()?;
+            if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
+                warn!("Failed to save SSH key: {}", e);
+            }
+            if let Ok(fp) = starla_controller::key_fingerprint(&new_key) {
+                info!("Generated new probe key: {}", fp);
+            }
+            let pubkey_path = starla_common::probe_pubkey_path();
+            match std::fs::read_to_string(&pubkey_path) {
+                Ok(contents) => info!("Public key:\n{}", contents.trim()),
+                Err(_) => info!("Public key file: {}", pubkey_path.display()),
+            }
+            info!("Register your probe at: https://atlas.ripe.net/apply/swprobe/");
+            new_key
         }
-        if let Ok(fp) = starla_controller::key_fingerprint(&new_key) {
-            info!("Generated new probe key: {}", fp);
-        }
-        // Print the public key so users can register it
-        let pubkey_path = starla_common::probe_pubkey_path();
-        match std::fs::read_to_string(&pubkey_path) {
-            Ok(contents) => info!("Public key:\n{}", contents.trim()),
-            Err(_) => info!("Public key file: {}", pubkey_path.display()),
-        }
-        info!("Register your probe at: https://atlas.ripe.net/apply/swprobe/");
-        new_key
     };
 
     // Log probe identity when both probe ID and key are available
