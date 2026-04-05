@@ -156,9 +156,9 @@
                   nativeBuildInputs = [ pkgs.gzip ];
                 } ''
                 mkdir -p starla
-                cp ${pkg}/bin/starla starla/
-                cp ${./config.toml.example} starla/
-                cp ${./starla.service} starla/
+                cp ${pkg}/bin/starla starla/starla
+                cp ${./config.toml.example} starla/config.toml.example
+                cp ${./starla.service} starla/starla.service
                 tar -czvf $out -C . starla
               '';
 
