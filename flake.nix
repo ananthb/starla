@@ -91,6 +91,9 @@
             cargo-outdated
             cargo-watch
             cargo-tarpaulin
+
+            # Signing
+            cosign
           ] ++ lib.optionals stdenv.isLinux [
             # Linux-specific
             iproute2
