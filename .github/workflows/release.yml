@@ -11,6 +11,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write # cosign keyless signing
     steps:
       - uses: actions/checkout@v4
 
@@ -20,22 +21,67 @@ jobs:
             extra-substituters = https://cache.garnix.io
             extra-trusted-public-keys = cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g=
 
+      - uses: sigstore/cosign-installer@v3
+
+      # Build binaries
       - name: Build x86_64 release
         run: nix build .#packages.x86_64-linux.release -o result-x86_64
 
       - name: Build aarch64 release
         run: nix build .#packages.aarch64-linux.release -o result-aarch64
 
+      # Build .deb and .rpm packages
+      - name: Build packages
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          for arch_pair in "x86_64:amd64:x86_64" "aarch64:arm64:aarch64"; do
+            IFS=: read -r nix_arch deb_arch rpm_arch <<< "$arch_pair"
+            dir="pkg-${deb_arch}"
+            mkdir -p "$dir"
+            cp "result-${nix_arch}/starla-${nix_arch}-linux" "${dir}/starla"
+            cp "result-${nix_arch}/starla.service" "${dir}/"
+            cp "result-${nix_arch}/config.toml.example" "${dir}/"
+            cp packaging/nfpm.yaml "${dir}/"
+
+            cd "$dir"
+            ARCH="$deb_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+              nfpm package -p deb -f nfpm.yaml
+            ARCH="$rpm_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+              nfpm package -p rpm -f nfpm.yaml
+            cd ..
+          done
+
+          # Collect all artifacts into dist/
+          mkdir -p dist
+          cp result-x86_64/starla-x86_64-linux dist/
+          cp result-aarch64/starla-aarch64-linux dist/
+          cp result-x86_64/config.toml.example dist/
+          cp result-x86_64/starla.service dist/
+          mv pkg-amd64/*.deb pkg-amd64/*.rpm dist/
+          mv pkg-arm64/*.deb pkg-arm64/*.rpm dist/
+
+      # Checksums and signing
+      - name: Generate checksums and sign artifacts
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+
+          for f in *; do
+            cosign sign-blob --yes \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.pem" \
+              "$f"
+          done
+
+      # GitHub Release
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            result-x86_64/starla-x86_64-linux
-            result-aarch64/starla-aarch64-linux
-            result-x86_64/config.toml.example
-            result-x86_64/starla.service
+          files: dist/*
           generate_release_notes: true
 
+      # OCI images
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
 
@@ -69,3 +115,11 @@ jobs:
             --platforms linux/amd64,linux/arm64 \
             --template "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-ARCH" \
             --target "ghcr.io/ananthb/starla:latest"
+
+      # Sign OCI images
+      - name: Sign container images
+        run: |
+          cosign sign --yes "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-amd64"
+          cosign sign --yes "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-arm64"
+          cosign sign --yes "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
+          cosign sign --yes "ghcr.io/ananthb/starla:latest"

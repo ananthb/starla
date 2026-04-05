@@ -1,0 +1,34 @@
+name: starla
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+maintainer: Ananth Bhaskararaman <ab@calculon.tech>
+description: A Rust implementation of the RIPE Atlas Software Probe
+vendor: Starla Contributors
+homepage: https://github.com/ananthb/starla
+license: AGPL-3.0-or-later
+
+contents:
+  - src: ./starla
+    dst: /usr/bin/starla
+    file_info:
+      mode: 0755
+
+  - src: ./starla.service
+    dst: /usr/lib/systemd/system/starla.service
+    type: config
+
+  - src: ./config.toml.example
+    dst: /etc/starla/config.toml.example
+
+  - dst: /etc/starla
+    type: dir
+    file_info:
+      mode: 0750
+
+deb:
+  compression: zstd
+
+rpm:
+  compression: zstd
+  group: Applications/Internet

@@ -128,6 +128,40 @@ state/config/runtime directories.</p>
 <pre><code># State is at /var/lib/starla/ (managed by systemd)
 sudo cat /var/lib/starla/probe_key.pub</code></pre>
 
+<h2>Ubuntu / Debian</h2>
+
+<p>Download the <code>.deb</code> package from
+<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.</p>
+
+<pre><code># amd64
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_0.1.0_amd64.deb
+sudo dpkg -i starla_*.deb
+
+# arm64
+# curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_0.1.0_arm64.deb
+
+# Enable and start
+sudo systemctl enable --now starla</code></pre>
+
+<p>The package installs the binary, systemd service, and example config.
+Copy the example to create your config:</p>
+<pre><code>sudo cp /etc/starla/config.toml.example /etc/starla/config.toml</code></pre>
+
+<h2>Fedora / RHEL</h2>
+
+<p>Download the <code>.rpm</code> package from
+<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.</p>
+
+<pre><code># x86_64
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-0.1.0.x86_64.rpm
+sudo dnf install ./starla-*.rpm
+
+# aarch64
+# curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-0.1.0.aarch64.rpm
+
+# Enable and start
+sudo systemctl enable --now starla</code></pre>
+
 <h2>Release Binary</h2>
 
 <p>Download the latest release from
@@ -190,6 +224,38 @@ for all available options. The config file is optional &mdash; all settings have
   <li><code>$XDG_CONFIG_HOME/starla/config.toml</code></li>
   <li><code>/etc/starla/config.toml</code> (root) or <code>~/.config/starla/config.toml</code> (user)</li>
 </ol>
+
+<h2>Verifying Downloads</h2>
+
+<p>All release artifacts are signed with
+<a href="https://docs.sigstore.dev/cosign/overview/">cosign</a> keyless signing
+via GitHub Actions OIDC. No GPG keys to manage.</p>
+
+<h3>Verify a binary or package</h3>
+<pre><code># Install cosign: https://docs.sigstore.dev/system_config/installation/
+
+# Download the artifact, its .sig and .pem from the release
+cosign verify-blob \
+  --signature starla-x86_64-linux.sig \
+  --certificate starla-x86_64-linux.pem \
+  --certificate-identity-regexp 'https://github.com/ananthb/starla/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  starla-x86_64-linux</code></pre>
+
+<h3>Verify a container image</h3>
+<pre><code>cosign verify \
+  --certificate-identity-regexp 'https://github.com/ananthb/starla/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  ghcr.io/ananthb/starla:latest</code></pre>
+
+<h3>Verify checksums</h3>
+<pre><code>cosign verify-blob \
+  --signature SHA256SUMS.sig \
+  --certificate SHA256SUMS.pem \
+  --certificate-identity-regexp 'https://github.com/ananthb/starla/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  SHA256SUMS
+sha256sum -c SHA256SUMS</code></pre>
 
 </div>
 </body>
