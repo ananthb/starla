@@ -3,6 +3,8 @@ name: Docs
 on:
   push:
     branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -37,6 +39,68 @@ jobs:
           mkdir -p site
           cp doc/*.html site/
           mv target/doc site/api
+
+      # Package repository generation
+      - name: Import GPG key
+        if: hashFiles('packaging/GPG-KEY') != ''
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Build apt repository
+        if: hashFiles('packaging/GPG-KEY') != ''
+        run: |
+          mkdir -p site/deb/pool site/deb/dists/stable/main/binary-amd64 site/deb/dists/stable/main/binary-arm64
+
+          # Download .deb packages from latest release
+          gh release download --pattern '*.deb' --dir site/deb/pool/ || true
+
+          if ls site/deb/pool/*.deb 1>/dev/null 2>&1; then
+            cd site/deb
+
+            # Generate Packages files per architecture
+            for arch in amd64 arm64; do
+              dpkg-scanpackages --arch "$arch" pool/ > "dists/stable/main/binary-${arch}/Packages"
+              gzip -k "dists/stable/main/binary-${arch}/Packages"
+            done
+
+            # Generate Release file
+            cd dists/stable
+            apt-ftparchive release . > Release
+
+            # GPG sign
+            gpg --batch --yes --armor --detach-sign --output Release.gpg Release
+            gpg --batch --yes --clearsign --output InRelease Release
+            cd ../..
+
+            # Include public key
+            cp ../../packaging/GPG-KEY KEY.gpg
+
+            cd ../..
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build rpm repository
+        if: hashFiles('packaging/GPG-KEY') != ''
+        run: |
+          mkdir -p site/rpm/packages
+
+          # Download .rpm packages from latest release
+          gh release download --pattern '*.rpm' --dir site/rpm/packages/ || true
+
+          if ls site/rpm/packages/*.rpm 1>/dev/null 2>&1; then
+            nix shell nixpkgs#createrepo_c -c createrepo_c site/rpm/
+
+            # Sign repomd.xml
+            gpg --batch --yes --armor --detach-sign \
+              --output site/rpm/repodata/repomd.xml.asc \
+              site/rpm/repodata/repomd.xml
+
+            # Include public key
+            cp packaging/GPG-KEY site/rpm/RPM-GPG-KEY-starla
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - uses: actions/configure-pages@v5
 

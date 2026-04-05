@@ -50,9 +50,9 @@ jobs:
             dir="pkg-${deb_arch}"
             mkdir -p "$dir"
 
-            # Extract binary from tarball for nfpm
+            # Extract binary from tarball and add packaging files for nfpm
             tar -xzf "$(readlink result-${nix_arch})" -C "${dir}"
-            cp packaging/nfpm.yaml "${dir}/starla/"
+            cp packaging/nfpm.yaml packaging/starla.gpg packaging/starla.sources packaging/starla.repo "${dir}/starla/"
 
             cd "${dir}/starla"
             ARCH="$deb_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \

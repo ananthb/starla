@@ -1,0 +1,5 @@
+Types: deb
+URIs: https://ananthb.github.io/starla/deb/
+Suites: stable
+Components: main
+Signed-By: /usr/share/keyrings/starla.gpg

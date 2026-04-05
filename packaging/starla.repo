@@ -1,0 +1,6 @@
+[starla]
+name=Starla
+baseurl=https://ananthb.github.io/starla/rpm/
+enabled=1
+gpgcheck=1
+gpgkey=https://ananthb.github.io/starla/rpm/RPM-GPG-KEY-starla
