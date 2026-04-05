@@ -75,6 +75,41 @@ docker logs -f starla
 # Get the probe public key (needed for registration)
 docker exec starla cat /state/probe_key.pub</code></pre>
 
+<h2>Ubuntu / Debian</h2>
+
+<p>Download the <code>.deb</code> package from
+<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.
+The package automatically configures the apt repository for future updates.</p>
+
+<pre><code># Install (amd64)
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_0.1.0_amd64.deb
+sudo dpkg -i starla_*.deb
+sudo apt update
+
+# arm64: download starla_0.1.0_arm64.deb instead
+
+# Enable and start
+sudo systemctl enable --now starla</code></pre>
+
+<p>Future updates arrive via <code>sudo apt upgrade starla</code>.</p>
+
+<h2>Fedora / RHEL</h2>
+
+<p>Download the <code>.rpm</code> package from
+<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.
+The package automatically configures the dnf repository for future updates.</p>
+
+<pre><code># Install (x86_64)
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-0.1.0-1.x86_64.rpm
+sudo dnf install ./starla-*.rpm
+
+# aarch64: download starla-0.1.0-1.aarch64.rpm instead
+
+# Enable and start
+sudo systemctl enable --now starla</code></pre>
+
+<p>Future updates arrive via <code>sudo dnf upgrade starla</code>.</p>
+
 <h2>NixOS</h2>
 
 <p>Add the starla flake to your NixOS configuration:</p>
@@ -127,41 +162,6 @@ state/config/runtime directories.</p>
 <h3>Probe key location</h3>
 <pre><code># State is at /var/lib/starla/ (managed by systemd)
 sudo cat /var/lib/starla/probe_key.pub</code></pre>
-
-<h2>Ubuntu / Debian</h2>
-
-<p>Download the <code>.deb</code> package from
-<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.
-The package automatically configures the apt repository for future updates.</p>
-
-<pre><code># Install (amd64)
-curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_0.1.0_amd64.deb
-sudo dpkg -i starla_*.deb
-sudo apt update
-
-# arm64: download starla_0.1.0_arm64.deb instead
-
-# Enable and start
-sudo systemctl enable --now starla</code></pre>
-
-<p>Future updates arrive via <code>sudo apt upgrade starla</code>.</p>
-
-<h2>Fedora / RHEL</h2>
-
-<p>Download the <code>.rpm</code> package from
-<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.
-The package automatically configures the dnf repository for future updates.</p>
-
-<pre><code># Install (x86_64)
-curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-0.1.0-1.x86_64.rpm
-sudo dnf install ./starla-*.rpm
-
-# aarch64: download starla-0.1.0-1.aarch64.rpm instead
-
-# Enable and start
-sudo systemctl enable --now starla</code></pre>
-
-<p>Future updates arrive via <code>sudo dnf upgrade starla</code>.</p>
 
 <h2>Release Tarball</h2>
 
