@@ -134,3 +134,9 @@ jobs:
           cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-arm64"
           cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
           cosign sign "ghcr.io/ananthb/starla:latest"
+
+      # Update package repos on GitHub Pages
+      - name: Trigger docs rebuild
+        run: gh workflow run docs.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
