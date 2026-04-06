@@ -4,15 +4,39 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Protocol Reference - Starla</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/picocss/2.1.1/pico.min.css">
-<style>main.container{max-width:720px}</style>
+<style>
+  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --accent: #2b6cb0; --code-bg: #f5f5f5; --border: #e2e2e2; --max-w: 740px; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a1a; --fg: #e0e0e0; --muted: #999; --accent: #63b3ed; --code-bg: #2d2d2d; --border: #404040; } }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; }
+  .container { max-width: var(--max-w); margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.3rem; margin-top: 2.5rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.3rem; }
+  h4 { font-size: 1rem; margin-top: 1.2rem; margin-bottom: 0.2rem; }
+  p { margin: 0.5rem 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  ul, ol { margin: 0.5rem 0 0.5rem 1.5rem; }
+  li { margin: 0.25rem 0; }
+  code { background: var(--code-bg); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9em; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; font-size: 0.82em; line-height: 1.5; }
+  pre code { background: none; padding: 0; }
+  nav { margin: 0.5rem 0 1.5rem; }
+  table { border-collapse: collapse; margin: 0.75rem 0; width: 100%; font-size: 0.9em; }
+  th, td { text-align: left; padding: 0.3rem 0.6rem; border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; }
+  .warn { background: #fff3cd; border-left: 3px solid #ffc107; padding: 0.5rem 0.75rem; margin: 0.75rem 0; border-radius: 0 4px 4px 0; }
+  @media (prefers-color-scheme: dark) { .warn { background: #3d3200; border-color: #ffc107; } }
+  .hljs { background: var(--code-bg) !important; }
+</style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" media="(prefers-color-scheme: light)">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
 <script>hljs.highlightAll();</script>
 </head>
 <body>
-<main class="container">
+<div class="container">
 <nav><a href="index.html">&larr; Starla</a></nav>
 <h1>Protocol Reference</h1>
 
@@ -218,9 +242,9 @@ omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
 
 <p>On timeout: <code>"result": { "error":{"timeout":5000} }</code></p>
 
-<blockquote><code>abuf</code> is the base64-encoded raw DNS wire response. This is the
+<div class="warn"><code>abuf</code> is the base64-encoded raw DNS wire response. This is the
 most important field &mdash; the RIPE Atlas API parses it server-side for detailed
-analysis. Without it, results are accepted but incomplete.</blockquote>
+analysis. Without it, results are accepted but incomplete.</div>
 
 <h3>HTTP (<code>evhttpget</code>)</h3>
 
@@ -307,10 +331,10 @@ SESSION_ID fa0b28e5...</code></pre>
 <code>429</code> means rate limiting &mdash; honor the <code>Retry-After</code>
 header. The official <code>httppost</code> uploads once per 60 seconds.</p>
 
-<blockquote>The controller <strong>requires</strong> system status results
+<div class="warn">The controller <strong>requires</strong> system status results
 (9018, 7001, 9002, 9901) alongside measurement results. Without them, the
 controller rate-limits uploads with persistent 429 responses that survive
-reconnections. The official probe includes these in every upload batch.</blockquote>
+reconnections. The official probe includes these in every upload batch.</div>
 
 <h3>System status results</h3>
 
@@ -326,8 +350,8 @@ reconnections. The official probe includes these in every upload batch.</blockqu
 
 <h2>5. RESULT Line Format Quirks</h2>
 
-<blockquote>The controller may do rigid string parsing. These quirks
-<strong>must</strong> be matched exactly.</blockquote>
+<div class="warn">The controller may do rigid string parsing. These quirks
+<strong>must</strong> be matched exactly.</div>
 
 <ul>
   <li><strong>mver spacing</strong>: <code>"mver": "2.6.4"</code> has a space after
@@ -383,6 +407,6 @@ its <code>simpleping</code> and <code>condmv</code> utilities.</p>
 templates. Failing to expand <code>$p</code> causes <code>hickory-dns</code> to
 reject the label as malformed (measurement 30001 uses these).</p>
 
-</main>
+</div>
 </body>
 </html>
