@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Starla - RIPE Atlas Software Probe</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/picocss/2.1.2/pico.min.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" media="(prefers-color-scheme: light)">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
@@ -11,14 +12,14 @@
 <script>hljs.highlightAll();</script>
 </head>
 <body>
-<div class="container">
+<main class="container">
 <h1>Starla <small>RIPE Atlas Software Probe</small></h1>
 
 <div class="badges">
   <a href="https://github.com/ananthb/starla"><img src="https://img.shields.io/github/license/ananthb/starla" alt="License"></a>
   <a href="https://github.com/ananthb/starla/releases"><img src="https://img.shields.io/github/v/release/ananthb/starla" alt="Release"></a>
   <a href="https://ghcr.io/ananthb/starla"><img src="https://img.shields.io/badge/container-ghcr.io-blue" alt="Container"></a>
-</div>
+</main>
 
 <p>Starla is an alternative unofficial <a href="https://atlas.ripe.net/">RIPE Atlas</a>
 software probe written in Rust. It connects to the RIPE Atlas controller
@@ -77,6 +78,6 @@ for crash resilience.</p>
 You'll need the probe's public key, which is printed in the log output and saved to
 the state directory as <code>probe_key.pub</code>.</p>
 
-</div>
+</main>
 </body>
 </html>

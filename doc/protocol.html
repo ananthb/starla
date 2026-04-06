@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Protocol Reference - Starla</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/picocss/2.1.2/pico.min.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" media="(prefers-color-scheme: light)">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
@@ -11,7 +12,7 @@
 <script>hljs.highlightAll();</script>
 </head>
 <body>
-<div class="container">
+<main class="container">
 <nav><a href="index.html">&larr; Starla</a></nav>
 <h1>Protocol Reference</h1>
 
@@ -219,7 +220,7 @@ omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
 
 <div class="warn"><code>abuf</code> is the base64-encoded raw DNS wire response. This is the
 most important field &mdash; the RIPE Atlas API parses it server-side for detailed
-analysis. Without it, results are accepted but incomplete.</div>
+analysis. Without it, results are accepted but incomplete.</main>
 
 <h3>HTTP (<code>evhttpget</code>)</h3>
 
@@ -309,7 +310,7 @@ header. The official <code>httppost</code> uploads once per 60 seconds.</p>
 <div class="warn">The controller <strong>requires</strong> system status results
 (9018, 7001, 9002, 9901) alongside measurement results. Without them, the
 controller rate-limits uploads with persistent 429 responses that survive
-reconnections. The official probe includes these in every upload batch.</div>
+reconnections. The official probe includes these in every upload batch.</main>
 
 <h3>System status results</h3>
 
@@ -326,7 +327,7 @@ reconnections. The official probe includes these in every upload batch.</div>
 <h2>5. RESULT Line Format Quirks</h2>
 
 <div class="warn">The controller may do rigid string parsing. These quirks
-<strong>must</strong> be matched exactly.</div>
+<strong>must</strong> be matched exactly.</main>
 
 <ul>
   <li><strong>mver spacing</strong>: <code>"mver": "2.6.4"</code> has a space after
@@ -382,6 +383,6 @@ its <code>simpleping</code> and <code>condmv</code> utilities.</p>
 templates. Failing to expand <code>$p</code> causes <code>hickory-dns</code> to
 reject the label as malformed (measurement 30001 uses these).</p>
 
-</div>
+</main>
 </body>
 </html>
