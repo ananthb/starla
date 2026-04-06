@@ -313,14 +313,35 @@ Connection: close
 Content-Length: 1234
 
 P_TO_C_REPORT
-RESULT { ... }
-RESULT { ... }
+RESULT { "id":"9018", "fw":5120, ... disk stats ... }
+RESULT { "id": "7001", "fw":5120, ... uptime ... }
+RESULT { "id": "9002", "fw":5120, ... interface stats ... }
+RESULT 9901 ongoing 1775483034 starla
+RESULT { "id":"1001", "fw":5120, ... measurement result ... }
+RESULT { "id":"1002", "fw":5120, ... measurement result ... }
 
 SESSION_ID fa0b28e5...</code></pre>
 
 <p>The controller responds <code>200 OK</code> with body <code>OK\n</code> on success.
 <code>429</code> means rate limiting &mdash; honor the <code>Retry-After</code>
 header. The official <code>httppost</code> uploads once per 60 seconds.</p>
+
+<div class="warn">The controller <strong>requires</strong> system status results
+(9018, 7001, 9002, 9901) alongside measurement results. Without them, the
+controller rate-limits uploads with persistent 429 responses that survive
+reconnections. The official probe includes these in every upload batch.</div>
+
+<h3>System status results</h3>
+
+<p>These are included in every upload batch, before measurement results:</p>
+
+<table>
+<tr><th>ID</th><th>Description</th><th>Format</th></tr>
+<tr><td><code>9018</code></td><td>Disk stats</td><td><code>bsize</code>, <code>blocks</code>, <code>bfree</code>, <code>free</code> (from <code>statvfs("/")</code>)</td></tr>
+<tr><td><code>7001</code></td><td>Probe uptime</td><td><code>uptime</code> in seconds since start, <code>lts</code></td></tr>
+<tr><td><code>9002</code></td><td>Network interfaces</td><td>Per-interface <code>bytes_recv</code>, <code>pkt_recv</code>, <code>bytes_sent</code>, <code>pkt_sent</code> (from <code>/proc/net/dev</code>)</td></tr>
+<tr><td><code>9901</code></td><td>Ongoing status</td><td>Plain text: <code>RESULT 9901 ongoing &lt;timestamp&gt; starla</code></td></tr>
+</table>
 
 <h2>5. RESULT Line Format Quirks</h2>
 
@@ -368,6 +389,13 @@ be lost.</p>
 <p>The official <code>httppost</code> runs once per 60 seconds. Uploading more
 frequently triggers 429 rate limiting from the controller. The penalty is
 per-probe (tied to SSH key/probe ID) and persists across reconnections.</p>
+
+<h3>System status results are mandatory</h3>
+<p>The controller expects system health data (disk stats, uptime, network
+interface counters, ongoing status lines) in every upload batch. Sending only
+measurement RESULT lines causes persistent 429 rate limiting that survives
+reconnections and lasts hours. The official probe always includes these via
+its <code>simpleping</code> and <code>condmv</code> utilities.</p>
 
 <h3>DNS template variables</h3>
 <p>Query names may contain <code>$r</code>, <code>$p</code>, and <code>$t</code>
