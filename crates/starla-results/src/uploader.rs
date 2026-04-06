@@ -5,6 +5,7 @@
 
 use super::format::AtlasResult;
 use super::queue::QueuedResult;
+use super::system_status;
 use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
@@ -47,12 +48,22 @@ impl Default for UploaderConfig {
 pub struct ResultUploader {
     transport: Box<dyn UploadTransport>,
     config: UploaderConfig,
+    /// Process start time (unix timestamp) for uptime reporting
+    start_time: u64,
 }
 
 impl ResultUploader {
     /// Create a new uploader with the given transport
     pub fn new(transport: Box<dyn UploadTransport>, config: UploaderConfig) -> Self {
-        Self { transport, config }
+        let start_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        Self {
+            transport,
+            config,
+            start_time,
+        }
     }
 
     /// Set the endpoint path (call after controller connection).
@@ -95,6 +106,11 @@ impl ResultUploader {
         // Build POST body
         let mut body = Vec::new();
         body.extend_from_slice(b"P_TO_C_REPORT\n");
+
+        // System status results (disk, uptime, interfaces, ongoing status)
+        // The controller expects these alongside measurement results
+        let status = system_status::system_status_lines(lts, self.start_time);
+        body.extend_from_slice(status.as_bytes());
 
         for queued in results {
             let atlas_result =

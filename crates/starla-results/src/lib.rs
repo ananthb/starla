@@ -8,6 +8,7 @@
 
 pub mod format;
 mod queue;
+mod system_status;
 mod time_sync;
 mod uploader;
 
