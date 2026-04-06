@@ -1,8 +1,0 @@
-/* Starla doc overrides for Pico CSS */
-.container { max-width: 800px; }
-nav a { white-space: nowrap; }
-.badges { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.badges img { height: 20px; }
-.warn { background: #fff3cd; border-left: 3px solid #ffc107; padding: 0.5rem 0.75rem; margin: 0.75rem 0; border-radius: 0 4px 4px 0; }
-@media (prefers-color-scheme: dark) { .warn { background: #3d3200; } }
-.diagram { white-space: pre; overflow-x: auto; font-family: monospace; font-size: 0.8rem; line-height: 1.4; }
