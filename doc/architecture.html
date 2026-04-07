@@ -23,12 +23,15 @@
   pre code { background: none; padding: 0; }
   nav { margin: 0.5rem 0 1.5rem; }
   .diagram { background: var(--code-bg); padding: 1.5rem; border-radius: 6px; margin: 1rem 0; font-family: monospace; white-space: pre; overflow-x: auto; font-size: 0.8em; line-height: 1.4; }
-  .hljs { background: var(--code-bg) !important; }
+  pre[class*="language-"], code[class*="language-"] { background: var(--code-bg) !important; }
 </style>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" media="(prefers-color-scheme: light)">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
-<script>hljs.highlightAll();</script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-nix.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-toml.min.js"></script>
 </head>
 <body>
 <div class="container">
@@ -128,7 +131,7 @@ RocksDB-backed result queue for upload.</p>
 <code>UploadTransport</code> trait. In production, this opens SSH
 <code>direct-tcpip</code> channels and writes raw HTTP/1.1:</p>
 
-<pre><code>POST /?PROBE_ID=12345&SESSION_ID=abc HTTP/1.1
+<pre><code class="language-http">POST /?PROBE_ID=12345&SESSION_ID=abc HTTP/1.1
 Content-Type: application/x-www-form-urlencoded
 
 P_TO_C_REPORT

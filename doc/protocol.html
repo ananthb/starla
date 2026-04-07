@@ -28,12 +28,15 @@
   th { font-weight: 600; }
   .warn { background: #fff3cd; border-left: 3px solid #ffc107; padding: 0.5rem 0.75rem; margin: 0.75rem 0; border-radius: 0 4px 4px 0; }
   @media (prefers-color-scheme: dark) { .warn { background: #3d3200; border-color: #ffc107; } }
-  .hljs { background: var(--code-bg) !important; }
+  pre[class*="language-"], code[class*="language-"] { background: var(--code-bg) !important; }
 </style>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" media="(prefers-color-scheme: light)">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
-<script>hljs.highlightAll();</script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-nix.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-toml.min.js"></script>
 </head>
 <body>
 <div class="container">
@@ -52,13 +55,13 @@ as implemented by starla. It was reverse-engineered from the official C probe
 (e.g., <code>reg03.atlas.ripe.net:443</code>) and executes the <code>INIT</code>
 command with probe identification on stdin:</p>
 
-<pre><code>P_TO_R_INIT
+<pre><code class="language-none">P_TO_R_INIT
 TOKEN_SPECS fluffy 1000 5120 generic/unknown/x86_64
 REASON_FOR_REGISTRATION NEW</code></pre>
 
 <p>The server responds with a controller assignment:</p>
 
-<pre><code>OK
+<pre><code class="language-none">OK
 CONTROLLER ctr-dub-sw01.atlas.prod.ripe.net 443 ssh-rsa AAAA...
 REREGISTER 3000
 PROBE_ID 1015186</code></pre>
@@ -72,7 +75,7 @@ approved at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply
 <p>After receiving the controller assignment, the probe connects to the controller
 via SSH and sends another <code>INIT</code> (no stdin data this time):</p>
 
-<pre><code>OK
+<pre><code class="language-none">OK
 SESSION_ID fa0b28e5f26291ad4a41ceecffc73457cbb4180291f53abdcda5667357440a9f
 REMOTE_PORT 2023</code></pre>
 
@@ -100,7 +103,7 @@ channel closes, the connection is lost and the probe reconnects.</p>
 
 <p>When the controller connects via the reverse tunnel, the probe sends:</p>
 
-<pre><code>IAC DO ECHO
+<pre><code class="language-none">IAC DO ECHO
 IAC DO NAWS
 IAC WILL ECHO
 IAC WILL SGA
@@ -117,7 +120,7 @@ On failure: <code>BAD_PASSWORD\r\n\r\n</code> and disconnect.</p>
 
 <h4>CRONLINE (recurring measurements)</h4>
 
-<pre><code>CRONLINE &lt;interval&gt; &lt;offset&gt; &lt;end_time&gt; &lt;spread_type&gt; &lt;spread&gt; &lt;command&gt; [args...]</code></pre>
+<pre><code class="language-none">CRONLINE &lt;interval&gt; &lt;offset&gt; &lt;end_time&gt; &lt;spread_type&gt; &lt;spread&gt; &lt;command&gt; [args...]</code></pre>
 
 <table>
 <tr><th>Field</th><th>Type</th><th>Description</th></tr>
@@ -130,11 +133,11 @@ On failure: <code>BAD_PASSWORD\r\n\r\n</code> and disconnect.</p>
 </table>
 
 <p>Example:</p>
-<pre><code>CRONLINE 240 269 1777902395 UNIFORM 3 evping -4 -c 3 -A "1001" -O /home/atlas/data/new/7 193.0.14.129</code></pre>
+<pre><code class="language-none">CRONLINE 240 269 1777902395 UNIFORM 3 evping -4 -c 3 -A "1001" -O /home/atlas/data/new/7 193.0.14.129</code></pre>
 
 <h4>ONEOFF (one-shot measurements)</h4>
 
-<pre><code>ONEOFF &lt;path&gt; &lt;command&gt; [args...]</code></pre>
+<pre><code class="language-none">ONEOFF &lt;path&gt; &lt;command&gt; [args...]</code></pre>
 
 <p>User-triggered via the RIPE Atlas API. The path is ignored (it's where
 the C probe writes results). Internally converted to CRONLINE with interval=0.</p>
@@ -153,7 +156,7 @@ the C probe writes results). Internally converted to CRONLINE with interval=0.</
 
 <h3>Ping (<code>evping</code>)</h3>
 
-<pre><code>evping [-4|-6] [-c count] [-s size] [-A msm_id] [-O output] [-I interval] &lt;target&gt;</code></pre>
+<pre><code class="language-none">evping [-4|-6] [-c count] [-s size] [-A msm_id] [-O output] [-I interval] &lt;target&gt;</code></pre>
 
 <table>
 <tr><th>Flag</th><th>Description</th><th>Default</th></tr>
@@ -164,7 +167,7 @@ the C probe writes results). Internally converted to CRONLINE with interval=0.</
 </table>
 
 <p>Result (PreFormatted array):</p>
-<pre><code>RESULT { "id":"1001", "fw":5120, "mver": "2.6.4", "lts":10,
+<pre><code class="language-json">RESULT { "id":"1001", "fw":5120, "mver": "2.6.4", "lts":10,
   "time":1700000000, "dst_name":"193.0.14.129", "af":4,
   "dst_addr":"193.0.14.129", "src_addr":"10.0.0.1",
   "proto":"ICMP", "ttl":56, "size":64,
@@ -175,7 +178,7 @@ omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
 
 <h3>Traceroute (<code>evtraceroute</code>)</h3>
 
-<pre><code>evtraceroute [-4|-6] [-I|-U|-T] [-f first_hop] [-m max_hops]
+<pre><code class="language-none">evtraceroute [-4|-6] [-I|-U|-T] [-f first_hop] [-m max_hops]
   [-p paris_id] [-S size] [-A msm_id] [-O output] &lt;target&gt;</code></pre>
 
 <table>
@@ -188,7 +191,7 @@ omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
 </table>
 
 <p>Result (FullLine &mdash; custom envelope with <code>endtime</code> and <code>paris_id</code>):</p>
-<pre><code>RESULT { "id":"5001", "fw":5120, "mver": "2.6.4", "lts":0,
+<pre><code class="language-json">RESULT { "id":"5001", "fw":5120, "mver": "2.6.4", "lts":0,
   "time":1700000000, "endtime":1700000030,
   "dst_name":"192.112.36.4", "dst_addr":"192.112.36.4",
   "src_addr":"10.0.0.1", "proto":"UDP", "af": 4,
@@ -203,7 +206,7 @@ omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
 
 <h3>DNS (<code>evtdig</code>)</h3>
 
-<pre><code>evtdig [-4|-6] [-t qtype] [-c qclass] [-T] [-r] [-d] [-e bufsize]
+<pre><code class="language-none">evtdig [-4|-6] [-t qtype] [-c qclass] [-T] [-r] [-d] [-e bufsize]
   [-R] [-h] [-b] [-i] [--soa] [--resolv] [--type N] [--class N]
   [--query NAME] [-A msm_id] [-O output] [@server] [query]</code></pre>
 
@@ -232,7 +235,7 @@ omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
 </table>
 
 <p>Result (PreFormatted object with <code>abuf</code>):</p>
-<pre><code>RESULT { "id":"10310", "fw":5120, "mver": "2.6.4", "lts":51,
+<pre><code class="language-json">RESULT { "id":"10310", "fw":5120, "mver": "2.6.4", "lts":51,
   "time":1775314719, "af":4, "dst_addr":"170.247.170.2",
   "dst_port":"53", "src_addr":"204.168.188.81", "proto":"UDP",
   "result": { "rt":29.846,"size":50,
@@ -248,10 +251,10 @@ analysis. Without it, results are accepted but incomplete.</div>
 
 <h3>HTTP (<code>evhttpget</code>)</h3>
 
-<pre><code>evhttpget [-4|-6] [-A msm_id] [-O output] [-M max_body] &lt;url&gt;</code></pre>
+<pre><code class="language-none">evhttpget [-4|-6] [-A msm_id] [-O output] [-M max_body] &lt;url&gt;</code></pre>
 
 <p>Result (PreFormatted array):</p>
-<pre><code>RESULT { "id":"12023", "fw":5120, "mver": "2.6.4", "lts":19,
+<pre><code class="language-json">RESULT { "id":"12023", "fw":5120, "mver": "2.6.4", "lts":19,
   "time":1775317966, "dst_name":"example.com", "af":4,
   "dst_addr":"93.184.216.34", "proto":"TCP",
   "result": [ { "method":"GET", "af": 6,
@@ -261,10 +264,10 @@ analysis. Without it, results are accepted but incomplete.</div>
 
 <h3>TLS (<code>evsslgetcert</code>)</h3>
 
-<pre><code>evsslgetcert [-4|-6] [-p port] [-h hostname] [-A msm_id] [-O output] &lt;target&gt;</code></pre>
+<pre><code class="language-none">evsslgetcert [-4|-6] [-p port] [-h hostname] [-A msm_id] [-O output] &lt;target&gt;</code></pre>
 
 <p>Result (FullLine &mdash; custom envelope):</p>
-<pre><code>RESULT { "id":"14002", "fw":5120, "mver": "2.6.4", "lts":0,
+<pre><code class="language-json">RESULT { "id":"14002", "fw":5120, "mver": "2.6.4", "lts":0,
   "time":1775325499, "dst_name":"atlas.ripe.net", "dst_port":"443",
   "ttr":0.390310, "method":"TLS", "ver":"1.3",
   "dst_addr":"193.0.11.37", "af": 4, "src_addr":"10.0.0.1",
@@ -279,10 +282,10 @@ Certificates are full PEM with escaped newlines.</p>
 
 <h3>NTP (<code>evntp</code>)</h3>
 
-<pre><code>evntp [-4|-6] [-c count] [-A msm_id] [-O output] &lt;target&gt;</code></pre>
+<pre><code class="language-none">evntp [-4|-6] [-c count] [-A msm_id] [-O output] &lt;target&gt;</code></pre>
 
 <p>Result (FullLine with 3 samples):</p>
-<pre><code>RESULT { "id":"99998", "fw":5120, "mver": "2.6.4", "lts":12,
+<pre><code class="language-json">RESULT { "id":"99998", "fw":5120, "mver": "2.6.4", "lts":12,
   "time":1775323252, "dst_addr":"213.239.234.28",
   "src_addr":"204.168.188.81", "proto":"UDP", "af": 4,
   "li":"no", "version":4, "mode":"server", "stratum":2,
@@ -310,7 +313,7 @@ Certificates are full PEM with escaped newlines.</p>
 <p>Results are uploaded via HTTP POST through SSH direct-tcpip channels to
 <code>127.0.0.1:8080</code> on the controller side.</p>
 
-<pre><code>POST /?PROBE_ID=1015186&amp;SESSION_ID=fa0b28e5... HTTP/1.1
+<pre><code class="language-http">POST /?PROBE_ID=1015186&amp;SESSION_ID=fa0b28e5... HTTP/1.1
 Host: 127.0.0.1
 Content-Type: application/x-www-form-urlencoded
 User-Agent: httppost for atlas.ripe.net

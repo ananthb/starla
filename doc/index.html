@@ -25,12 +25,15 @@
   nav a { padding: 0.4rem 0.8rem; background: var(--code-bg); border-radius: 4px; font-weight: 500; }
   .badges { display: flex; gap: 0.5rem; margin: 0.5rem 0; flex-wrap: wrap; }
   .badges img { height: 20px; }
-  .hljs { background: var(--code-bg) !important; }
+  pre[class*="language-"], code[class*="language-"] { background: var(--code-bg) !important; }
 </style>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" media="(prefers-color-scheme: light)">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
-<script>hljs.highlightAll();</script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-dark.min.css" media="(prefers-color-scheme: dark)">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-nix.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-toml.min.js"></script>
 </head>
 <body>
 <div class="container">
@@ -68,7 +71,7 @@ results back to the API.</p>
 </ul>
 
 <h2>Quick Start</h2>
-<pre><code># Container (simplest)
+<pre><code class="language-bash"># Container (simplest)
 docker run -d --name starla \
   -v starla-state:/state \
   --cap-add NET_RAW \
