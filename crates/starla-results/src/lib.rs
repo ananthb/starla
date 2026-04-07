@@ -19,7 +19,7 @@ pub use uploader::{ResultUploader, UploadStream, UploadTransport, UploaderConfig
 
 use starla_common::MeasurementResult;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -44,7 +44,7 @@ pub struct ResultHandlerConfig {
 impl Default for ResultHandlerConfig {
     fn default() -> Self {
         Self {
-            batch_size: 10,
+            batch_size: 100,
             upload_interval: Duration::from_secs(60),
             max_result_age_secs: 3600, // 1 hour
             max_attempts: 5,
@@ -138,6 +138,9 @@ impl ResultHandler {
             return Ok(0);
         }
 
+        // Drain all available results up to batch size — don't expire here,
+        // let the periodic cleanup handle expiration so results always get
+        // at least one upload attempt
         let results = {
             let mut queue = self.queue.lock().await;
             queue.drain_batch(self.config.batch_size)
@@ -147,21 +150,7 @@ impl ResultHandler {
             return Ok(0);
         }
 
-        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
-
-        let (valid, expired): (Vec<_>, Vec<_>) = results
-            .into_iter()
-            .partition(|r| now - r.queued_at < self.config.max_result_age_secs);
-
-        if !expired.is_empty() {
-            warn!("Dropping {} expired results", expired.len());
-        }
-
-        if valid.is_empty() {
-            return Ok(0);
-        }
-
-        let (uploadable, failed): (Vec<_>, Vec<_>) = valid
+        let (uploadable, failed): (Vec<_>, Vec<_>) = results
             .into_iter()
             .partition(|r| r.attempts < self.config.max_attempts);
 
