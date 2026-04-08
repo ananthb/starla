@@ -6,12 +6,12 @@ on:
       - "v*"
 
 jobs:
-  release:
+  linux:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
-      id-token: write # cosign keyless signing
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -23,8 +23,6 @@ jobs:
 
       - uses: sigstore/cosign-installer@v3
 
-      # Wait for Garnix CI to finish — it builds and caches aarch64
-      # packages that we can't build on the x86_64 runner
       - name: Wait for Garnix
         uses: lewagon/wait-on-check-action@v1.3.4
         with:
@@ -33,14 +31,14 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           wait-interval: 30
 
-      # Build release tarballs (binary + service + config per arch)
+      # Build release tarballs
       - name: Build x86_64 release
         run: nix build .#packages.x86_64-linux.release -o result-x86_64
 
       - name: Build aarch64 release
         run: nix build .#packages.aarch64-linux.release -o result-aarch64
 
-      # Build .deb and .rpm packages
+      # Build headless + GUI packages
       - name: Build packages
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -50,10 +48,11 @@ jobs:
             dir="pkg-${deb_arch}"
             mkdir -p "$dir"
 
-            # Extract binary from tarball and add packaging files for nfpm
+            # Extract binary from tarball
             tar -xzf "$(readlink result-${nix_arch})" -C "${dir}"
             cp packaging/nfpm.yaml packaging/starla.gpg packaging/starla.sources packaging/starla.repo "${dir}/starla/"
 
+            # Build headless packages
             cd "${dir}/starla"
             ARCH="$deb_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
               nfpm package -p deb -f nfpm.yaml
@@ -62,19 +61,31 @@ jobs:
             cd ../..
           done
 
-          # Collect all artifacts into dist/
+          # Build GUI tray binary (x86_64 only for now)
+          nix build .#packages.x86_64-linux.starla-tray -o result-tray
+          mkdir -p gui-pkg
+          cp result-tray/bin/starla-tray gui-pkg/
+          cp packaging/nfpm-gui.yaml packaging/starla-tray.desktop gui-pkg/
+          cd gui-pkg
+          ARCH="amd64" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+            nfpm package -p deb -f nfpm-gui.yaml
+          ARCH="x86_64" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+            nfpm package -p rpm -f nfpm-gui.yaml
+          cd ..
+
+          # Collect artifacts
           mkdir -p dist
           cp "$(readlink result-x86_64)" dist/starla-amd64.tar.gz
           cp "$(readlink result-aarch64)" dist/starla-arm64.tar.gz
           mv pkg-amd64/starla/*.deb pkg-amd64/starla/*.rpm dist/
           mv pkg-arm64/starla/*.deb pkg-arm64/starla/*.rpm dist/
+          mv gui-pkg/*.deb gui-pkg/*.rpm dist/
 
-      # Checksums and signing
+      # Sign
       - name: Generate checksums and sign artifacts
         run: |
           cd dist
           sha256sum * > SHA256SUMS
-
           for f in *; do
             cosign sign-blob --yes \
               --output-signature "${f}.sig" \
@@ -82,12 +93,10 @@ jobs:
               "$f"
           done
 
-      # GitHub Release
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@v4
         with:
-          files: dist/*
-          generate_release_notes: true
+          name: linux-artifacts
+          path: dist/
 
       # OCI images
       - name: Log in to ghcr.io
@@ -124,7 +133,6 @@ jobs:
             --template "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-ARCH" \
             --target "ghcr.io/ananthb/starla:latest"
 
-      # Sign OCI images (cosign uses COSIGN_REGISTRY_* or docker config for auth)
       - name: Sign container images
         env:
           COSIGN_YES: "true"
@@ -134,6 +142,95 @@ jobs:
           cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-arm64"
           cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
           cosign sign "ghcr.io/ananthb/starla:latest"
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build binaries
+        run: |
+          cargo build --release --bin starla --all-features
+          cargo build --release --bin starla-tray
+
+      - name: Package macOS release
+        run: |
+          mkdir -p dist
+          # Probe tarball
+          mkdir -p starla
+          cp target/release/starla starla/
+          cp config.toml.example starla/
+          cp packaging/com.ananthb.starla.plist starla/
+          tar -czvf dist/starla-macos-arm64.tar.gz -C . starla
+          rm -rf starla
+
+          # Tray app (just binary for now, DMG later)
+          cp target/release/starla-tray dist/starla-tray-macos-arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: dist/
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build probe
+        run: cargo build --release --bin starla --all-features
+
+      - name: Package Windows release
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/release/starla.exe dist/starla-windows-amd64.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: dist/
+
+  publish:
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: sigstore/cosign-installer@v3
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # Sign macOS and Windows artifacts
+      - name: Sign non-Linux artifacts
+        run: |
+          cd artifacts
+          for f in starla-macos-* starla-tray-macos-* starla-windows-*; do
+            [ -f "$f" ] || continue
+            cosign sign-blob --yes \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.pem" \
+              "$f"
+          done
+          # Regenerate checksums for all artifacts
+          sha256sum $(ls -1 | grep -v '\.sig$\|\.pem$\|SHA256SUMS') > SHA256SUMS
+          cosign sign-blob --yes \
+            --output-signature SHA256SUMS.sig \
+            --output-certificate SHA256SUMS.pem \
+            SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
 
       # Update package repos on GitHub Pages
       - name: Trigger docs rebuild

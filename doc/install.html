@@ -248,6 +248,46 @@ sudo ./starla/starla</code></pre>
 # As user: ~/.local/state/starla/probe_key.pub
 cat ~/.local/state/starla/probe_key.pub</code></pre>
 
+<h2>macOS</h2>
+
+<h3>Homebrew</h3>
+<pre><code class="language-bash"># Install probe
+brew install ananthb/starla/starla
+
+# Start as a service
+brew services start starla
+
+# Install tray app (GUI)
+brew install --cask ananthb/starla/starla-tray</code></pre>
+
+<h3>Manual install</h3>
+<pre><code class="language-bash"># Download (Apple Silicon)
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-macos-arm64.tar.gz
+tar xzf starla-macos-arm64.tar.gz
+
+# Run
+./starla/starla</code></pre>
+
+<p>Ping and traceroute work on macOS without root (uses ICMP DGRAM sockets).</p>
+
+<h3>nix-darwin</h3>
+<pre><code class="language-nix"># flake.nix
+inputs.starla.url = "github:ananthb/starla";
+# In darwin modules:
+starla.darwinModules.default
+{ services.starla.enable = true; }</code></pre>
+
+<h2>Windows</h2>
+
+<pre><code class="language-bash"># Download from GitHub Releases
+# https://github.com/ananthb/starla/releases/latest/download/starla-windows-amd64.exe
+
+# Run
+.\starla-windows-amd64.exe</code></pre>
+
+<p>DNS, HTTP, TLS, and NTP measurements work on Windows. Ping and traceroute
+are not yet supported (requires Windows ICMP API).</p>
+
 <h2>After Installation</h2>
 
 <ol>
