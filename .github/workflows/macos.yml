@@ -1,0 +1,23 @@
+name: macOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build probe
+        run: cargo build --bin starla --all-features
+
+      - name: Build tray app
+        run: cargo build --bin starla-tray
+
+      - name: Run tests
+        run: cargo test --workspace --all-features

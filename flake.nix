@@ -49,6 +49,7 @@
           ] ++ lib.optionals stdenv.isDarwin [
             darwin.apple_sdk.frameworks.Security
             darwin.apple_sdk.frameworks.SystemConfiguration
+            darwin.apple_sdk.frameworks.AppKit
           ];
 
           # Development shell packages
