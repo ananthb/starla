@@ -8,13 +8,24 @@
 //! Note: This uses DGRAM ICMP sockets when available (Linux with
 //! ping_group_range), which don't require CAP_NET_RAW. Falls back to RAW
 //! sockets if needed.
+//!
+//! Unix only — uses raw sockets via AsyncFd.
 
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("This example requires Unix (raw sockets)");
+}
+
+#[cfg(unix)]
 use starla_network::{
     build_icmpv4_echo_request, new_icmpv4_socket, parse_icmpv4_packet, IcmpResponse,
 };
+#[cfg(unix)]
 use std::net::{IpAddr, SocketAddr};
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Target host (8.8.8.8 - Google DNS)
