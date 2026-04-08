@@ -1,7 +1,9 @@
 //! Traceroute measurement implementation
 
 pub mod icmp;
+#[cfg(unix)]
 pub mod tcp;
+#[cfg(unix)]
 pub mod udp;
 
 use crate::traits::Measurement;
@@ -89,8 +91,14 @@ impl Measurement for Traceroute {
 
         let results = match self.config.protocol {
             TracerouteProtocol::ICMP => icmp::execute_traceroute(&self.config).await?,
+            #[cfg(unix)]
             TracerouteProtocol::UDP => udp::execute_traceroute(&self.config).await?,
+            #[cfg(unix)]
             TracerouteProtocol::TCP => tcp::execute_traceroute(&self.config).await?,
+            #[cfg(not(unix))]
+            TracerouteProtocol::UDP | TracerouteProtocol::TCP => {
+                anyhow::bail!("UDP and TCP traceroute are not supported on this platform; use ICMP")
+            }
         };
 
         let endtime = Timestamp::now().0;

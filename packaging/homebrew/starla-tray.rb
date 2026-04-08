@@ -1,8 +1,7 @@
 cask "starla-tray" do
   version :latest
-  arch arm: "arm64", intel: "amd64"
 
-  url "https://github.com/ananthb/starla/releases/latest/download/Starla-Tray-macos-#{arch}.dmg"
+  url "https://github.com/ananthb/starla/releases/latest/download/starla-macos-arm64.dmg"
   name "Starla Tray"
   desc "System tray app for RIPE Atlas probe monitoring"
   homepage "https://github.com/ananthb/starla"

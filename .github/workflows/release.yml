@@ -48,7 +48,7 @@ jobs:
             dir="pkg-${deb_arch}"
             mkdir -p "$dir"
 
-            # Extract binary from tarball
+            # Extract binary from tarball (includes both starla and starla-tray)
             tar -xzf "$(readlink result-${nix_arch})" -C "${dir}"
             cp packaging/nfpm.yaml packaging/starla.gpg packaging/starla.sources packaging/starla.repo "${dir}/starla/"
 
@@ -59,31 +59,34 @@ jobs:
             ARCH="$rpm_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
               nfpm package -p rpm -f nfpm.yaml
             cd ../..
+
+            # Build GUI packages
+            gui_dir="gui-pkg-${deb_arch}"
+            mkdir -p "$gui_dir"
+            cp "${dir}/starla/starla-tray" "$gui_dir/"
+            cp packaging/nfpm-gui.yaml packaging/starla-tray.desktop "$gui_dir/"
+            cd "$gui_dir"
+            ARCH="$deb_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+              nfpm package -p deb -f nfpm-gui.yaml
+            ARCH="$rpm_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+              nfpm package -p rpm -f nfpm-gui.yaml
+            cd ..
           done
 
-          # Build GUI tray binary (x86_64 only for now)
-          nix build .#packages.x86_64-linux.starla-tray -o result-tray
-          mkdir -p gui-pkg
-          cp result-tray/bin/starla-tray gui-pkg/
-          cp packaging/nfpm-gui.yaml packaging/starla-tray.desktop gui-pkg/
-          cd gui-pkg
-          ARCH="amd64" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-            nfpm package -p deb -f nfpm-gui.yaml
-          ARCH="x86_64" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-            nfpm package -p rpm -f nfpm-gui.yaml
-          cd ..
-
-          # Build AppImage
-          nix build .#packages.x86_64-linux.appimage -o result-appimage
+          # Build AppImages
+          nix build .#packages.x86_64-linux.appimage -o result-appimage-x86_64
+          nix build .#packages.aarch64-linux.appimage -o result-appimage-aarch64
 
           # Collect artifacts
           mkdir -p dist
           cp "$(readlink result-x86_64)" dist/starla-amd64.tar.gz
           cp "$(readlink result-aarch64)" dist/starla-arm64.tar.gz
-          cp "$(readlink result-appimage)" dist/starla-tray-x86_64.AppImage
+          cp "$(readlink result-appimage-x86_64)" dist/starla-tray-x86_64.AppImage
+          cp "$(readlink result-appimage-aarch64)" dist/starla-tray-aarch64.AppImage
           mv pkg-amd64/starla/*.deb pkg-amd64/starla/*.rpm dist/
           mv pkg-arm64/starla/*.deb pkg-arm64/starla/*.rpm dist/
-          mv gui-pkg/*.deb gui-pkg/*.rpm dist/
+          mv gui-pkg-amd64/*.deb gui-pkg-amd64/*.rpm dist/
+          mv gui-pkg-arm64/*.deb gui-pkg-arm64/*.rpm dist/
 
       # Sign
       - name: Generate checksums and sign artifacts
@@ -158,19 +161,22 @@ jobs:
           cargo build --release --bin starla --all-features
           cargo build --release --bin starla-tray
 
-      - name: Package macOS release
+      - name: Create DMG
         run: |
-          mkdir -p dist
-          # Probe tarball
-          mkdir -p starla
-          cp target/release/starla starla/
-          cp config.toml.example starla/
-          cp packaging/com.ananthb.starla.plist starla/
-          tar -czvf dist/starla-macos-arm64.tar.gz -C . starla
-          rm -rf starla
+          mkdir -p dmg-staging dist
 
-          # Tray app (just binary for now, DMG later)
-          cp target/release/starla-tray dist/starla-tray-macos-arm64
+          # CLI binary + support files
+          cp target/release/starla dmg-staging/
+          cp config.toml.example dmg-staging/
+          cp packaging/com.ananthb.starla.plist dmg-staging/
+
+          # App bundle for tray
+          mkdir -p "dmg-staging/Starla Tray.app/Contents/MacOS"
+          cp target/release/starla-tray "dmg-staging/Starla Tray.app/Contents/MacOS/"
+          cp packaging/Info.plist "dmg-staging/Starla Tray.app/Contents/"
+
+          hdiutil create -volname "Starla" -srcfolder dmg-staging \
+            -ov -format UDZO dist/starla-macos-arm64.dmg
 
       - uses: actions/upload-artifact@v4
         with:
@@ -186,11 +192,23 @@ jobs:
       - name: Build probe
         run: cargo build --release --bin starla --all-features
 
+      - name: Build MSI
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p msi-staging
+          cp target/release/starla.exe msi-staging/
+          cp config.toml.example msi-staging/
+          cp packaging/starla.wxs msi-staging/
+          cd msi-staging
+          dotnet tool install --global wix
+          wix build starla.wxs -d Version="$VERSION" -arch x64 -o starla.msi
+
       - name: Package Windows release
         shell: bash
         run: |
           mkdir -p dist
-          cp target/release/starla.exe dist/starla-windows-amd64.exe
+          cp msi-staging/starla.msi dist/starla-windows-amd64.msi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -216,7 +234,7 @@ jobs:
       - name: Sign non-Linux artifacts
         run: |
           cd artifacts
-          for f in starla-macos-* starla-tray-macos-* starla-windows-*; do
+          for f in starla-macos-*.dmg starla-windows-*.msi; do
             [ -f "$f" ] || continue
             cosign sign-blob --yes \
               --output-signature "${f}.sig" \

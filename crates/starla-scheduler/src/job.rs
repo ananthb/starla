@@ -8,14 +8,10 @@ use starla_measurements::{
     dns::{DnsConfig, DnsProtocol},
     http::HttpConfig,
     ntp::NtpConfig,
-    tls::TlsConfig,
-    Dns, Http, Measurement, Ntp, Tls,
-};
-#[cfg(unix)]
-use starla_measurements::{
     ping::PingConfig,
+    tls::TlsConfig,
     traceroute::{TracerouteConfig, TracerouteProtocol},
-    Ping, Traceroute,
+    Dns, Http, Measurement, Ntp, Ping, Tls, Traceroute,
 };
 use std::net::{IpAddr, ToSocketAddrs};
 
@@ -109,7 +105,6 @@ impl MeasurementJob {
         let msm_id = MeasurementId(self.msm_id);
 
         match &self.spec {
-            #[cfg(unix)]
             MeasurementSpec::Ping(spec) => {
                 let target = resolve_target(&spec.target, spec.af)?;
                 Ok(Box::new(Ping {
@@ -124,11 +119,6 @@ impl MeasurementJob {
                     msm_id,
                 }))
             }
-            #[cfg(not(unix))]
-            MeasurementSpec::Ping(_) => {
-                anyhow::bail!("Ping measurements require Unix (raw sockets)")
-            }
-            #[cfg(unix)]
             MeasurementSpec::Traceroute(spec) => {
                 let target = resolve_target(&spec.target, spec.af)?;
                 let protocol = match spec.protocol.to_uppercase().as_str() {
@@ -149,10 +139,6 @@ impl MeasurementJob {
                     probe_id,
                     msm_id,
                 }))
-            }
-            #[cfg(not(unix))]
-            MeasurementSpec::Traceroute(_) => {
-                anyhow::bail!("Traceroute measurements require Unix (raw sockets)")
             }
             MeasurementSpec::Dns(spec) => {
                 let target = resolve_target(&spec.target, spec.af)?;

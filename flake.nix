@@ -145,22 +145,6 @@
               };
             };
 
-            release =
-              let
-                pkg = self.packages.${system}.default;
-                arch = if system == "x86_64-linux" then "amd64" else "arm64";
-              in
-              pkgs.runCommand "starla-${arch}.tar.gz"
-                {
-                  nativeBuildInputs = [ pkgs.gzip ];
-                } ''
-                mkdir -p starla
-                cp ${pkg}/bin/starla starla/starla
-                cp ${./config.toml.example} starla/config.toml.example
-                cp ${./starla.service} starla/starla.service
-                tar -czvf $out -C . starla
-              '';
-
             oci = pkgs.dockerTools.buildLayeredImage {
               name = "ghcr.io/ananthb/starla";
               tag = "latest";
@@ -196,6 +180,25 @@
               };
             };
           } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            release =
+              let
+                pkg = self.packages.${system}.default;
+                tray = self.packages.${system}.starla-tray;
+                arch = if system == "x86_64-linux" then "amd64" else "arm64";
+              in
+              pkgs.runCommand "starla-${arch}.tar.gz"
+                {
+                  nativeBuildInputs = [ pkgs.gzip ];
+                } ''
+                mkdir -p starla
+                cp ${pkg}/bin/starla starla/starla
+                cp ${tray}/bin/starla-tray starla/starla-tray
+                cp ${./config.toml.example} starla/config.toml.example
+                cp ${./starla.service} starla/starla.service
+                cp ${./packaging/starla-tray.desktop} starla/starla-tray.desktop
+                tar -czvf $out -C . starla
+              '';
+
             starla-tray = pkgs.rustPlatform.buildRustPackage {
               pname = "starla-tray";
               version = "0.1.0";
@@ -218,11 +221,15 @@
             appimage =
               let
                 tray = self.packages.${system}.starla-tray;
+                arch = if system == "x86_64-linux" then "x86_64" else "aarch64";
 
-                appimageRuntime = pkgs.fetchurl {
+                appimageRuntime = pkgs.fetchurl (if system == "x86_64-linux" then {
                   url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64";
                   hash = "sha256-L8qLRDySUQ8Ug6iD9gBhrQm0a5eLJjHIB82HOkfsJg0=";
-                };
+                } else {
+                  url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-aarch64";
+                  hash = "sha256-AMvfz5F8xsD/bTNH1Z4Moff0Wm3xpCig1tinhmTYdEQ=";
+                });
 
                 libPath = pkgs.lib.makeLibraryPath (with pkgs; [
                   glib
@@ -250,7 +257,7 @@
                   xdotool
                 ]);
               in
-              pkgs.runCommand "starla-tray-x86_64.AppImage"
+              pkgs.runCommand "starla-tray-${arch}.AppImage"
                 {
                   nativeBuildInputs = with pkgs; [ squashfsTools ];
                 } ''

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Starla"
+    Manufacturer="Starla Contributors"
+    Version="$(var.Version)"
+    UpgradeCode="8A4F2E6B-7C3D-4E5A-9B1F-D8C6A2E7F4B3">
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of Starla is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Starla">
+        <Component Id="StarlaExe" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+          <File Id="starla.exe" Source="starla.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="ExampleConfig" Guid="B2C3D4E5-F6A7-8901-BCDE-F12345678901">
+          <File Id="config.toml.example" Source="config.toml.example" />
+        </Component>
+        <Component Id="AddToPath" Guid="C3D4E5F6-A7B8-9012-CDEF-123456789012">
+          <Environment
+            Id="PATH"
+            Name="PATH"
+            Value="[INSTALLFOLDER]"
+            Permanent="no"
+            Part="last"
+            Action="set"
+            System="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Complete" Title="Starla" Level="1">
+      <ComponentRef Id="StarlaExe" />
+      <ComponentRef Id="ExampleConfig" />
+      <ComponentRef Id="AddToPath" />
+    </Feature>
+  </Package>
+</Wix>

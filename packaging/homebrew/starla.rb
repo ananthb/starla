@@ -5,10 +5,7 @@ class Starla < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/ananthb/starla/releases/latest/download/starla-macos-arm64.tar.gz"
-    end
-    on_intel do
-      url "https://github.com/ananthb/starla/releases/latest/download/starla-macos-amd64.tar.gz"
+      url "https://github.com/ananthb/starla/releases/latest/download/starla-macos-arm64.dmg"
     end
   end
 

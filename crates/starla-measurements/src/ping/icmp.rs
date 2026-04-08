@@ -1,15 +1,8 @@
 //! ICMP Ping execution logic
 
 use super::PingConfig;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
-use starla_network::{
-    build_icmpv4_echo_request, build_icmpv6_echo_request, new_icmpv4_socket, new_icmpv6_socket,
-    parse_icmpv4_echo_reply, parse_icmpv6_echo_reply,
-};
-use std::net::SocketAddr;
-use std::time::{Duration, Instant};
-use tokio::time::timeout;
+use std::time::Duration;
 
 /// Individual ping reply result (per packet)
 /// Official format: { "rtt":1.672125 } or { "x":"*" } for timeout
@@ -46,20 +39,6 @@ impl Serialize for PingReplyOrTimeout {
 }
 
 /// Ping measurement results - a vector of RTT measurements
-///
-/// Official format example:
-/// ```json
-/// { "id":"2004", "fw":5120, "mver": "2.6.4", "lts":35, "time":1768243499,
-///   "dst_name":"2001:500:2f::f", "af":6, "dst_addr":"2001:500:2f::f",
-///   "src_addr":"...", "proto":"ICMP", "ttl":58, "size":32,
-///   "result": [ { "rtt":1.672125 }, { "rtt":1.460567 }, { "rtt":1.419836 } ] }
-/// ```
-///
-/// The result field is just an array of RTT measurements.
-/// Statistics (min, max, avg) are NOT sent - they can be calculated from the
-/// array.
-///
-/// This type serializes directly as the array (not wrapped in an object).
 pub type PingResults = Vec<PingReplyOrTimeout>;
 
 /// Get statistics from ping results
@@ -85,7 +64,17 @@ pub fn ping_stats(results: &PingResults) -> (f64, f64, f64, u32, u32) {
     }
 }
 
+#[cfg(unix)]
 pub async fn execute_ping(config: &PingConfig) -> anyhow::Result<PingResults> {
+    use rand::Rng;
+    use starla_network::{
+        build_icmpv4_echo_request, build_icmpv6_echo_request, new_icmpv4_socket, new_icmpv6_socket,
+        parse_icmpv4_echo_reply, parse_icmpv6_echo_reply,
+    };
+    use std::net::SocketAddr;
+    use std::time::Instant;
+    use tokio::time::timeout;
+
     let socket = if config.target.is_ipv4() {
         new_icmpv4_socket()?
     } else {
@@ -126,23 +115,14 @@ pub async fn execute_ping(config: &PingConfig) -> anyhow::Result<PingResults> {
         // Wait for reply
         let mut recv_buf = [0u8; 1500];
 
-        // Using a loop with timeout to filter packets
-        // Note: For DGRAM sockets, the kernel filters by identifier for us,
-        // so we only need to verify the sequence number.
         let wait_result = timeout(Duration::from_millis(config.timeout_ms), async {
             loop {
-                // socket.recv_from returns (size, addr)
                 let result = socket.recv_from(&mut recv_buf).await;
                 match result {
                     Ok((len, addr)) => {
-                        // Verify it's a reply to our packet
                         let is_reply = if config.target.is_ipv4() {
                             parse_icmpv4_echo_reply(&recv_buf[..len])
-                                .map(|(id, s)| {
-                                    // For DGRAM sockets, kernel handles identifier filtering
-                                    // For RAW sockets, we need to verify both
-                                    (is_dgram || id == identifier) && s == sequence
-                                })
+                                .map(|(id, s)| (is_dgram || id == identifier) && s == sequence)
                                 .unwrap_or(false)
                         } else {
                             parse_icmpv6_echo_reply(&recv_buf[..len])
@@ -166,16 +146,52 @@ pub async fn execute_ping(config: &PingConfig) -> anyhow::Result<PingResults> {
                 results.push(PingReplyOrTimeout::Reply { rtt });
             }
             Ok(Err(_e)) => {
-                // Socket error - treat as timeout
                 results.push(PingReplyOrTimeout::Timeout);
             }
             Err(_) => {
-                // Timeout
                 results.push(PingReplyOrTimeout::Timeout);
             }
         }
 
         // Wait interval if needed (1 second between pings by default)
+        if seq < config.count - 1 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    Ok(results)
+}
+
+#[cfg(windows)]
+pub async fn execute_ping(config: &PingConfig) -> anyhow::Result<PingResults> {
+    use starla_network::windows_icmp::{self, IcmpStatus};
+
+    let mut results = Vec::new();
+    let payload_len = if config.size < 8 {
+        56
+    } else {
+        (config.size - 8) as usize
+    };
+    let payload = vec![0u8; payload_len];
+
+    for seq in 0..config.count {
+        let reply = windows_icmp::icmp_ping(
+            config.target,
+            config.ttl,
+            config.timeout_ms as u32,
+            payload.clone(),
+        )
+        .await?;
+
+        match reply.status {
+            IcmpStatus::Success => {
+                results.push(PingReplyOrTimeout::Reply { rtt: reply.rtt_ms });
+            }
+            _ => {
+                results.push(PingReplyOrTimeout::Timeout);
+            }
+        }
+
         if seq < config.count - 1 {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }

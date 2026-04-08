@@ -260,13 +260,17 @@ brew services start starla
 # Install tray app (GUI)
 brew install --cask ananthb/starla/starla-tray</code></pre>
 
-<h3>Manual install</h3>
-<pre><code class="language-bash"># Download (Apple Silicon)
-curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-macos-arm64.tar.gz
-tar xzf starla-macos-arm64.tar.gz
+<h3>DMG download</h3>
+<p>Download the <code>.dmg</code> from
+<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.
+It contains the <code>starla</code> CLI binary, <code>Starla Tray.app</code>,
+example config, and launchd plist.</p>
 
-# Run
-./starla/starla</code></pre>
+<pre><code class="language-bash"># Download (Apple Silicon)
+# https://github.com/ananthb/starla/releases/latest/download/starla-macos-arm64.dmg
+
+# Mount, copy starla to /usr/local/bin, then run
+starla</code></pre>
 
 <p>Ping and traceroute work on macOS without root (uses ICMP DGRAM sockets).</p>
 
@@ -279,14 +283,19 @@ starla.darwinModules.default
 
 <h2>Windows</h2>
 
-<pre><code class="language-bash"># Download from GitHub Releases
-# https://github.com/ananthb/starla/releases/latest/download/starla-windows-amd64.exe
+<p>Download the <code>.msi</code> installer from
+<a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>.
+It installs the binary to <code>Program Files\Starla</code> and adds it to PATH.</p>
 
-# Run
-.\starla-windows-amd64.exe</code></pre>
+<pre><code class="language-bash"># Download and install
+# https://github.com/ananthb/starla/releases/latest/download/starla-windows-amd64.msi
 
-<p>DNS, HTTP, TLS, and NTP measurements work on Windows. Ping and traceroute
-are not yet supported (requires Windows ICMP API).</p>
+# After install, open a new terminal and run
+starla</code></pre>
+
+<p>All measurement types work on Windows. Ping and traceroute use the
+Windows ICMP Helper API and do not require administrator privileges.
+UDP and TCP traceroute variants are not yet supported (ICMP traceroute works).</p>
 
 <h2>After Installation</h2>
 
