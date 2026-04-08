@@ -201,7 +201,7 @@ jobs:
           cp config.toml.example msi-staging/
           cp packaging/starla.wxs msi-staging/
           cd msi-staging
-          dotnet tool install --global wix
+          dotnet tool install --global wix --version 5.0.2
           wix build starla.wxs -d Version="$VERSION" -arch x64 -o starla.msi
 
       - name: Package Windows release
