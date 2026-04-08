@@ -1,0 +1,20 @@
+name: Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build probe
+        run: cargo build --bin starla --all-features
+
+      - name: Run tests
+        run: cargo test --workspace --all-features --exclude starla-tray
