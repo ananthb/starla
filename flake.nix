@@ -214,6 +214,71 @@
                 maintainers = [ ];
               };
             };
+
+            appimage =
+              let
+                tray = self.packages.${system}.starla-tray;
+
+                appimageRuntime = pkgs.fetchurl {
+                  url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64";
+                  hash = "sha256-L8qLRDySUQ8Ug6iD9gBhrQm0a5eLJjHIB82HOkfsJg0=";
+                };
+
+                libPath = pkgs.lib.makeLibraryPath (with pkgs; [
+                  glib
+                  gtk3
+                  libayatana-appindicator
+                  pango
+                  cairo
+                  gdk-pixbuf
+                  atk
+                  harfbuzz
+                  fontconfig
+                  freetype
+                  xorg.libX11
+                  xorg.libXcursor
+                  xorg.libXrandr
+                  xorg.libXi
+                  xorg.libXext
+                  xorg.libXrender
+                  xorg.libXfixes
+                  xorg.libXcomposite
+                  xorg.libXdamage
+                  xorg.libxcb
+                  libxkbcommon
+                  wayland
+                  xdotool
+                ]);
+              in
+              pkgs.runCommand "starla-tray-x86_64.AppImage"
+                {
+                  nativeBuildInputs = with pkgs; [ squashfsTools ];
+                } ''
+                                mkdir -p AppDir/usr/bin
+                                mkdir -p AppDir/usr/share/applications
+
+                                cp ${tray}/bin/starla-tray AppDir/usr/bin/
+                                chmod +w AppDir/usr/bin/*
+
+                                cp ${./packaging/starla-tray.desktop} AppDir/starla-tray.desktop
+                                cp ${./packaging/starla-tray.desktop} AppDir/usr/share/applications/
+
+                                cat > AppDir/AppRun << 'APPRUN'
+                                #!/bin/bash
+                                set -e
+                                SELF=$(readlink -f "$0")
+                                APPDIR=''${SELF%/*}
+                                export LD_LIBRARY_PATH="LIBPATH:''${LD_LIBRARY_PATH}"
+                                export GSETTINGS_SCHEMA_DIR="/usr/share/glib-2.0/schemas:''${GSETTINGS_SCHEMA_DIR}"
+                                exec "''${APPDIR}/usr/bin/starla-tray" "$@"
+                APPRUN
+                                sed -i "s|LIBPATH|${libPath}|g" AppDir/AppRun
+                                chmod +x AppDir/AppRun
+
+                                mksquashfs AppDir appimage.squashfs -root-owned -noappend -comp zstd -quiet -no-progress
+                                cat ${appimageRuntime} appimage.squashfs > $out
+                                chmod +x $out
+              '';
           };
 
           # CI checks

@@ -73,10 +73,14 @@ jobs:
             nfpm package -p rpm -f nfpm-gui.yaml
           cd ..
 
+          # Build AppImage
+          nix build .#packages.x86_64-linux.appimage -o result-appimage
+
           # Collect artifacts
           mkdir -p dist
           cp "$(readlink result-x86_64)" dist/starla-amd64.tar.gz
           cp "$(readlink result-aarch64)" dist/starla-arm64.tar.gz
+          cp "$(readlink result-appimage)" dist/starla-tray-x86_64.AppImage
           mv pkg-amd64/starla/*.deb pkg-amd64/starla/*.rpm dist/
           mv pkg-arm64/starla/*.deb pkg-arm64/starla/*.rpm dist/
           mv gui-pkg/*.deb gui-pkg/*.rpm dist/
