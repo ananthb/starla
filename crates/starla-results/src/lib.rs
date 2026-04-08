@@ -27,8 +27,6 @@ use tracing::{debug, info, warn};
 /// Configuration for the result handler
 #[derive(Debug, Clone)]
 pub struct ResultHandlerConfig {
-    /// Upload batch size
-    pub batch_size: usize,
     /// Upload interval
     pub upload_interval: Duration,
     /// Maximum result age before dropping (seconds)
@@ -44,7 +42,6 @@ pub struct ResultHandlerConfig {
 impl Default for ResultHandlerConfig {
     fn default() -> Self {
         Self {
-            batch_size: 100,
             upload_interval: Duration::from_secs(60),
             max_result_age_secs: 3600, // 1 hour
             max_attempts: 5,
@@ -138,12 +135,11 @@ impl ResultHandler {
             return Ok(0);
         }
 
-        // Drain all available results up to batch size — don't expire here,
-        // let the periodic cleanup handle expiration so results always get
-        // at least one upload attempt
+        // Drain all available results — upload everything each cycle,
+        // matching the official probe's httppost behavior
         let results = {
             let mut queue = self.queue.lock().await;
-            queue.drain_batch(self.config.batch_size)
+            queue.drain_all()
         };
 
         if results.is_empty() {

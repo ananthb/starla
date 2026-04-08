@@ -76,6 +76,11 @@ impl ResultQueue {
         self.items.drain(..count).collect()
     }
 
+    /// Take all results from the queue
+    pub fn drain_all(&mut self) -> Vec<QueuedResult> {
+        self.items.drain(..).collect()
+    }
+
     /// Put failed results back at the front with incremented attempt counter
     pub fn requeue_failed(&mut self, mut results: Vec<QueuedResult>) {
         let now = SystemTime::now()
