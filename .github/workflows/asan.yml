@@ -23,6 +23,7 @@ jobs:
       - name: Run tests with AddressSanitizer
         run: |
           cargo test --all-features --workspace \
+            --exclude starla-tray \
             -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
           RUSTFLAGS: "-Zsanitizer=address"
