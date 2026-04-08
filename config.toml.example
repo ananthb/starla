@@ -18,6 +18,9 @@ log_level = "info"
 # Report network interface traffic statistics (rx/tx bytes, packets, errors)
 rxtxrpt = false
 
+# Enable status socket for tray app communication (desktop only)
+status_socket = false
+
 [controller]
 # Registration servers (host:port)
 registration_servers = [

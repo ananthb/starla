@@ -31,6 +31,57 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+/// Run the status socket server for tray app communication.
+/// Listens on a Unix domain socket; on each connection writes current
+/// probe status as JSON and closes.
+#[cfg(unix)]
+async fn run_status_socket(
+    status: Arc<tokio::sync::Mutex<starla_common::status::ProbeStatus>>,
+    start_time: u64,
+) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::UnixListener;
+
+    let socket_path = starla_common::status_socket_path();
+
+    // Remove stale socket
+    let _ = std::fs::remove_file(&socket_path);
+
+    // Ensure parent directory exists
+    if let Some(parent) = socket_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let listener = UnixListener::bind(&socket_path)?;
+    debug!("Status socket listening on {}", socket_path.display());
+
+    loop {
+        let (mut stream, _) = listener.accept().await?;
+        let mut s = status.lock().await;
+
+        // Update uptime
+        s.uptime_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_sub(start_time);
+
+        let json = serde_json::to_string_pretty(&*s).unwrap_or_default();
+        drop(s);
+        let _ = stream.write_all(json.as_bytes()).await;
+        let _ = stream.shutdown().await;
+    }
+}
+
+#[cfg(not(unix))]
+async fn run_status_socket(
+    _status: Arc<tokio::sync::Mutex<starla_common::status::ProbeStatus>>,
+    _start_time: u64,
+) -> anyhow::Result<()> {
+    // TODO: Windows named pipe support
+    Ok(())
+}
+
 /// SSH-based upload transport that opens direct-tcpip channels
 /// to the controller's HTTP result endpoint.
 ///
@@ -471,6 +522,31 @@ async fn main() -> Result<()> {
 
     debug!("Probe initialization complete");
 
+    // Status socket for tray app communication
+    let probe_status = Arc::new(tokio::sync::Mutex::new(
+        starla_common::status::ProbeStatus {
+            probe_id: probe_id.0,
+            connected: false,
+            controller: None,
+            uptime_secs: 0,
+            measurements: std::collections::HashMap::new(),
+            queue_depth: 0,
+            public_key: None,
+        },
+    ));
+    if config.network.status_socket {
+        let status = probe_status.clone();
+        let start_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        tokio::spawn(async move {
+            if let Err(e) = run_status_socket(status, start_time).await {
+                debug!("Status socket ended: {}", e);
+            }
+        });
+    }
+
     // Controller connection
     debug!("Connecting to controller...");
 
@@ -540,10 +616,16 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Log probe identity when both probe ID and key are available
+    // Log probe identity and update status with public key
     if probe_id.0 != 0 {
         if let Ok(fp) = starla_controller::key_fingerprint(&key) {
             info!("Probe {} ({})", probe_id.0, fp);
+        }
+    }
+    {
+        let pubkey_path = starla_common::probe_pubkey_path();
+        if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
+            probe_status.lock().await.public_key = Some(contents.trim().to_string());
         }
     }
 
@@ -622,7 +704,9 @@ async fn main() -> Result<()> {
                 if info.probe_id != 0 {
                     probe_id = starla_common::ProbeId(info.probe_id);
                     info!("Probe ID: {}", info.probe_id);
+                    probe_status.lock().await.probe_id = info.probe_id;
                 }
+                probe_status.lock().await.controller = Some(format!("{}:{}", info.host, info.port));
 
                 break info;
             }
@@ -852,6 +936,7 @@ async fn main() -> Result<()> {
                 );
 
                 info!("Controller connection established successfully");
+                probe_status.lock().await.connected = true;
                 #[cfg(feature = "metrics-export")]
                 metrics.set_connected(true);
 
@@ -898,6 +983,7 @@ async fn main() -> Result<()> {
                             Err(e) => warn!("KEEP task panicked: {}", e),
                             _ => warn!("KEEP session ended"),
                         }
+                        probe_status.lock().await.connected = false;
                         #[cfg(feature = "metrics-export")]
                         metrics.set_connected(false);
                         // Clear SSH connection so uploads fail fast

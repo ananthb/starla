@@ -189,6 +189,11 @@ pub fn known_hosts_path() -> PathBuf {
     state_dir().join("known_hosts")
 }
 
+/// Get the status socket path (for tray app communication)
+pub fn status_socket_path() -> PathBuf {
+    runtime_dir().join("starla.sock")
+}
+
 /// Get the probe ID file path
 pub fn probe_id_path() -> PathBuf {
     state_dir().join("probe_id")

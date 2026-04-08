@@ -22,6 +22,7 @@ clap = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 rustls = { workspace = true }
+serde_json = { workspace = true }
 
 [features]
 default = ["observability"]

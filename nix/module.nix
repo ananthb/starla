@@ -7,6 +7,7 @@ let
   configFile = settingsFormat.generate "config.toml" {
     probe.log_level = cfg.logLevel;
     network.rxtxrpt = cfg.reportInterfaceStats;
+    network.status_socket = cfg.statusSocket;
     controller = {
       registration_servers = cfg.controller.registrationServers;
       ssh_timeout = cfg.controller.sshTimeout;
@@ -58,6 +59,12 @@ in
       type = lib.types.bool;
       default = false;
       description = "Report network interface traffic statistics (rx/tx bytes, packets, errors) to the RIPE Atlas controller.";
+    };
+
+    statusSocket = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Enable the Unix domain socket for tray app communication. Only needed on desktop systems.";
     };
 
     controller = {

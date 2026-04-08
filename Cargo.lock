@@ -3004,6 +3004,7 @@ dependencies = [
  "anyhow",
  "clap",
  "rustls",
+ "serde_json",
  "starla-common",
  "starla-controller",
  "starla-metrics",

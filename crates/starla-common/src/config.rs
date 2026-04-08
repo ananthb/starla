@@ -43,6 +43,11 @@ impl Default for ProbeSettings {
 pub struct NetworkSettings {
     #[serde(default)]
     pub rxtxrpt: bool,
+
+    /// Enable the status socket for tray app communication.
+    /// Only needed on desktop systems. Default: false.
+    #[serde(default)]
+    pub status_socket: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
