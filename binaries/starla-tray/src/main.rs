@@ -3,7 +3,7 @@
 use anyhow::Result;
 use starla_common::status::ProbeStatus;
 use std::sync::{Arc, Mutex};
-use tray_icon::menu::{AboutMetadata, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -70,8 +70,8 @@ fn format_uptime(secs: u64) -> String {
 }
 
 struct App {
-    icon_green: Icon,
-    icon_red: Icon,
+    _icon_green: Icon,
+    _icon_red: Icon,
     status: Arc<Mutex<Option<ProbeStatus>>>,
     copy_key_id: tray_icon::menu::MenuId,
     open_atlas_id: tray_icon::menu::MenuId,
@@ -195,8 +195,8 @@ fn main() -> Result<()> {
     let quit_id = tray_icon::menu::MenuId::new("quit");
 
     let mut app = App {
-        icon_green: icon_green.clone(),
-        icon_red: icon_red.clone(),
+        _icon_green: icon_green.clone(),
+        _icon_red: icon_red.clone(),
         status: status.clone(),
         copy_key_id,
         open_atlas_id,
