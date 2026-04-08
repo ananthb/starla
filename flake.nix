@@ -41,6 +41,11 @@
 
           buildInputs = with pkgs; [
             openssl
+          ] ++ lib.optionals stdenv.isLinux [
+            glib
+            gtk3
+            libayatana-appindicator
+            xdotool
           ] ++ lib.optionals stdenv.isDarwin [
             darwin.apple_sdk.frameworks.Security
             darwin.apple_sdk.frameworks.SystemConfiguration

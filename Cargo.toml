@@ -9,6 +9,7 @@ members = [
     "crates/starla-results",
     "crates/starla-metrics",
     "binaries/starla-probe",
+    "binaries/starla-tray",
     "tests/mock-controller",
 ]
 exclude = ["fuzz"]
