@@ -195,6 +195,25 @@
                 maintainers = [ ];
               };
             };
+          } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            starla-tray = pkgs.rustPlatform.buildRustPackage {
+              pname = "starla-tray";
+              version = "0.1.0";
+              src = ./.;
+              cargoLock.lockFile = ./Cargo.lock;
+
+              inherit nativeBuildInputs buildInputs;
+
+              cargoBuildFlags = [ "-p" "starla-tray" ];
+              doCheck = false;
+
+              meta = with pkgs.lib; {
+                description = "Starla system tray app";
+                homepage = "https://github.com/ananthb/starla";
+                license = licenses.agpl3Only;
+                maintainers = [ ];
+              };
+            };
           };
 
           # CI checks
@@ -299,5 +318,22 @@
         };
       };
       nixosModules.starla = self.nixosModules.default;
+
+      darwinModules.default = { config, lib, pkgs, ... }: {
+        imports = [ ./nix/darwin-module.nix ];
+        config = lib.mkIf config.services.starla.enable {
+          services.starla.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        };
+      };
+      darwinModules.starla = self.darwinModules.default;
+
+      homeManagerModules.default = { config, lib, pkgs, ... }: {
+        imports = [ ./nix/home-module.nix ];
+        config = lib.mkIf config.services.starla.enable {
+          services.starla.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          services.starla.trayPackage = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.starla-tray;
+        };
+      };
+      homeManagerModules.starla = self.homeManagerModules.default;
     };
 }

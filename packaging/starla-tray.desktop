@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Starla
+Comment=RIPE Atlas probe status
+Exec=starla-tray
+Icon=starla
+Categories=System;Monitor;Network;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
