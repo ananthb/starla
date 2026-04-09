@@ -27,5 +27,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - name: Evaluate nix flake (darwin)
-        run: nix flake check --no-build
+      - name: Build default package (darwin)
+        run: nix build
