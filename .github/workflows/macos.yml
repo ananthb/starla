@@ -21,3 +21,11 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace --all-features
+
+  nix:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Evaluate nix flake (darwin)
+        run: nix flake check --no-build
