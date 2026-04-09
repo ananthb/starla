@@ -10,22 +10,13 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
 
-      - uses: dtolnay/rust-toolchain@nightly
-
-      - name: Build probe
-        run: cargo build --bin starla --all-features
-
-      - name: Build tray app
-        run: cargo build --bin starla-tray
+      - name: Build packages
+        run: |
+          nix build .#default
+          nix build .#starla-tray
 
       - name: Run tests
-        run: cargo test --workspace --all-features
-
-  nix:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - name: Build default package (darwin)
-        run: nix build
+        run: |
+          nix develop -c cargo test --workspace --all-features

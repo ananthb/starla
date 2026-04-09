@@ -154,29 +154,13 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Build binaries
+      - name: Build release DMG
         run: |
-          cargo build --release --bin starla --all-features
-          cargo build --release --bin starla-tray
-
-      - name: Create DMG
-        run: |
-          mkdir -p dmg-staging dist
-
-          # CLI binary + support files
-          cp target/release/starla dmg-staging/
-          cp config.toml.example dmg-staging/
-          cp packaging/com.ananthb.starla.plist dmg-staging/
-
-          # App bundle for tray
-          mkdir -p "dmg-staging/Starla Tray.app/Contents/MacOS"
-          cp target/release/starla-tray "dmg-staging/Starla Tray.app/Contents/MacOS/"
-          cp packaging/Info.plist "dmg-staging/Starla Tray.app/Contents/"
-
-          hdiutil create -volname "Starla" -srcfolder dmg-staging \
-            -ov -format UDZO dist/starla-macos-arm64.dmg
+          nix build .#release -o result-dmg
+          mkdir -p dist
+          cp "$(readlink result-dmg)" dist/starla-macos-arm64.dmg
 
       - uses: actions/upload-artifact@v4
         with:

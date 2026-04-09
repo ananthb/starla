@@ -175,6 +175,25 @@
                 maintainers = [ ];
               };
             };
+            starla-tray = pkgs.rustPlatform.buildRustPackage {
+              pname = "starla-tray";
+              version = "0.1.0";
+              src = ./.;
+              cargoLock.lockFile = ./Cargo.lock;
+
+              inherit nativeBuildInputs buildInputs;
+
+              cargoBuildFlags = [ "-p" "starla-tray" ];
+              doCheck = false;
+
+              meta = with pkgs.lib; {
+                description = "Starla system tray app";
+                homepage = "https://github.com/ananthb/starla";
+                license = licenses.agpl3Only;
+                maintainers = [ ];
+              };
+            };
+
           } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             release =
               let
@@ -194,25 +213,6 @@
                 cp ${./packaging/starla-tray.desktop} starla/starla-tray.desktop
                 tar -czvf $out -C . starla
               '';
-
-            starla-tray = pkgs.rustPlatform.buildRustPackage {
-              pname = "starla-tray";
-              version = "0.1.0";
-              src = ./.;
-              cargoLock.lockFile = ./Cargo.lock;
-
-              inherit nativeBuildInputs buildInputs;
-
-              cargoBuildFlags = [ "-p" "starla-tray" ];
-              doCheck = false;
-
-              meta = with pkgs.lib; {
-                description = "Starla system tray app";
-                homepage = "https://github.com/ananthb/starla";
-                license = licenses.agpl3Only;
-                maintainers = [ ];
-              };
-            };
 
             appimage =
               let
@@ -281,6 +281,31 @@
                                 mksquashfs AppDir appimage.squashfs -root-owned -noappend -comp zstd -quiet -no-progress
                                 cat ${appimageRuntime} appimage.squashfs > $out
                                 chmod +x $out
+              '';
+          } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+            release =
+              let
+                pkg = self.packages.${system}.default;
+                tray = self.packages.${system}.starla-tray;
+              in
+              pkgs.runCommand "starla-macos-arm64.dmg"
+                {
+                  nativeBuildInputs = [ pkgs.coreutils ];
+                } ''
+                mkdir -p dmg-staging
+
+                # CLI binary + support files
+                cp ${pkg}/bin/starla dmg-staging/
+                cp ${./config.toml.example} dmg-staging/
+                cp ${./packaging/com.ananthb.starla.plist} dmg-staging/
+
+                # App bundle for tray
+                mkdir -p "dmg-staging/Starla Tray.app/Contents/MacOS"
+                cp ${tray}/bin/starla-tray "dmg-staging/Starla Tray.app/Contents/MacOS/"
+                cp ${./packaging/Info.plist} "dmg-staging/Starla Tray.app/Contents/"
+
+                hdiutil create -volname "Starla" -srcfolder dmg-staging \
+                  -ov -format UDZO $out
               '';
           };
 
