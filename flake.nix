@@ -335,6 +335,9 @@
                 SCRIPT
                 chmod +x staging/Install\ CLI.command
 
+                # create-dmg needs sw_vers which lives outside the nix PATH.
+                export PATH="/usr/bin:$PATH"
+
                 # create-dmg returns exit code 2 when it succeeds but
                 # skips the code-signing step (expected in a sandbox).
                 create-dmg \
