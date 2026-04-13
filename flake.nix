@@ -292,51 +292,7 @@
                                 cat ${appimageRuntime} appimage.squashfs > $out
                                 chmod +x $out
               '';
-          } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
-            release =
-              let
-                pkg = self.packages.${system}.default;
-                tray = self.packages.${system}.starla-tray;
-                arch = if system == "x86_64-darwin" then "amd64" else "arm64";
-              in
-              pkgs.runCommand "starla-macos-${arch}.dmg"
-                { } ''
-                mkdir -p staging
-
-                # App bundle for tray (also includes the CLI probe binary
-                # so Install CLI.command can symlink it from /usr/local/bin)
-                mkdir -p "staging/Starla Tray.app/Contents/MacOS"
-                mkdir -p "staging/Starla Tray.app/Contents/Resources"
-                cp ${tray}/bin/starla-tray "staging/Starla Tray.app/Contents/MacOS/"
-                cp ${pkg}/bin/starla "staging/Starla Tray.app/Contents/MacOS/"
-                cp ${./packaging/Info.plist} "staging/Starla Tray.app/Contents/"
-                cp ${./assets/logo.icns} "staging/Starla Tray.app/Contents/Resources/icon.icns"
-
-                # Support files
-                cp ${./config.toml.example} staging/
-                cp ${./packaging/com.ananthb.starla.plist} staging/
-
-                # Script that symlinks the CLI binary into /usr/local/bin
-                cat > staging/Install\ CLI.command << 'SCRIPT'
-                #!/bin/bash
-                set -e
-                dst="/usr/local/bin/starla"
-                src="/Applications/Starla Tray.app/Contents/MacOS/starla"
-                if [ ! -f "$src" ]; then
-                  echo "Error: Starla Tray.app not found in /Applications."
-                  echo "Drag the app to Applications first, then run this again."
-                  exit 1
-                fi
-                mkdir -p /usr/local/bin
-                ln -sf "$src" "$dst"
-                echo "Installed: $dst -> $src"
-                SCRIPT
-                chmod +x staging/Install\ CLI.command
-
-                hdiutil create -volname "Starla" -srcfolder staging \
-                  -ov -format UDZO $out
-              '';
-          };
+          } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin { };
 
           # CI checks
           checks = {
