@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="128" height="128" alt="Starla logo">
+</p>
+
 # Starla
 
 An alternative unofficial [RIPE Atlas](https://atlas.ripe.net) software probe written in Rust.
@@ -13,6 +17,8 @@ An alternative unofficial [RIPE Atlas](https://atlas.ripe.net) software probe wr
 - **No local ports** — all communication flows through the SSH tunnel
 - **Minimal container image** — just the binary + CA certs, multi-arch (amd64/arm64)
 - **NixOS module** — declarative configuration with systemd hardening
+- **Home Manager module** — user-level service with launchd (macOS) or systemd (Linux)
+- **macOS app bundle** — Starla Tray.app with DMG installer and Install CLI script
 - **Prometheus metrics** — optional observability export
 - **Persistent result queue** — survives restarts via RocksDB
 

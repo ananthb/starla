@@ -186,6 +186,16 @@
               cargoBuildFlags = [ "-p" "starla-tray" ];
               doCheck = false;
 
+              postInstall = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+                # macOS .app bundle for the tray — gives it a dock icon,
+                # proper app lifecycle, and allows launchd to manage it.
+                mkdir -p "$out/Applications/Starla Tray.app/Contents/MacOS"
+                mkdir -p "$out/Applications/Starla Tray.app/Contents/Resources"
+                cp $src/packaging/Info.plist "$out/Applications/Starla Tray.app/Contents/"
+                cp $src/assets/logo.icns "$out/Applications/Starla Tray.app/Contents/Resources/icon.icns"
+                cp $out/bin/starla-tray "$out/Applications/Starla Tray.app/Contents/MacOS/"
+              '';
+
               meta = with pkgs.lib; {
                 description = "Starla system tray app";
                 homepage = "https://github.com/ananthb/starla";
@@ -287,25 +297,55 @@
               let
                 pkg = self.packages.${system}.default;
                 tray = self.packages.${system}.starla-tray;
+                arch = if system == "x86_64-darwin" then "amd64" else "arm64";
               in
-              pkgs.runCommand "starla-macos-arm64.dmg"
+              pkgs.runCommand "starla-macos-${arch}.dmg"
                 {
-                  nativeBuildInputs = [ pkgs.coreutils ];
+                  nativeBuildInputs = [ pkgs.create-dmg ];
                 } ''
-                mkdir -p dmg-staging
+                mkdir -p staging
 
-                # CLI binary + support files
-                cp ${pkg}/bin/starla dmg-staging/
-                cp ${./config.toml.example} dmg-staging/
-                cp ${./packaging/com.ananthb.starla.plist} dmg-staging/
+                # App bundle for tray (also includes the CLI probe binary
+                # so Install CLI.command can symlink it from /usr/local/bin)
+                mkdir -p "staging/Starla Tray.app/Contents/MacOS"
+                mkdir -p "staging/Starla Tray.app/Contents/Resources"
+                cp ${tray}/bin/starla-tray "staging/Starla Tray.app/Contents/MacOS/"
+                cp ${pkg}/bin/starla "staging/Starla Tray.app/Contents/MacOS/"
+                cp ${./packaging/Info.plist} "staging/Starla Tray.app/Contents/"
+                cp ${./assets/logo.icns} "staging/Starla Tray.app/Contents/Resources/icon.icns"
 
-                # App bundle for tray
-                mkdir -p "dmg-staging/Starla Tray.app/Contents/MacOS"
-                cp ${tray}/bin/starla-tray "dmg-staging/Starla Tray.app/Contents/MacOS/"
-                cp ${./packaging/Info.plist} "dmg-staging/Starla Tray.app/Contents/"
+                # Support files
+                cp ${./config.toml.example} staging/
+                cp ${./packaging/com.ananthb.starla.plist} staging/
 
-                hdiutil create -volname "Starla" -srcfolder dmg-staging \
-                  -ov -format UDZO $out
+                # Script that symlinks the CLI binary into /usr/local/bin
+                cat > staging/Install\ CLI.command << 'SCRIPT'
+                #!/bin/bash
+                set -e
+                dst="/usr/local/bin/starla"
+                src="/Applications/Starla Tray.app/Contents/MacOS/starla"
+                if [ ! -f "$src" ]; then
+                  echo "Error: Starla Tray.app not found in /Applications."
+                  echo "Drag the app to Applications first, then run this again."
+                  exit 1
+                fi
+                mkdir -p /usr/local/bin
+                ln -sf "$src" "$dst"
+                echo "Installed: $dst -> $src"
+                SCRIPT
+                chmod +x staging/Install\ CLI.command
+
+                # create-dmg returns exit code 2 when it succeeds but
+                # skips the code-signing step (expected in a sandbox).
+                create-dmg \
+                  --volname "Starla" \
+                  --window-size 600 400 \
+                  --icon-size 128 \
+                  --icon "Starla Tray.app" 150 190 \
+                  --app-drop-link 450 190 \
+                  $out \
+                  staging/ \
+                || test $? -eq 2
               '';
           };
 

@@ -93,8 +93,10 @@ in
     # Config file
     xdg.configFile."starla/config.toml".source = configFile;
 
+    # --- Linux: systemd user services ---
+
     # Probe daemon as user service
-    systemd.user.services.starla = {
+    systemd.user.services.starla = lib.mkIf pkgs.stdenv.isLinux {
       Unit = {
         Description = "Starla RIPE Atlas Software Probe";
         After = [ "default.target" ];
@@ -113,7 +115,7 @@ in
     };
 
     # Tray app as user service (desktop only)
-    systemd.user.services.starla-tray = lib.mkIf cfg.tray.enable {
+    systemd.user.services.starla-tray = lib.mkIf (cfg.tray.enable && pkgs.stdenv.isLinux) {
       Unit = {
         Description = "Starla System Tray";
         After = [ "graphical-session-pre.target" ];
@@ -132,8 +134,8 @@ in
       };
     };
 
-    # Autostart desktop entry for tray
-    xdg.configFile."autostart/starla-tray.desktop" = lib.mkIf cfg.tray.enable {
+    # Autostart desktop entry for tray (Linux)
+    xdg.configFile."autostart/starla-tray.desktop" = lib.mkIf (cfg.tray.enable && pkgs.stdenv.isLinux) {
       text = ''
         [Desktop Entry]
         Type=Application
@@ -146,5 +148,52 @@ in
         X-GNOME-Autostart-enabled=true
       '';
     };
+
+    # --- macOS: launchd agents ---
+
+    launchd.agents.starla = lib.mkIf pkgs.stdenv.isDarwin {
+      enable = true;
+      config = {
+        Label = "com.ananthb.starla";
+        ProgramArguments = [
+          "${cfg.package}/bin/starla"
+          "--config"
+          "${config.home.homeDirectory}/.config/starla/config.toml"
+        ];
+        RunAtLoad = true;
+        KeepAlive = { SuccessfulExit = false; };
+        ThrottleInterval = 10;
+        StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/starla.log";
+        StandardOutPath = "${config.home.homeDirectory}/Library/Logs/starla.log";
+      };
+    };
+
+    launchd.agents.starla-tray = lib.mkIf (cfg.tray.enable && pkgs.stdenv.isDarwin) {
+      enable = true;
+      config = {
+        Label = "com.ananthb.starla-tray";
+        ProgramArguments = [
+          "${config.home.homeDirectory}/Applications/Starla Tray.app/Contents/MacOS/starla-tray"
+        ];
+        RunAtLoad = true;
+        KeepAlive = { SuccessfulExit = false; };
+        ProcessType = "Interactive";
+      };
+    };
+
+    # Copy .app bundle into ~/Applications on activation (macOS).
+    # home.file with recursive=true creates per-file symlinks which macOS
+    # does not recognise as a valid bundle. Copy the whole .app instead.
+    home.activation.starla-tray-app = lib.mkIf (cfg.tray.enable && pkgs.stdenv.isDarwin)
+      (lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        app_src="${cfg.trayPackage}/Applications/Starla Tray.app"
+        app_dst="$HOME/Applications/Starla Tray.app"
+        if [ -d "$app_src" ]; then
+          $DRY_RUN_CMD rm -rf "$app_dst"
+          $DRY_RUN_CMD cp -RL "$app_src" "$app_dst"
+          $DRY_RUN_CMD chmod -R u+w "$app_dst"
+          $DRY_RUN_CMD xattr -dr com.apple.quarantine "$app_dst" 2>/dev/null || true
+        fi
+      '');
   };
 }
