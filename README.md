@@ -35,12 +35,12 @@ docker run -d --name starla \
 services.starla.enable = true;
 
 # Ubuntu / Debian
-curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_0.1.0_amd64.deb
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_0.3.0_amd64.deb
 sudo dpkg -i starla_*.deb
 sudo systemctl enable --now starla
 
 # Fedora / RHEL
-curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-0.1.0-1.x86_64.rpm
+curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-0.3.0-1.x86_64.rpm
 sudo dnf install ./starla-*.rpm
 sudo systemctl enable --now starla
 
