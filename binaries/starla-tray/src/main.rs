@@ -8,30 +8,40 @@ use tray_icon::{Icon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 
-/// Generate a colored circle icon (16x16 RGBA)
-fn make_icon(r: u8, g: u8, b: u8) -> Icon {
-    let size = 16u32;
-    let mut rgba = Vec::with_capacity((size * size * 4) as usize);
-    let center = size as f32 / 2.0;
-    let radius = center - 1.0;
+/// Embedded tray icon (star with signal arcs, RGBA PNG).
+const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../assets/tray.png");
 
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32 - center;
-            let dy = y as f32 - center;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist <= radius {
-                rgba.extend_from_slice(&[r, g, b, 255]);
-            } else if dist <= radius + 1.0 {
-                let alpha = ((radius + 1.0 - dist) * 255.0) as u8;
-                rgba.extend_from_slice(&[r, g, b, alpha]);
-            } else {
-                rgba.extend_from_slice(&[0, 0, 0, 0]);
+/// Tint the embedded icon's opaque pixels with the given RGB color, preserving
+/// alpha.
+fn tint_icon(r: u8, g: u8, b: u8) -> Icon {
+    let decoder = png::Decoder::new(TRAY_ICON_PNG);
+    let mut reader = decoder.read_info().expect("Failed to read PNG header");
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).expect("Failed to decode PNG");
+    buf.truncate(info.buffer_size());
+
+    let mut rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => {
+            let mut rgba = Vec::with_capacity(buf.len() / 3 * 4);
+            for chunk in buf.chunks(3) {
+                rgba.extend_from_slice(chunk);
+                rgba.push(255);
             }
+            rgba
+        }
+        _ => panic!("Unexpected PNG color type: {:?}", info.color_type),
+    };
+
+    for pixel in rgba.chunks_exact_mut(4) {
+        if pixel[3] > 0 {
+            pixel[0] = r;
+            pixel[1] = g;
+            pixel[2] = b;
         }
     }
 
-    Icon::from_rgba(rgba, size, size).expect("Failed to create icon")
+    Icon::from_rgba(rgba, info.width, info.height).expect("Failed to create tinted icon")
 }
 
 /// Read probe status from the Unix domain socket
@@ -179,8 +189,8 @@ impl ApplicationHandler for App {
 fn main() -> Result<()> {
     let event_loop = EventLoop::new()?;
 
-    let icon_green = make_icon(76, 175, 80);
-    let icon_red = make_icon(244, 67, 54);
+    let icon_green = tint_icon(76, 175, 80);
+    let icon_red = tint_icon(244, 67, 54);
 
     let status: Arc<Mutex<Option<ProbeStatus>>> = Arc::new(Mutex::new(read_status()));
     let connected = status

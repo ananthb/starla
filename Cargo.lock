@@ -4663,6 +4663,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "open",
+ "png 0.17.16",
  "serde_json",
  "starla-common",
  "tray-icon",
