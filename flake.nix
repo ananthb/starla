@@ -300,9 +300,7 @@
                 arch = if system == "x86_64-darwin" then "amd64" else "arm64";
               in
               pkgs.runCommand "starla-macos-${arch}.dmg"
-                {
-                  nativeBuildInputs = [ pkgs.create-dmg ];
-                } ''
+                { } ''
                 mkdir -p staging
 
                 # App bundle for tray (also includes the CLI probe binary
@@ -335,20 +333,8 @@
                 SCRIPT
                 chmod +x staging/Install\ CLI.command
 
-                # create-dmg needs sw_vers which lives outside the nix PATH.
-                export PATH="/usr/bin:$PATH"
-
-                # create-dmg returns exit code 2 when it succeeds but
-                # skips the code-signing step (expected in a sandbox).
-                create-dmg \
-                  --volname "Starla" \
-                  --window-size 600 400 \
-                  --icon-size 128 \
-                  --icon "Starla Tray.app" 150 190 \
-                  --app-drop-link 450 190 \
-                  $out \
-                  staging/ \
-                || test $? -eq 2
+                hdiutil create -volname "Starla" -srcfolder staging \
+                  -ov -format UDZO $out
               '';
           };
 
