@@ -157,43 +157,11 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Build packages
+      - name: Build DMG
         run: |
-          nix build .#packages.aarch64-darwin.default -o result-probe
-          nix build .#packages.aarch64-darwin.starla-tray -o result-tray
-
-      - name: Create DMG
-        run: |
-          mkdir -p staging
-          mkdir -p "staging/Starla Tray.app/Contents/MacOS"
-          mkdir -p "staging/Starla Tray.app/Contents/Resources"
-          cp result-tray/bin/starla-tray "staging/Starla Tray.app/Contents/MacOS/"
-          cp result-probe/bin/starla "staging/Starla Tray.app/Contents/MacOS/"
-          cp packaging/Info.plist "staging/Starla Tray.app/Contents/"
-          cp assets/logo.icns "staging/Starla Tray.app/Contents/Resources/icon.icns"
-
-          cp config.toml.example staging/
-          cp packaging/com.ananthb.starla.plist staging/
-
-          cat > "staging/Install CLI.command" << 'SCRIPT'
-          #!/bin/bash
-          set -e
-          dst="/usr/local/bin/starla"
-          src="/Applications/Starla Tray.app/Contents/MacOS/starla"
-          if [ ! -f "$src" ]; then
-            echo "Error: Starla Tray.app not found in /Applications."
-            echo "Drag the app to Applications first, then run this again."
-            exit 1
-          fi
-          mkdir -p /usr/local/bin
-          ln -sf "$src" "$dst"
-          echo "Installed: $dst -> $src"
-          SCRIPT
-          chmod +x "staging/Install CLI.command"
-
+          nix build .#packages.aarch64-darwin.release -o result-dmg
           mkdir -p dist
-          hdiutil create -volname "Starla" -srcfolder staging \
-            -ov -format UDZO dist/starla-macos-arm64.dmg
+          cp "$(readlink result-dmg)" dist/starla-macos-arm64.dmg
 
       - uses: actions/upload-artifact@v4
         with:

@@ -213,11 +213,14 @@
               in
               pkgs.runCommand "starla-${arch}.tar.gz"
                 {
-                  nativeBuildInputs = [ pkgs.gzip ];
+                  nativeBuildInputs = [ pkgs.gzip pkgs.patchelf ];
                 } ''
                 mkdir -p starla
                 cp ${pkg}/bin/starla starla/starla
                 cp ${tray}/bin/starla-tray starla/starla-tray
+                chmod +w starla/starla starla/starla-tray
+                patchelf --remove-rpath starla/starla
+                patchelf --remove-rpath starla/starla-tray
                 cp ${./config.toml.example} starla/config.toml.example
                 cp ${./starla.service} starla/starla.service
                 cp ${./packaging/starla-tray.desktop} starla/starla-tray.desktop
@@ -237,7 +240,7 @@
                   hash = "sha256-AMvfz5F8xsD/bTNH1Z4Moff0Wm3xpCig1tinhmTYdEQ=";
                 });
 
-                libPath = pkgs.lib.makeLibraryPath (with pkgs; [
+                libDeps = with pkgs; [
                   glib
                   gtk3
                   libayatana-appindicator
@@ -261,38 +264,109 @@
                   libxkbcommon
                   wayland
                   xdotool
-                ]);
+                ];
               in
               pkgs.runCommand "starla-tray-${arch}.AppImage"
                 {
-                  nativeBuildInputs = with pkgs; [ squashfsTools ];
+                  nativeBuildInputs = with pkgs; [ squashfsTools patchelf ];
                 } ''
-                                mkdir -p AppDir/usr/bin
-                                mkdir -p AppDir/usr/share/applications
+                mkdir -p AppDir/usr/bin
+                mkdir -p AppDir/usr/lib
+                mkdir -p AppDir/usr/share/applications
 
-                                cp ${tray}/bin/starla-tray AppDir/usr/bin/
-                                chmod +w AppDir/usr/bin/*
+                cp ${tray}/bin/starla-tray AppDir/usr/bin/
+                chmod +w AppDir/usr/bin/*
+                patchelf --remove-rpath AppDir/usr/bin/starla-tray
 
-                                cp ${./packaging/starla-tray.desktop} AppDir/starla-tray.desktop
-                                cp ${./packaging/starla-tray.desktop} AppDir/usr/share/applications/
+                # Bundle shared libraries so the AppImage is self-contained.
+                for dir in ${pkgs.lib.concatStringsSep " " (map (d: "${d}/lib") libDeps)}; do
+                  if [ -d "$dir" ]; then
+                    for so in "$dir"/*.so "$dir"/*.so.*; do
+                      [ -e "$so" ] || continue
+                      cp -n "$(readlink -f "$so")" "AppDir/usr/lib/$(basename "$so")" 2>/dev/null || true
+                    done
+                  fi
+                done
 
-                                cat > AppDir/AppRun << 'APPRUN'
-                                #!/bin/bash
-                                set -e
-                                SELF=$(readlink -f "$0")
-                                APPDIR=''${SELF%/*}
-                                export LD_LIBRARY_PATH="LIBPATH:''${LD_LIBRARY_PATH}"
-                                export GSETTINGS_SCHEMA_DIR="/usr/share/glib-2.0/schemas:''${GSETTINGS_SCHEMA_DIR}"
-                                exec "''${APPDIR}/usr/bin/starla-tray" "$@"
+                cp ${./packaging/starla-tray.desktop} AppDir/starla-tray.desktop
+                cp ${./packaging/starla-tray.desktop} AppDir/usr/share/applications/
+
+                cat > AppDir/AppRun << 'APPRUN'
+                #!/bin/bash
+                set -e
+                SELF=$(readlink -f "$0")
+                APPDIR=''${SELF%/*}
+                export LD_LIBRARY_PATH="''${APPDIR}/usr/lib:''${LD_LIBRARY_PATH}"
+                export GSETTINGS_SCHEMA_DIR="/usr/share/glib-2.0/schemas:''${GSETTINGS_SCHEMA_DIR}"
+                exec "''${APPDIR}/usr/bin/starla-tray" "$@"
                 APPRUN
-                                sed -i "s|LIBPATH|${libPath}|g" AppDir/AppRun
-                                chmod +x AppDir/AppRun
+                chmod +x AppDir/AppRun
 
-                                mksquashfs AppDir appimage.squashfs -root-owned -noappend -comp zstd -quiet -no-progress
-                                cat ${appimageRuntime} appimage.squashfs > $out
-                                chmod +x $out
+                mksquashfs AppDir appimage.squashfs -root-owned -noappend -comp zstd -quiet -no-progress
+                cat ${appimageRuntime} appimage.squashfs > $out
+                chmod +x $out
               '';
-          } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin { };
+          } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+            release =
+              let
+                pkg = self.packages.${system}.default;
+                tray = self.packages.${system}.starla-tray;
+                arch = if system == "x86_64-darwin" then "amd64" else "arm64";
+              in
+              pkgs.runCommand "starla-macos-${arch}.dmg"
+                {
+                  nativeBuildInputs = [ pkgs.cctools ];
+                }
+                ''
+                  export PATH="/usr/bin:$PATH"
+                  mkdir -p staging
+
+                  # Copy the .app bundle from the tray package
+                  cp -rL "${tray}/Applications/Starla Tray.app" staging/
+                  chmod -R u+w staging/
+
+                  # Add the CLI probe binary into the .app bundle
+                  cp ${pkg}/bin/starla "staging/Starla Tray.app/Contents/MacOS/"
+
+                  # Rewrite any /nix/store dylib references to /usr/lib
+                  # so binaries work on non-Nix macOS systems.
+                  for bin in "staging/Starla Tray.app/Contents/MacOS/starla" \
+                             "staging/Starla Tray.app/Contents/MacOS/starla-tray"; do
+                    chmod +w "$bin"
+                    for dep in $(otool -L "$bin" | grep /nix/store | awk '{print $1}'); do
+                      base=$(basename "$dep")
+                      install_name_tool -change "$dep" "/usr/lib/$base" "$bin"
+                    done
+                  done
+
+                  # Include config example and launchd plist
+                  cp ${./config.toml.example} staging/config.toml.example
+                  cp ${./packaging/com.ananthb.starla.plist} staging/com.ananthb.starla.plist
+
+                  # Install CLI script that symlinks the probe binary
+                  cat > staging/Install\ CLI.command << 'SCRIPT'
+                  #!/bin/bash
+                  set -e
+                  dst="/usr/local/bin/starla"
+                  src="/Applications/Starla Tray.app/Contents/MacOS/starla"
+                  if [ ! -f "$src" ]; then
+                    echo "Error: Starla Tray.app not found in /Applications."
+                    echo "Drag the app to Applications first, then run this again."
+                    exit 1
+                  fi
+                  mkdir -p /usr/local/bin
+                  ln -sf "$src" "$dst"
+                  echo "Installed: $dst -> $src"
+                  SCRIPT
+                  chmod +x staging/Install\ CLI.command
+
+                  # Applications symlink for drag-and-drop install
+                  ln -s /Applications staging/Applications
+
+                  hdiutil create -volname "Starla" -srcfolder staging \
+                    -ov -format UDZO $out
+                '';
+          };
 
           # CI checks
           checks = {
