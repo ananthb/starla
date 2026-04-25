@@ -26,7 +26,7 @@ contents:
     file_info:
       mode: 0750
 
-  # apt repository config — auto-configures updates
+  # apt repository config: auto-configures updates
   - src: ./starla.gpg
     dst: /usr/share/keyrings/starla.gpg
     packager: deb
@@ -36,7 +36,7 @@ contents:
     type: config
     packager: deb
 
-  # dnf/yum repository config — auto-configures updates
+  # dnf/yum repository config: auto-configures updates
   - src: ./starla.repo
     dst: /etc/yum.repos.d/starla.repo
     type: config

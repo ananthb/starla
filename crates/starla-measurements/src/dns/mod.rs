@@ -47,7 +47,7 @@ impl Measurement for Dns {
         };
         let src_addr = get_source_addr_for_dest(self.config.target).ok();
 
-        // Execute DNS query — handle timeout as a valid result with error field
+        // Execute DNS query: handle timeout as a valid result with error field
         // (matching official C probe behavior)
         let result_str = match resolver::execute_dns_query(&self.config, self.probe_id.0).await {
             Ok(results) => {
@@ -91,7 +91,7 @@ impl Measurement for Dns {
                 s
             }
             Err(_) => {
-                // Timeout or network error — report as result with error field
+                // Timeout or network error: report as result with error field
                 // matching official C probe: {"error":{"timeout":5000}}
                 format!("{{ \"error\":{{\"timeout\":{}}} }}", self.config.timeout_ms)
             }

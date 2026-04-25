@@ -12,15 +12,15 @@ An alternative unofficial [RIPE Atlas](https://atlas.ripe.net) software probe wr
 
 ## Features
 
-- **All measurement types** — Ping, Traceroute, DNS, HTTP, TLS, NTP
-- **Pure Rust SSH** — no OpenSSH dependency, uses `russh`
-- **No local ports** — all communication flows through the SSH tunnel
-- **Minimal container image** — just the binary + CA certs, multi-arch (amd64/arm64)
-- **NixOS module** — declarative configuration with systemd hardening
-- **Home Manager module** — user-level service with launchd (macOS) or systemd (Linux)
-- **macOS app bundle** — Starla Tray.app with DMG installer and Install CLI script
-- **Prometheus metrics** — optional observability export
-- **Persistent result queue** — survives restarts via RocksDB
+- **All measurement types**: Ping, Traceroute, DNS, HTTP, TLS, NTP
+- **Pure Rust SSH**: no OpenSSH dependency, uses `russh`
+- **No local ports**: all communication flows through the SSH tunnel
+- **Minimal container image**: just the binary + CA certs, multi-arch (amd64/arm64)
+- **NixOS module**: declarative configuration with systemd hardening
+- **Home Manager module**: user-level service with launchd (macOS) or systemd (Linux)
+- **macOS app bundle**: Starla Tray.app with DMG installer and Install CLI script
+- **Prometheus metrics**: optional observability export
+- **Persistent result queue**: survives restarts via RocksDB
 
 ## Quick Start
 
@@ -63,4 +63,4 @@ configuration, and signature verification.
 
 ## License
 
-AGPL-3.0-or-later — See [LICENSE](LICENSE).
+AGPL-3.0-or-later: See [LICENSE](LICENSE).

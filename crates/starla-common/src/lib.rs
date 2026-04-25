@@ -23,7 +23,7 @@ pub use paths::{
 };
 pub use types::*;
 
-/// Firmware version — must match the reference probe version for controller
+/// Firmware version: must match the reference probe version for controller
 /// acceptance
 pub const FIRMWARE_VERSION: u32 = 5120;
 

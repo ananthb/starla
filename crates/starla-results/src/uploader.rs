@@ -173,7 +173,7 @@ impl ResultUploader {
                     break;
                 }
             }
-            // Don't read forever — response should be short
+            // Don't read forever: response should be short
             if response.len() > 4096 {
                 break;
             }
@@ -210,7 +210,7 @@ impl ResultUploader {
                         anyhow::bail!("Upload rejected: {}", resp_body);
                     }
                 }
-                // No body separator found but status was 200 — treat as success
+                // No body separator found but status was 200: treat as success
                 debug!(
                     "Batch upload successful (no body): {} results",
                     results.len()

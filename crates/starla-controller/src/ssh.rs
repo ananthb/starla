@@ -266,7 +266,7 @@ impl client::Handler for AtlasClientHandler {
             originator_address, originator_port, connected_address, connected_port
         );
 
-        // Convert SSH channel to an async stream and handle directly —
+        // Convert SSH channel to an async stream and handle directly :
         // no local TCP port needed
         let stream = crate::channel_stream::channel_to_stream(channel);
         let command_tx = self.command_tx.clone();
@@ -615,14 +615,14 @@ impl SshConnection {
 
         debug!("KEEP session started, monitoring channel");
 
-        // Block until the KEEP channel closes — this is our connection health signal
+        // Block until the KEEP channel closes: this is our connection health signal
         while let Some(msg) = channel.wait().await {
             match msg {
                 ChannelMsg::Data { data } => {
                     trace!("KEEP channel data: {} bytes", data.len());
                 }
                 ChannelMsg::Eof => {
-                    debug!("KEEP channel EOF — connection lost");
+                    debug!("KEEP channel EOF: connection lost");
                     break;
                 }
                 ChannelMsg::ExitStatus { exit_status } => {
@@ -632,7 +632,7 @@ impl SshConnection {
             }
         }
 
-        warn!("KEEP session ended — controller disconnected");
+        warn!("KEEP session ended: controller disconnected");
         anyhow::bail!("KEEP session ended")
     }
 
@@ -860,7 +860,7 @@ impl SshConnection {
                                     result = local_stream.read(&mut local_buf), if !local_done => {
                                         match result {
                                             Ok(0) => {
-                                                // Local finished sending — half-close the SSH side
+                                                // Local finished sending: half-close the SSH side
                                                 // but keep looping to read the response
                                                 let _ = channel.eof().await;
                                                 local_done = true;

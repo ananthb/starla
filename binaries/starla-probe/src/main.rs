@@ -290,7 +290,7 @@ async fn main() -> Result<()> {
     // Create channel for receiving telnet commands
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<TelnetCommand>(100);
 
-    // Telnet state — passed to SSH connections so forwarded connections
+    // Telnet state: passed to SSH connections so forwarded connections
     // are handled directly without a local TCP listener
     let telnet_session_id = std::sync::Arc::new(tokio::sync::RwLock::new(None));
     let telnet_state = starla_controller::TelnetState {
@@ -576,7 +576,7 @@ async fn main() -> Result<()> {
                 }
             }
         } else {
-            // Credentials dir exists but no ssh-key — fall through to file
+            // Credentials dir exists but no ssh-key: fall through to file
             let key_path = starla_common::probe_key_path();
             starla_controller::load_key(&key_path).await?
         }
@@ -649,7 +649,7 @@ async fn main() -> Result<()> {
     // Create probe info for registration
     let probe_info = ProbeInitInfo::new(starla_common::FIRMWARE_VERSION);
 
-    // Registration loop — retries indefinitely with backoff
+    // Registration loop: retries indefinitely with backoff
     let mut reg_delay = Duration::from_secs(5);
     let max_reg_delay = Duration::from_secs(300);
     let mut printed_key = false;
@@ -711,7 +711,7 @@ async fn main() -> Result<()> {
                 break info;
             }
             Ok(InitResponse::Ok) | Ok(InitResponse::Wait { .. }) => {
-                // Not yet registered — print key and keep retrying
+                // Not yet registered: print key and keep retrying
                 if !printed_key {
                     let pubkey_path = starla_common::probe_pubkey_path();
                     if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
@@ -953,7 +953,7 @@ async fn main() -> Result<()> {
                     debug!("Result upload loop started");
                 }
 
-                // Run KEEP session — blocks until connection drops.
+                // Run KEEP session: blocks until connection drops.
                 let keep_ssh_for_keep = {
                     let guard = ssh_for_upload.lock().await;
                     match guard.as_ref() {

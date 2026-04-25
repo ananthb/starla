@@ -231,9 +231,9 @@ pub fn decode_answers(abuf: &str) -> Option<Vec<AnswerRecord>> {
 }
 
 /// Expand RIPE Atlas DNS query name templates:
-/// - `$r` — random 8-char alphanumeric (prevents DNS caching)
-/// - `$p` — probe ID
-/// - `$t` — current Unix timestamp
+/// - `$r`: random 8-char alphanumeric (prevents DNS caching)
+/// - `$p`: probe ID
+/// - `$t`: current Unix timestamp
 fn expand_query_templates(query_name: &str, probe_id: u32) -> String {
     if query_name == "." {
         return query_name.to_string();

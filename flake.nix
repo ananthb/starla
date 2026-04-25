@@ -187,7 +187,7 @@
               doCheck = false;
 
               postInstall = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
-                # macOS .app bundle for the tray — gives it a dock icon,
+                # macOS .app bundle for the tray: gives it a dock icon,
                 # proper app lifecycle, and allows launchd to manage it.
                 mkdir -p "$out/Applications/Starla Tray.app/Contents/MacOS"
                 mkdir -p "$out/Applications/Starla Tray.app/Contents/Resources"

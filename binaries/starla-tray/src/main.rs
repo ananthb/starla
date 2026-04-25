@@ -1,4 +1,4 @@
-//! Starla tray app — system tray icon showing probe status
+//! Starla tray app: system tray icon showing probe status
 
 use anyhow::Result;
 use starla_common::status::ProbeStatus;
@@ -225,7 +225,7 @@ fn main() -> Result<()> {
         .as_ref()
         .map(|s| {
             format!(
-                "Starla — Probe {} — {}",
+                "Starla: Probe {}: {}",
                 s.probe_id,
                 if s.connected {
                     "Connected"
@@ -234,7 +234,7 @@ fn main() -> Result<()> {
                 }
             )
         })
-        .unwrap_or_else(|| "Starla — Probe not running".to_string());
+        .unwrap_or_else(|| "Starla: Probe not running".to_string());
 
     let _tray = TrayIconBuilder::new()
         .with_tooltip(&tooltip)

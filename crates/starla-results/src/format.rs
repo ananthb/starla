@@ -74,7 +74,7 @@ fn write_result_value(buf: &mut String, value: &serde_json::Value) {
 /// - `result` is NOT flattened - it's a nested object or array
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AtlasResult {
-    /// Probe ID (not serialized — controller knows this from the URL)
+    /// Probe ID (not serialized: controller knows this from the URL)
     #[serde(skip_serializing)]
     pub prb_id: u32,
 
@@ -286,7 +286,7 @@ impl AtlasResult {
 
         let mut s = String::with_capacity(512);
 
-        // Envelope fields (id, fw, mver, lts, time) — always present
+        // Envelope fields (id, fw, mver, lts, time): always present
         write!(
             s,
             "RESULT {{ \"id\":\"{}\", \"fw\":{}, \"mver\": \"{}\", \"lts\":{}, \"time\":{}",
@@ -349,11 +349,11 @@ impl AtlasResult {
             write!(s, ", \"paris_id\":{}", paris_id).unwrap();
         }
 
-        // result — if PreFormatted, use the string directly; otherwise format via
+        // result: if PreFormatted, use the string directly; otherwise format via
         // format_result_value
         match &self.result {
             serde_json::Value::String(pre) => {
-                // PreFormatted result string — use verbatim
+                // PreFormatted result string: use verbatim
                 write!(s, ", \"result\": {}", pre).unwrap();
             }
             other => {
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn test_dns_result_line_no_double_comma() {
-        // DNS has no dst_name — this previously caused a double comma bug
+        // DNS has no dst_name: this previously caused a double comma bug
         let result = make_dns_result();
         let atlas = AtlasResult::from_measurement(result, None).with_lts(10);
         let line = atlas.to_result_line();

@@ -229,7 +229,7 @@ enum ConnectionState {
 
 /// Handle a single telnet connection with Atlas authentication.
 ///
-/// Accepts any async stream — works with both TCP sockets (for local testing)
+/// Accepts any async stream: works with both TCP sockets (for local testing)
 /// and SSH channel streams (for production controller connections).
 pub async fn handle_connection(
     stream: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -490,7 +490,7 @@ pub fn parse_command(cmd: &str) -> TelnetCommand {
         "CRONLINE" => parse_cronline(cmd),
         "ONEOFF" => {
             // ONEOFF <path> <measurement_command> <args...>
-            // One-shot measurement — parse as CRONLINE with interval=0
+            // One-shot measurement: parse as CRONLINE with interval=0
             if parts.len() >= 3 {
                 // Reconstruct as a CRONLINE with interval=0 for the parser
                 let measurement_parts = &parts[2..]; // skip ONEOFF and path

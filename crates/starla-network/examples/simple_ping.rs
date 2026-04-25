@@ -9,7 +9,7 @@
 //! ping_group_range), which don't require CAP_NET_RAW. Falls back to RAW
 //! sockets if needed.
 //!
-//! Unix only — uses raw sockets via AsyncFd.
+//! Unix only: uses raw sockets via AsyncFd.
 
 #[cfg(not(unix))]
 fn main() {

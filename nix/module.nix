@@ -160,7 +160,7 @@ in
 
         DynamicUser = true;
 
-        # Directories — systemd sets CONFIGURATION_DIRECTORY, STATE_DIRECTORY,
+        # Directories: systemd sets CONFIGURATION_DIRECTORY, STATE_DIRECTORY,
         # RUNTIME_DIRECTORY which starla's path resolution picks up automatically
         ConfigurationDirectory = "starla";
         ConfigurationDirectoryMode = "0750";

@@ -135,7 +135,7 @@ impl ResultHandler {
             return Ok(0);
         }
 
-        // Drain all available results — upload everything each cycle,
+        // Drain all available results: upload everything each cycle,
         // matching the official probe's httppost behavior
         let results = {
             let mut queue = self.queue.lock().await;

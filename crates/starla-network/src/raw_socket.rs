@@ -120,7 +120,7 @@ impl RawSocket {
 
             match guard.try_io(|inner| {
                 // socket2's recv_from requires MaybeUninit buffer.
-                // SAFETY: &mut [u8] is a valid &mut [MaybeUninit<u8>] — initialized
+                // SAFETY: &mut [u8] is a valid &mut [MaybeUninit<u8>]: initialized
                 // memory is trivially valid as MaybeUninit. The layout is guaranteed
                 // identical (MaybeUninit<u8> is repr(transparent) over u8).
                 let maybe_uninit_buf: &mut [std::mem::MaybeUninit<u8>] = unsafe {
