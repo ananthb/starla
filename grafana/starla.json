@@ -75,7 +75,7 @@
       "options": { "legend": { "calcs": ["rate"], "displayMode": "table" } },
       "title": "Measurements Started (rate)",
       "type": "timeseries",
-      "targets": [{ "expr": "rate(starla_measurements_started_total[5m])", "legendFormat": "{{type}}", "refId": "A" }]
+      "targets": [{ "expr": "rate(starla_measurements_started_total[5m])", "legendFormat": "{{msm_type}}", "refId": "A" }]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
@@ -84,7 +84,7 @@
       "options": { "legend": { "calcs": ["rate"], "displayMode": "table" } },
       "title": "Measurement Failures (rate)",
       "type": "timeseries",
-      "targets": [{ "expr": "rate(starla_measurements_failed_total[5m])", "legendFormat": "{{type}}", "refId": "A" }]
+      "targets": [{ "expr": "rate(starla_measurements_failed_total[5m])", "legendFormat": "{{msm_type}}", "refId": "A" }]
     },
     {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
@@ -94,9 +94,9 @@
       "title": "Measurement Duration",
       "type": "timeseries",
       "targets": [
-        { "expr": "histogram_quantile(0.5, rate(starla_measurement_duration_seconds_bucket[5m]))", "legendFormat": "p50 {{type}}", "refId": "A" },
-        { "expr": "histogram_quantile(0.95, rate(starla_measurement_duration_seconds_bucket[5m]))", "legendFormat": "p95 {{type}}", "refId": "B" },
-        { "expr": "histogram_quantile(0.99, rate(starla_measurement_duration_seconds_bucket[5m]))", "legendFormat": "p99 {{type}}", "refId": "C" }
+        { "expr": "histogram_quantile(0.5, rate(starla_measurement_duration_seconds_bucket[5m]))", "legendFormat": "p50 {{msm_type}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, rate(starla_measurement_duration_seconds_bucket[5m]))", "legendFormat": "p95 {{msm_type}}", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, rate(starla_measurement_duration_seconds_bucket[5m]))", "legendFormat": "p99 {{msm_type}}", "refId": "C" }
       ]
     },
     {

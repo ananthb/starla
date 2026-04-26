@@ -102,8 +102,9 @@ impl ResultQueue {
         }
     }
 
-    /// Remove results older than `max_age_secs`
-    pub fn cleanup_expired(&mut self, max_age_secs: i64) {
+    /// Remove results older than `max_age_secs`. Returns number of items
+    /// removed.
+    pub fn cleanup_expired(&mut self, max_age_secs: i64) -> usize {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -115,16 +116,19 @@ impl ResultQueue {
         if removed > 0 {
             debug!("Cleaned up {} expired results", removed);
         }
+        removed
     }
 
-    /// Remove results that exceeded max attempts
-    pub fn cleanup_failed(&mut self, max_attempts: u32) {
+    /// Remove results that exceeded max attempts. Returns number of items
+    /// removed.
+    pub fn cleanup_failed(&mut self, max_attempts: u32) -> usize {
         let before = self.items.len();
         self.items.retain(|r| r.attempts < max_attempts);
         let removed = before - self.items.len();
         if removed > 0 {
             warn!("Dropped {} results that exceeded max attempts", removed);
         }
+        removed
     }
 
     /// Get queue statistics

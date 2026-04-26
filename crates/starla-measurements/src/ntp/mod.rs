@@ -27,6 +27,10 @@ pub struct Ntp {
 
 #[async_trait]
 impl Measurement for Ntp {
+    fn measurement_type(&self) -> starla_common::MeasurementType {
+        starla_common::MeasurementType::Ntp
+    }
+
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
         let results = client::execute_ntp_query(&self.config, 3).await?;
 

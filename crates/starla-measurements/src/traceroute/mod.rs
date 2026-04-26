@@ -86,6 +86,10 @@ pub struct Traceroute {
 
 #[async_trait]
 impl Measurement for Traceroute {
+    fn measurement_type(&self) -> starla_common::MeasurementType {
+        starla_common::MeasurementType::Traceroute
+    }
+
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
         let start_time = Timestamp::now().0;
 

@@ -42,6 +42,8 @@ pub struct Scheduler {
     probe_id: ProbeId,
     /// Result handler for uploading results
     result_handler: Option<Arc<ResultHandler>>,
+    /// Metrics registry for recording operations
+    metrics: starla_metrics::MetricsRegistry,
     /// Command receiver
     cmd_rx: Arc<Mutex<Option<mpsc::Receiver<SchedulerCommand>>>>,
     /// Command sender (for cloning)
@@ -52,12 +54,13 @@ pub struct Scheduler {
 
 impl Scheduler {
     /// Create a new scheduler
-    pub fn new(probe_id: ProbeId) -> Self {
+    pub fn new(probe_id: ProbeId, metrics: starla_metrics::MetricsRegistry) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(100);
         Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             probe_id,
             result_handler: None,
+            metrics,
             cmd_rx: Arc::new(Mutex::new(Some(cmd_rx))),
             cmd_tx,
             cancel_token: CancellationToken::new(),
@@ -135,9 +138,16 @@ impl Scheduler {
 
     /// Execute a measurement and handle the result
     async fn execute_measurement(&self, measurement: &dyn starla_measurements::Measurement) {
+        let start_time = std::time::Instant::now();
+        let msm_type = measurement.measurement_type().to_string();
+
         match measurement.execute().await {
             Ok(result) => {
+                let duration = start_time.elapsed().as_secs_f64();
                 debug!(msm_id = result.msm_id.0, "Measurement completed");
+
+                self.metrics
+                    .record_measurement_completed(&msm_type, duration);
 
                 if let Some(ref handler) = self.result_handler {
                     handler.submit(result).await;
@@ -146,7 +156,9 @@ impl Scheduler {
                 }
             }
             Err(e) => {
+                let duration = start_time.elapsed().as_secs_f64();
                 error!("Measurement execution failed: {}", e);
+                self.metrics.record_measurement_failed(&msm_type, duration);
             }
         }
     }
@@ -213,6 +225,10 @@ impl Scheduler {
                 // Check for due tasks
                 _ = tick_interval.tick() => {
                     self.check_due_tasks().await;
+
+                    // Update metrics
+                    let count = self.tasks.lock().await.len() as i64;
+                    self.metrics.update_scheduler_tasks(count);
                 }
             }
         }
@@ -257,20 +273,29 @@ impl Scheduler {
         for job in due_jobs {
             debug!(msm_id = job.msm_id, "Executing scheduled measurement");
             let result_handler = self.result_handler.clone();
+            let metrics = self.metrics.clone();
             let probe_id = self.probe_id;
             tokio::spawn(async move {
                 match job.to_measurement(probe_id) {
-                    Ok(measurement) => match measurement.execute().await {
-                        Ok(result) => {
-                            debug!(msm_id = result.msm_id.0, "Measurement completed");
-                            if let Some(ref handler) = result_handler {
-                                handler.submit(result).await;
+                    Ok(measurement) => {
+                        let start_time = std::time::Instant::now();
+                        let msm_type = measurement.measurement_type().to_string();
+                        match measurement.execute().await {
+                            Ok(result) => {
+                                let duration = start_time.elapsed().as_secs_f64();
+                                debug!(msm_id = result.msm_id.0, "Measurement completed");
+                                metrics.record_measurement_completed(&msm_type, duration);
+                                if let Some(ref handler) = result_handler {
+                                    handler.submit(result).await;
+                                }
+                            }
+                            Err(e) => {
+                                let duration = start_time.elapsed().as_secs_f64();
+                                error!(msm_id = job.msm_id, "Measurement failed: {}", e);
+                                metrics.record_measurement_failed(&msm_type, duration);
                             }
                         }
-                        Err(e) => {
-                            error!(msm_id = job.msm_id, "Measurement failed: {}", e);
-                        }
-                    },
+                    }
                     Err(e) => {
                         error!(msm_id = job.msm_id, "Failed to create measurement: {}", e);
                     }

@@ -40,7 +40,7 @@ impl MetricsRegistry {
         // Measurements
         let measurements_started = IntCounterVec::new(
             Opts::new("starla_measurements_started_total", "Measurements started"),
-            &["type"],
+            &["msm_type"],
         )?;
         registry.register(Box::new(measurements_started.clone()))?;
 
@@ -49,13 +49,13 @@ impl MetricsRegistry {
                 "starla_measurements_completed_total",
                 "Measurements completed successfully",
             ),
-            &["type"],
+            &["msm_type"],
         )?;
         registry.register(Box::new(measurements_completed.clone()))?;
 
         let measurements_failed = IntCounterVec::new(
             Opts::new("starla_measurements_failed_total", "Measurements failed"),
-            &["type"],
+            &["msm_type"],
         )?;
         registry.register(Box::new(measurements_failed.clone()))?;
 
@@ -65,7 +65,7 @@ impl MetricsRegistry {
                 "Measurement execution duration",
             )
             .buckets(vec![0.01, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0]),
-            &["type"],
+            &["msm_type"],
         )?;
         registry.register(Box::new(measurement_duration_seconds.clone()))?;
 

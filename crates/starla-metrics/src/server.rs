@@ -29,7 +29,7 @@ struct HealthResponse {
 /// Returns a handle that can be awaited to run the server.
 /// The server will run until the provided cancellation token is triggered.
 pub async fn start_metrics_server(
-    metrics: Arc<MetricsRegistry>,
+    metrics: MetricsRegistry,
     addr: SocketAddr,
     cancel_token: tokio_util::sync::CancellationToken,
 ) -> Result<(), anyhow::Error> {
@@ -53,7 +53,7 @@ pub async fn start_metrics_server(
 }
 
 /// Handler for /metrics endpoint
-async fn metrics_handler(State(metrics): State<Arc<MetricsRegistry>>) -> Response {
+async fn metrics_handler(State(metrics): State<MetricsRegistry>) -> Response {
     let encoder = TextEncoder::new();
     let metric_families = metrics.registry().gather();
 

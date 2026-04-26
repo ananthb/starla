@@ -25,6 +25,10 @@ pub struct Tls {
 
 #[async_trait]
 impl Measurement for Tls {
+    fn measurement_type(&self) -> starla_common::MeasurementType {
+        starla_common::MeasurementType::Tls
+    }
+
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
         let results = cert::execute_tls_check(&self.config).await?;
 

@@ -50,11 +50,16 @@ pub struct ResultUploader {
     config: UploaderConfig,
     /// Process start time (unix timestamp) for uptime reporting
     start_time: u64,
+    metrics: starla_metrics::MetricsRegistry,
 }
 
 impl ResultUploader {
     /// Create a new uploader with the given transport
-    pub fn new(transport: Box<dyn UploadTransport>, config: UploaderConfig) -> Self {
+    pub fn new(
+        transport: Box<dyn UploadTransport>,
+        config: UploaderConfig,
+        metrics: starla_metrics::MetricsRegistry,
+    ) -> Self {
         let start_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -63,6 +68,7 @@ impl ResultUploader {
             transport,
             config,
             start_time,
+            metrics,
         }
     }
 
@@ -102,6 +108,9 @@ impl ResultUploader {
         if !self.has_endpoint() {
             anyhow::bail!("No upload endpoint configured");
         }
+
+        self.metrics.record_upload_attempt();
+        let start_time = std::time::Instant::now();
 
         // Build POST body
         let mut body = Vec::new();
@@ -204,6 +213,8 @@ impl ResultUploader {
                     let resp_body = response_str[body_start + 4..].trim();
                     if resp_body == "OK" {
                         debug!("Batch upload successful: {} results", results.len());
+                        self.metrics
+                            .record_upload_duration(start_time.elapsed().as_secs_f64());
                         return Ok(());
                     } else {
                         debug!("Upload rejected: {:?}", resp_body);
@@ -215,6 +226,8 @@ impl ResultUploader {
                     "Batch upload successful (no body): {} results",
                     results.len()
                 );
+                self.metrics
+                    .record_upload_duration(start_time.elapsed().as_secs_f64());
                 return Ok(());
             } else {
                 anyhow::bail!("Upload failed: {}", status_line);

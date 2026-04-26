@@ -58,6 +58,7 @@ pub struct ResultHandler {
     config: ResultHandlerConfig,
     time_sync: Arc<TimeSyncTracker>,
     session_id: Arc<Mutex<Option<String>>>,
+    metrics: starla_metrics::MetricsRegistry,
 }
 
 impl ResultHandler {
@@ -66,9 +67,10 @@ impl ResultHandler {
         transport: Box<dyn UploadTransport>,
         uploader_config: UploaderConfig,
         config: ResultHandlerConfig,
+        metrics: starla_metrics::MetricsRegistry,
     ) -> Self {
         let queue = ResultQueue::new(config.max_queue_size);
-        let uploader = ResultUploader::new(transport, uploader_config);
+        let uploader = ResultUploader::new(transport, uploader_config, metrics.clone());
 
         Self {
             queue: Arc::new(Mutex::new(queue)),
@@ -76,6 +78,7 @@ impl ResultHandler {
             config,
             time_sync: Arc::new(TimeSyncTracker::new()),
             session_id: Arc::new(Mutex::new(None)),
+            metrics,
         }
     }
 
@@ -118,8 +121,16 @@ impl ResultHandler {
     /// Submit a result for upload
     pub async fn submit(&self, result: MeasurementResult) {
         let mut queue = self.queue.lock().await;
+        let before = queue.stats().count;
         queue.enqueue(result);
-        debug!("Result enqueued, queue: {}", queue.stats().count);
+        let after = queue.stats().count;
+
+        if after <= before && before > 0 {
+            self.metrics.record_queue_drop();
+        }
+
+        self.metrics.update_queue_depth(after as i64);
+        debug!("Result enqueued, queue: {}", after);
     }
 
     /// Get current queue statistics
@@ -139,7 +150,9 @@ impl ResultHandler {
         // matching the official probe's httppost behavior
         let results = {
             let mut queue = self.queue.lock().await;
-            queue.drain_all()
+            let res = queue.drain_all();
+            self.metrics.update_queue_depth(0);
+            res
         };
 
         if results.is_empty() {
@@ -155,6 +168,9 @@ impl ResultHandler {
                 "Dropping {} results that exceeded max attempts",
                 failed.len()
             );
+            for _ in 0..failed.len() {
+                self.metrics.record_queue_drop();
+            }
         }
 
         if uploadable.is_empty() {
@@ -175,12 +191,15 @@ impl ResultHandler {
         {
             Ok(()) => {
                 info!("Successfully uploaded {} results", count);
+                self.metrics.record_upload_success();
                 Ok(count)
             }
             Err(e) => {
                 warn!("Upload failed: {}", e);
+                self.metrics.record_upload_failure();
                 let mut queue = self.queue.lock().await;
                 queue.requeue_failed(uploadable);
+                self.metrics.update_queue_depth(queue.stats().count as i64);
                 Err(e)
             }
         }
@@ -189,8 +208,16 @@ impl ResultHandler {
     /// Run cleanup to remove expired and failed results
     pub async fn run_cleanup(&self) {
         let mut queue = self.queue.lock().await;
-        queue.cleanup_expired(self.config.max_result_age_secs);
-        queue.cleanup_failed(self.config.max_attempts);
+        let removed_expired = queue.cleanup_expired(self.config.max_result_age_secs);
+        let removed_failed = queue.cleanup_failed(self.config.max_attempts);
+
+        let total_removed = removed_expired + removed_failed;
+        if total_removed > 0 {
+            for _ in 0..total_removed {
+                self.metrics.record_queue_drop();
+            }
+            self.metrics.update_queue_depth(queue.stats().count as i64);
+        }
     }
 
     /// Run the upload loop
@@ -295,6 +322,7 @@ mod tests {
             Box::new(NoopTransport),
             UploaderConfig::default(),
             ResultHandlerConfig::default(),
+            starla_metrics::MetricsRegistry::default(),
         );
 
         let stats = handler.queue_stats().await;
@@ -307,6 +335,7 @@ mod tests {
             Box::new(NoopTransport),
             UploaderConfig::default(),
             ResultHandlerConfig::default(),
+            starla_metrics::MetricsRegistry::default(),
         );
 
         handler.submit(make_result(1001)).await;

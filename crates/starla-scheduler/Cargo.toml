@@ -10,6 +10,7 @@ readme = "README.md"
 starla-common = { path = "../starla-common", version = "0.3.0" }
 starla-measurements = { path = "../starla-measurements", version = "0.3.0" }
 starla-results = { path = "../starla-results", version = "0.3.0" }
+starla-metrics = { path = "../starla-metrics", version = "0.3.0" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 chrono = { workspace = true }

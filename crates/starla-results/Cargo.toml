@@ -8,6 +8,7 @@ readme = "README.md"
 
 [dependencies]
 starla-common = { path = "../starla-common", version = "0.3.0" }
+starla-metrics = { path = "../starla-metrics", version = "0.3.0" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 serde = { workspace = true }

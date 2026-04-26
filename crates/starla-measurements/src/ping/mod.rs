@@ -41,6 +41,10 @@ pub struct Ping {
 
 #[async_trait]
 impl Measurement for Ping {
+    fn measurement_type(&self) -> starla_common::MeasurementType {
+        starla_common::MeasurementType::Ping
+    }
+
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
         let results = icmp::execute_ping(&self.config).await?;
 

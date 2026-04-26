@@ -56,7 +56,7 @@ mod with_export {
 
     #[tokio::test]
     async fn test_metrics_server() {
-        let registry = Arc::new(MetricsRegistry::new().unwrap());
+        let registry = MetricsRegistry::new().unwrap();
         let addr = "127.0.0.1:0".parse().unwrap();
         let cancel_token = CancellationToken::new();
         let cancel_clone = cancel_token.clone();

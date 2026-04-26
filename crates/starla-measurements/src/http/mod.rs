@@ -31,6 +31,10 @@ pub struct Http {
 
 #[async_trait]
 impl Measurement for Http {
+    fn measurement_type(&self) -> starla_common::MeasurementType {
+        starla_common::MeasurementType::Http
+    }
+
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
         let results = client::execute_http_request(&self.config).await?;
 

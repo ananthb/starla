@@ -40,6 +40,10 @@ pub struct Dns {
 
 #[async_trait]
 impl Measurement for Dns {
+    fn measurement_type(&self) -> starla_common::MeasurementType {
+        starla_common::MeasurementType::Dns
+    }
+
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
         let proto = match self.config.protocol {
             DnsProtocol::TCP => "TCP",

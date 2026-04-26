@@ -232,7 +232,7 @@ async fn main() -> Result<()> {
 
     // Initialize Metrics (only when feature is enabled)
     #[cfg(feature = "metrics-export")]
-    let metrics = Arc::new(MetricsRegistry::new()?);
+    let metrics = MetricsRegistry::new()?;
 
     // Start Metrics Server if enabled
     #[allow(unused_variables)]
@@ -269,6 +269,12 @@ async fn main() -> Result<()> {
     let transport = Box::new(SshUploadTransport {
         ssh: ssh_for_upload.clone(),
     });
+
+    #[cfg(feature = "metrics-export")]
+    let metrics_for_results = metrics.clone();
+    #[cfg(not(feature = "metrics-export"))]
+    let metrics_for_results = starla_metrics::MetricsRegistry::default();
+
     let result_handler = Arc::new(ResultHandler::new(
         transport,
         UploaderConfig::default(),
@@ -276,10 +282,16 @@ async fn main() -> Result<()> {
             max_queue_size: config.storage.max_queue_size,
             ..ResultHandlerConfig::default()
         },
+        metrics_for_results,
     ));
 
     // Initialize Scheduler
-    let mut scheduler = starla_scheduler::Scheduler::new(probe_id);
+    #[cfg(feature = "metrics-export")]
+    let metrics_for_scheduler = metrics.clone();
+    #[cfg(not(feature = "metrics-export"))]
+    let metrics_for_scheduler = starla_metrics::MetricsRegistry::default();
+
+    let mut scheduler = starla_scheduler::Scheduler::new(probe_id, metrics_for_scheduler);
     scheduler.set_result_handler(result_handler.clone());
 
     let scheduler_tx = scheduler.command_sender();
