@@ -56,7 +56,7 @@ docker run -d --name starla \
 Without it, only DNS, HTTP, TLS, and NTP measurements will work.</p>
 
 <p>Inside a container, starla automatically stores state in <code>/state</code>
-and reads config from <code>/config</code> &mdash; no extra flags needed.</p>
+and reads config from <code>/config</code>; no extra flags needed.</p>
 
 <h3>With a config file</h3>
 <pre><code class="language-bash"># Download example config
@@ -329,17 +329,17 @@ UDP and TCP traceroute variants are not yet supported (ICMP traceroute works).</
 <h2>After Installation</h2>
 
 <ol>
-  <li>Start starla &mdash; on first run it generates an SSH key and logs the public key</li>
+  <li>Start starla. On first run it generates an SSH key and logs the public key</li>
   <li>Copy the public key from the log output (it's also saved to
     <code>probe_key.pub</code> in the state directory)</li>
   <li>Register at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a></li>
-  <li>Starla retries automatically &mdash; once approved, it connects and begins measurements</li>
+  <li>Starla retries automatically; once approved, it connects and begins measurements</li>
 </ol>
 
 <h2>Configuration File</h2>
 
 <p>See <a href="https://github.com/ananthb/starla/blob/main/config.toml.example">config.toml.example</a>
-for all available options. The config file is optional &mdash; all settings have sensible defaults.</p>
+for all available options. The config file is optional; all settings have sensible defaults.</p>
 
 <p>Config file search order:</p>
 <ol>

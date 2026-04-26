@@ -39,11 +39,11 @@
 <p>All starla release artifacts are signed with two complementary methods:</p>
 <ul>
   <li><strong><a href="https://docs.sigstore.dev/cosign/overview/">Cosign</a></strong>
-    (keyless, via Sigstore) &mdash; signs individual files and container images.
+    (keyless, via Sigstore) signs individual files and container images.
     No keys to manage; signatures are tied to the GitHub Actions workflow identity
     and recorded in a public transparency log.</li>
   <li><strong>GPG</strong> (<code>Starla Releases &lt;starla@calculon.tech&gt;</code>)
-    &mdash; signs apt and rpm repository metadata. Required because apt and dnf
+    signs apt and rpm repository metadata. Required because apt and dnf
     don't support cosign.</li>
 </ul>
 
@@ -107,9 +107,9 @@ sha256sum -c SHA256SUMS</code></pre>
 <h2>What the flags mean</h2>
 
 <ul>
-  <li><code>--certificate-identity-regexp</code> &mdash; ensures the certificate was
+  <li><code>--certificate-identity-regexp</code>: ensures the certificate was
     issued to a workflow in the <code>ananthb/starla</code> repository</li>
-  <li><code>--certificate-oidc-issuer</code> &mdash; ensures the certificate came from
+  <li><code>--certificate-oidc-issuer</code>: ensures the certificate came from
     GitHub Actions (not some other OIDC provider)</li>
 </ul>
 

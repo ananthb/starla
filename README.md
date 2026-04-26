@@ -20,7 +20,7 @@ An alternative unofficial [RIPE Atlas](https://atlas.ripe.net) software probe wr
 - **Home Manager module**: user-level service with launchd (macOS) or systemd (Linux)
 - **macOS app bundle**: Starla Tray.app with DMG installer and Install CLI script
 - **Prometheus metrics**: optional observability export
-- **Persistent result queue**: survives restarts via RocksDB
+- **Bounded in-memory result queue**: configurable capacity, drops oldest when full
 
 ## Quick Start
 

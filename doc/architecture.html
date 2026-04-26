@@ -61,7 +61,7 @@ RIPE Atlas Infrastructure                          Starla Probe
        |    (long-lived connection)     |       |          +-----v-----+  |
        |                                |       |          | Result    |  |
        +--[ reverse tunnel ]------------|-------+          | Queue     |  |
-       |   forwarded-tcpip              |                  | (RocksDB) |  |
+       |   forwarded-tcpip              |                  | in memory |  |
        |   (measurement commands)       |                  +-----+-----+  |
        |                                |                        |        |
        +--[ direct-tcpip ]<-------------|------------------------+        |
@@ -73,20 +73,20 @@ RIPE Atlas Infrastructure                          Starla Probe
 <h2>Connection Flow</h2>
 
 <ol>
-  <li><strong>Registration</strong> &mdash; Starla connects via SSH to a registration server
+  <li><strong>Registration</strong>: Starla connects via SSH to a registration server
     (<code>reg03.atlas.ripe.net:443</code>), sends an <code>INIT</code> command with probe
     identity, and receives a controller assignment.</li>
-  <li><strong>Controller INIT</strong> &mdash; Connects to the assigned controller via SSH,
+  <li><strong>Controller INIT</strong>: connects to the assigned controller via SSH,
     sends another <code>INIT</code>, and receives a <code>SESSION_ID</code> and
     <code>REMOTE_PORT</code>.</li>
-  <li><strong>KEEP session</strong> &mdash; Opens a long-lived SSH connection to the controller
+  <li><strong>KEEP session</strong>: opens a long-lived SSH connection to the controller
     running the <code>KEEP</code> command. This connection carries both measurement commands
     (inbound) and result uploads (outbound).</li>
 </ol>
 
 <h2>No Local Ports</h2>
 
-<p>All communication flows through the SSH tunnel &mdash; starla binds no local TCP ports.</p>
+<p>All communication flows through the SSH tunnel; starla binds no local TCP ports.</p>
 
 <ul>
   <li><strong>Measurement commands</strong> arrive via SSH reverse tunnel
@@ -104,8 +104,7 @@ starla-common         Shared types, config, paths, logging
 starla-controller     SSH connection, telnet parser, channel streams
 starla-measurements   Ping, DNS, traceroute, HTTP, TLS, NTP implementations
 starla-scheduler      Measurement scheduling and concurrent execution
-starla-results        Result formatting, persistent queue, upload transport
-starla-database       RocksDB measurement storage
+starla-results        Result formatting, in-memory upload queue, upload transport
 starla-network        Raw sockets, source address detection
 starla-metrics        Prometheus metrics export (optional)</code></pre>
 
@@ -122,8 +121,9 @@ executes them concurrently via <code>tokio::spawn</code>.</p>
 }</code></pre>
 
 <p>Results are formatted to match the official C probe's JSON output exactly
-(field order, spacing, numeric precision) and queued in the persistent
-RocksDB-backed result queue for upload.</p>
+(field order, spacing, numeric precision) and queued in a bounded in-memory
+buffer for upload. The queue size is configurable; oldest entries are dropped
+when the buffer is full.</p>
 
 <h2>Result Upload</h2>
 
@@ -152,8 +152,7 @@ SESSION_ID abc</code></pre>
   known_hosts       Controller SSH host keys (TOFU)
 
 Runtime directory (ephemeral):
-  measurements/     RocksDB measurement database
-  result_queue/     RocksDB result upload queue</code></pre>
+  starla.sock       Status socket for tray app communication (when enabled)</code></pre>
 
 <p>Path resolution priority: CLI flag &gt; systemd env &gt; container paths
 (<code>/state</code>, <code>/config</code>) &gt; XDG &gt; standard Linux paths.

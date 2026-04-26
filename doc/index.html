@@ -62,13 +62,13 @@ results back to the API.</p>
 
 <h2>Features</h2>
 <ul>
-  <li><strong>All measurement types</strong> &mdash; Ping, Traceroute, DNS, HTTP, TLS, NTP</li>
-  <li><strong>Pure Rust SSH</strong> &mdash; no OpenSSH dependency, uses <code>russh</code></li>
-  <li><strong>No local ports</strong> &mdash; all communication flows through the SSH tunnel</li>
-  <li><strong>Minimal container image</strong> &mdash; just the binary + CA certs, multi-arch (amd64/arm64)</li>
-  <li><strong>NixOS module</strong> &mdash; declarative configuration with systemd hardening</li>
-  <li><strong>Prometheus metrics</strong> &mdash; optional observability export</li>
-  <li><strong>Persistent result queue</strong> &mdash; survives restarts via RocksDB</li>
+  <li><strong>All measurement types</strong>: Ping, Traceroute, DNS, HTTP, TLS, NTP</li>
+  <li><strong>Pure Rust SSH</strong>: no OpenSSH dependency, uses <code>russh</code></li>
+  <li><strong>No local ports</strong>: all communication flows through the SSH tunnel</li>
+  <li><strong>Minimal container image</strong>: just the binary + CA certs, multi-arch (amd64/arm64)</li>
+  <li><strong>NixOS module</strong>: declarative configuration with systemd hardening</li>
+  <li><strong>Prometheus metrics</strong>: optional observability export</li>
+  <li><strong>Bounded in-memory result queue</strong>: configurable capacity, drops oldest when full</li>
 </ul>
 
 <h2>Quick Start</h2>
@@ -94,8 +94,8 @@ SSH, receives measurement schedules over a reverse-tunneled telnet interface,
 executes measurements, and uploads results through SSH direct-tcpip channels.</p>
 
 <p>Probe state (SSH keys, probe ID, known hosts) is stored in the state directory
-and persists across restarts. The measurement result queue is backed by RocksDB
-for crash resilience.</p>
+and persists across restarts. Pending measurement results are held in a bounded
+in-memory queue and are not retained across restarts.</p>
 
 <h2>Registration</h2>
 <p>After first startup, register your probe at

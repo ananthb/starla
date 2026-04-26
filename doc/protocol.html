@@ -86,7 +86,7 @@ reverse tunnel.</p>
 <h3>KEEP Session</h3>
 
 <p>The probe opens a long-lived SSH connection and executes <code>KEEP</code>.
-This channel blocks indefinitely and serves as a health monitor &mdash; if the
+This channel blocks indefinitely and serves as a health monitor; if the
 channel closes, the connection is lost and the probe reconnects.</p>
 
 <p>On this same SSH connection:</p>
@@ -150,7 +150,7 @@ the C probe writes results). Internally converted to CRONLINE with interval=0.</
 
 <p><code>CRONTAB</code>, <code>httppost</code>, <code>condmv</code>,
 <code>rptaddrs</code>, <code>buddyinfo</code>, <code>conntrack</code>,
-<code>dfrm</code> &mdash; internal Atlas utilities that starla doesn't need.</p>
+<code>dfrm</code>: internal Atlas utilities that starla doesn't need.</p>
 
 <h2>3. Measurement Commands</h2>
 
@@ -190,7 +190,7 @@ omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
 <tr><td><code>-S</code></td><td>Packet size</td><td>40</td></tr>
 </table>
 
-<p>Result (FullLine &mdash; custom envelope with <code>endtime</code> and <code>paris_id</code>):</p>
+<p>Result (FullLine, custom envelope with <code>endtime</code> and <code>paris_id</code>):</p>
 <pre><code class="language-json">RESULT { "id":"5001", "fw":5120, "mver": "2.6.4", "lts":0,
   "time":1700000000, "endtime":1700000030,
   "dst_name":"192.112.36.4", "dst_addr":"192.112.36.4",
@@ -246,7 +246,7 @@ omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
 <p>On timeout: <code>"result": { "error":{"timeout":5000} }</code></p>
 
 <div class="warn"><code>abuf</code> is the base64-encoded raw DNS wire response. This is the
-most important field &mdash; the RIPE Atlas API parses it server-side for detailed
+most important field; the RIPE Atlas API parses it server-side for detailed
 analysis. Without it, results are accepted but incomplete.</div>
 
 <h3>HTTP (<code>evhttpget</code>)</h3>
@@ -266,7 +266,7 @@ analysis. Without it, results are accepted but incomplete.</div>
 
 <pre><code class="language-none">evsslgetcert [-4|-6] [-p port] [-h hostname] [-A msm_id] [-O output] &lt;target&gt;</code></pre>
 
-<p>Result (FullLine &mdash; custom envelope):</p>
+<p>Result (FullLine, custom envelope):</p>
 <pre><code class="language-json">RESULT { "id":"14002", "fw":5120, "mver": "2.6.4", "lts":0,
   "time":1775325499, "dst_name":"atlas.ripe.net", "dst_port":"443",
   "ttr":0.390310, "method":"TLS", "ver":"1.3",
@@ -331,7 +331,7 @@ RESULT { "id":"1002", "fw":5120, ... measurement result ... }
 SESSION_ID fa0b28e5...</code></pre>
 
 <p>The controller responds <code>200 OK</code> with body <code>OK\n</code> on success.
-<code>429</code> means rate limiting &mdash; honor the <code>Retry-After</code>
+<code>429</code> means rate limiting; honor the <code>Retry-After</code>
 header. The official <code>httppost</code> uploads once per 60 seconds.</p>
 
 <div class="warn">The controller <strong>requires</strong> system status results
@@ -364,7 +364,7 @@ reconnections. The official probe includes these in every upload batch.</div>
     [dst_addr], [dst_port], [src_addr], proto, [ttl], [size], [endtime], [paris_id], result</li>
   <li><strong>Array spacing</strong>: <code>[ { "rtt":10.5 }, { "rtt":11.2 } ]</code>
     (spaces inside brackets and braces)</li>
-  <li><strong>prb_id</strong>: NOT in the RESULT line &mdash; controller gets it from
+  <li><strong>prb_id</strong>: NOT in the RESULT line; controller gets it from
     the URL query parameter</li>
   <li><strong>fw</strong>: Must be <code>5120</code> (or a real deployed version).
     Arbitrary values may be rejected.</li>
