@@ -109,7 +109,8 @@ impl ProbeInitInfo {
         msg.push_str("P_TO_R_INIT\n");
 
         let arch = std::env::consts::ARCH;
-        let sub_arch = format!("generic/unknown/{}", arch);
+        let version = env!("CARGO_PKG_VERSION");
+        let sub_arch = format!("starla/{}/{}", version, arch);
 
         msg.push_str(&format!(
             "TOKEN_SPECS fluffy 1000 {} {}\n",
