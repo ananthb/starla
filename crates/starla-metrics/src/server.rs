@@ -10,7 +10,6 @@ use axum::{
 };
 use prometheus::{Encoder, TextEncoder};
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{debug, error};
 
