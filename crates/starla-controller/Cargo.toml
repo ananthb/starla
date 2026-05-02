@@ -9,7 +9,7 @@ repository.workspace = true
 readme = "README.md"
 
 [dependencies]
-starla-common = { path = "../starla-common", version = "0.3.0" }
+starla-common = { path = "../starla-common", version = "0.4.0" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 russh = { workspace = true }
