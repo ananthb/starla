@@ -105,7 +105,7 @@ body {
   gap: 24px;
   border-bottom: 1px solid var(--rule);
   padding-bottom: 14px;
-  margin-bottom: 28px;
+  margin-bottom: 14px;
 }
 .mast .brand {
   display: flex;
@@ -409,8 +409,8 @@ tbody td:first-child code { font-size: 12px; }
 /* ————— hero ————— */
 .hero {
   position: relative;
-  margin: 8px 0 36px;
-  padding: 12px 0 18px;
+  margin: 0 0 36px;
+  padding: 0 0 18px;
   border-bottom: 1px solid var(--rule);
 }
 
