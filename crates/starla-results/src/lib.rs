@@ -322,7 +322,7 @@ mod tests {
             Box::new(NoopTransport),
             UploaderConfig::default(),
             ResultHandlerConfig::default(),
-            starla_metrics::MetricsRegistry::default(),
+            starla_metrics::MetricsRegistry::new().unwrap(),
         );
 
         let stats = handler.queue_stats().await;
@@ -335,7 +335,7 @@ mod tests {
             Box::new(NoopTransport),
             UploaderConfig::default(),
             ResultHandlerConfig::default(),
-            starla_metrics::MetricsRegistry::default(),
+            starla_metrics::MetricsRegistry::new().unwrap(),
         );
 
         handler.submit(make_result(1001)).await;
