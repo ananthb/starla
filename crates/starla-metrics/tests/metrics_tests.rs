@@ -3,7 +3,6 @@
 #[cfg(feature = "export")]
 mod with_export {
     use starla_metrics::{server::start_metrics_server, MetricsRegistry};
-    use std::sync::Arc;
     use std::time::Duration;
     use tokio_util::sync::CancellationToken;
 
