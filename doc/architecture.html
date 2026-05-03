@@ -3,45 +3,73 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Architecture - Starla</title>
-<style>
-  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --accent: #2b6cb0; --code-bg: #f5f5f5; --border: #e2e2e2; --max-w: 740px; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a1a; --fg: #e0e0e0; --muted: #999; --accent: #63b3ed; --code-bg: #2d2d2d; --border: #404040; } }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; }
-  .container { max-width: var(--max-w); margin: 0 auto; padding: 2rem 1.5rem; }
-  h1 { font-size: 2rem; margin-bottom: 0.25rem; }
-  h2 { font-size: 1.3rem; margin-top: 2rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
-  h3 { font-size: 1.1rem; margin-top: 1.5rem; margin-bottom: 0.3rem; }
-  p { margin: 0.5rem 0; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  ul { margin: 0.5rem 0 0.5rem 1.5rem; }
-  li { margin: 0.3rem 0; }
-  code { background: var(--code-bg); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9em; }
-  pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; font-size: 0.85em; }
-  pre code { background: none; padding: 0; }
-  nav { margin: 0.5rem 0 1.5rem; }
-  .diagram { background: var(--code-bg); padding: 1.5rem; border-radius: 6px; margin: 1rem 0; font-family: monospace; white-space: pre; overflow-x: auto; font-size: 0.8em; line-height: 1.4; }
-  pre[class*="language-"], code[class*="language-"] { background: var(--code-bg) !important; }
-</style>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-dark.min.css" media="(prefers-color-scheme: dark)">
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-nix.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-toml.min.js"></script>
+<title>Architecture — starla</title>
+<link rel="icon" type="image/png" href="logo.png">
+<link rel="stylesheet" href="style.css">
+<script>
+  (function(){
+    try {
+      var t = localStorage.getItem('starla-theme');
+      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+    } catch(e) {}
+  })();
+</script>
 </head>
 <body>
-<div class="container">
-<nav><a href="index.html">&larr; Starla</a></nav>
-<h1>Architecture</h1>
+<div class="shell">
 
-<h2>Overview</h2>
+  <header class="mast">
+    <a class="brand" href="index.html">
+      <img src="logo.png" alt="">
+      <span class="word">starla</span>
+    </a>
+    <div class="meta">
+      <span id="mastVersion">v0.3.1</span>
+      <span>AGPL-3.0</span>
+      <span>rust 2024</span>
+      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme"><span class="glyph" aria-hidden="true">◐</span><span class="theme-label">auto</span></button>
+    </div>
+  </header>
 
-<div class="diagram">
-RIPE Atlas Infrastructure                          Starla Probe
+  <aside class="rail-l">
+    <div class="rail-label">Pages</div>
+    <ul class="toc">
+      <li><span class="num">01</span><a href="index.html">Overview</a></li>
+      <li><span class="num">02</span><a href="install.html">Install &amp; run</a></li>
+      <li><span class="num">03</span><a class="current" href="architecture.html">Architecture</a></li>
+      <li><span class="num">04</span><a href="protocol.html">Protocol</a></li>
+      <li><span class="num">05</span><a href="verify.html">Verify</a></li>
+      <li><span class="num">06</span><a href="api/starla_common/index.html">API docs</a></li>
+      <li><span class="num">↗</span><a href="https://github.com/ananthb/starla">Source</a></li>
+    </ul>
+
+    <div class="rail-label" style="margin-top:32px">On this page</div>
+    <ul class="toc">
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#flow">Connection flow</a></li>
+      <li><a href="#ports">No local ports</a></li>
+      <li><a href="#crates">Crate structure</a></li>
+      <li><a href="#exec">Execution</a></li>
+      <li><a href="#upload">Result upload</a></li>
+      <li><a href="#state">State &amp; dirs</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+
+    <p class="crumb"><a href="index.html">← starla</a> <span>·</span> 03</p>
+    <p class="eyebrow">03 · architecture</p>
+    <h1 class="display">Architecture.</h1>
+    <p class="lede">
+      How starla connects to the RIPE&nbsp;Atlas controller infrastructure, where the
+      data flows, and which Rust crate owns which slice of the pipeline.
+    </p>
+
+    <section id="overview">
+      <h2 class="section"><span class="num">01</span>Overview</h2>
+      <p>One probe, one outbound SSH connection, one in-memory queue, one upload channel per batch.</p>
+
+      <div class="ascii">RIPE Atlas Infrastructure                          starla Probe
 ========================                          ============
 
  Registration Server                    +---------------------------------+
@@ -58,109 +86,190 @@ RIPE Atlas Infrastructure                          Starla Probe
        |    (get session)               |       |          | trace,... |  |
        |                                |       |          +-----+-----+  |
        | 3. SSH KEEP                    |       |                |        |
-       |    (long-lived connection)     |       |          +-----v-----+  |
+       |    (long-lived)                |       |          +-----v-----+  |
        |                                |       |          | Result    |  |
        +--[ reverse tunnel ]------------|-------+          | Queue     |  |
        |   forwarded-tcpip              |                  | in memory |  |
        |   (measurement commands)       |                  +-----+-----+  |
        |                                |                        |        |
-       +--[ direct-tcpip ]<-------------|------------------------+        |
+       +--[ direct-tcpip ]&lt;-------------|------------------------+        |
           channel per upload            |   HTTP POST over SSH channel    |
           (result uploads)              |                                 |
-                                        +---------------------------------+
-</div>
+                                        +---------------------------------+</div>
+    </section>
 
-<h2>Connection Flow</h2>
+    <section id="flow">
+      <h2 class="section"><span class="num">02</span>Connection flow</h2>
 
-<ol>
-  <li><strong>Registration</strong>: Starla connects via SSH to a registration server
-    (<code>reg03.atlas.ripe.net:443</code>), sends an <code>INIT</code> command with probe
-    identity, and receives a controller assignment.</li>
-  <li><strong>Controller INIT</strong>: connects to the assigned controller via SSH,
-    sends another <code>INIT</code>, and receives a <code>SESSION_ID</code> and
-    <code>REMOTE_PORT</code>.</li>
-  <li><strong>KEEP session</strong>: opens a long-lived SSH connection to the controller
-    running the <code>KEEP</code> command. This connection carries both measurement commands
-    (inbound) and result uploads (outbound).</li>
-</ol>
+      <ol>
+        <li><strong>Registration.</strong> starla SSHes to a registration server (e.g. <code>reg03.atlas.ripe.net:443</code>), runs <code>INIT</code> with probe identity on stdin, and receives a controller assignment.</li>
+        <li><strong>Controller INIT.</strong> Connects to the assigned controller via SSH, sends another <code>INIT</code> (no stdin), and receives a <code>SESSION_ID</code> + <code>REMOTE_PORT</code>.</li>
+        <li><strong>KEEP session.</strong> Opens a long-lived SSH connection running the <code>KEEP</code> command. This connection carries both measurement commands (inbound) and result uploads (outbound).</li>
+      </ol>
+    </section>
 
-<h2>No Local Ports</h2>
+    <section id="ports">
+      <h2 class="section"><span class="num">03</span>No local ports</h2>
+      <p>All communication flows through the SSH tunnel; starla binds no local TCP ports.</p>
 
-<p>All communication flows through the SSH tunnel; starla binds no local TCP ports.</p>
+      <ul>
+        <li><strong>Measurement commands</strong> arrive via SSH reverse tunnel (<code>forwarded-tcpip</code>). The SSH handler pipes them straight to the telnet command parser through an in-process <code>DuplexStream</code> bridge.</li>
+        <li><strong>Result uploads</strong> go out via SSH <code>direct-tcpip</code> channels. Each upload opens a fresh channel to <code>127.0.0.1:8080</code> on the controller side and writes a raw HTTP/1.1 <code>POST</code> with the measurement results.</li>
+      </ul>
 
-<ul>
-  <li><strong>Measurement commands</strong> arrive via SSH reverse tunnel
-    (<code>forwarded-tcpip</code>). The SSH handler pipes them directly to the telnet
-    command parser through an in-process <code>DuplexStream</code> bridge.</li>
-  <li><strong>Result uploads</strong> go out via SSH <code>direct-tcpip</code> channels.
-    Each upload opens a fresh channel to <code>127.0.0.1:8080</code> on the controller
-    side and writes a raw HTTP/1.1 POST with the measurement results.</li>
-</ul>
+      <p class="spec">One outbound socket. No listeners. No exposed surface.</p>
+    </section>
 
-<h2>Crate Structure</h2>
+    <section id="crates">
+      <h2 class="section"><span class="num">04</span>Crate structure</h2>
 
-<pre><code>starla-probe          Main binary: orchestrates everything
-starla-common         Shared types, config, paths, logging
-starla-controller     SSH connection, telnet parser, channel streams
-starla-measurements   Ping, DNS, traceroute, HTTP, TLS, NTP implementations
-starla-scheduler      Measurement scheduling and concurrent execution
-starla-results        Result formatting, in-memory upload queue, upload transport
-starla-network        Raw sockets, source address detection
-starla-metrics        Prometheus metrics export (optional)</code></pre>
+      <table>
+        <thead><tr><th>Crate</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><code>starla-probe</code></td><td>Main binary; orchestrates everything.</td></tr>
+          <tr><td><code>starla-common</code></td><td>Shared types, config, paths, logging.</td></tr>
+          <tr><td><code>starla-controller</code></td><td>SSH connection, telnet parser, channel streams.</td></tr>
+          <tr><td><code>starla-measurements</code></td><td>Ping, DNS, traceroute, HTTP, TLS, NTP implementations.</td></tr>
+          <tr><td><code>starla-scheduler</code></td><td>Measurement scheduling and concurrent execution.</td></tr>
+          <tr><td><code>starla-results</code></td><td>Result formatting, in-memory upload queue, upload transport.</td></tr>
+          <tr><td><code>starla-network</code></td><td>Raw sockets, source address detection.</td></tr>
+          <tr><td><code>starla-metrics</code></td><td>Prometheus metrics export (optional).</td></tr>
+        </tbody>
+      </table>
+    </section>
 
-<h2>Measurement Execution</h2>
+    <section id="exec">
+      <h2 class="section"><span class="num">05</span>Measurement execution</h2>
+      <p>The controller sends measurement schedules as CRONLINE or JSON commands over the telnet interface. The scheduler parses these into <code>MeasurementJob</code>s and executes them concurrently via <code>tokio::spawn</code>.</p>
 
-<p>The controller sends measurement schedules as CRONLINE or JSON commands over the
-telnet interface. The scheduler parses these into <code>MeasurementJob</code>s and
-executes them concurrently via <code>tokio::spawn</code>.</p>
+      <p>Each measurement type implements the <code>Measurement</code> trait:</p>
 
-<p>Each measurement type implements the <code>Measurement</code> trait:</p>
+      <pre><div class="pre-head"><span class="lang">rust</span><span>starla-measurements</span></div><div class="pre-body"><code><span class="k">pub trait</span> Measurement: Send + Sync {
+    <span class="k">async fn</span> execute(&amp;self) -&gt; anyhow::Result&lt;MeasurementResult&gt;;
+}</code></div></pre>
 
-<pre><code>pub trait Measurement: Send + Sync {
-    async fn execute(&self) -> anyhow::Result&lt;MeasurementResult&gt;;
-}</code></pre>
+      <p>Results are formatted to match the official C probe's JSON output exactly — field order, spacing, numeric precision — and queued in a bounded in-memory buffer for upload. The queue size is configurable; oldest entries are dropped when the buffer is full.</p>
+    </section>
 
-<p>Results are formatted to match the official C probe's JSON output exactly
-(field order, spacing, numeric precision) and queued in a bounded in-memory
-buffer for upload. The queue size is configurable; oldest entries are dropped
-when the buffer is full.</p>
+    <section id="upload">
+      <h2 class="section"><span class="num">06</span>Result upload</h2>
+      <p>The result handler periodically drains the queue and uploads batches via the <code>UploadTransport</code> trait. In production, this opens SSH <code>direct-tcpip</code> channels and writes raw HTTP/1.1:</p>
 
-<h2>Result Upload</h2>
-
-<p>The result handler periodically drains the queue and uploads batches via the
-<code>UploadTransport</code> trait. In production, this opens SSH
-<code>direct-tcpip</code> channels and writes raw HTTP/1.1:</p>
-
-<pre><code class="language-http">POST /?PROBE_ID=12345&SESSION_ID=abc HTTP/1.1
+      <pre><div class="pre-head"><span class="lang">http</span><span>POST · over SSH channel</span></div><div class="pre-body"><code>POST /?PROBE_ID=12345&amp;SESSION_ID=abc HTTP/1.1
 Content-Type: application/x-www-form-urlencoded
 
 P_TO_C_REPORT
-RESULT { "id":"1001", "fw":5120, ... }
-RESULT { "id":"1002", "fw":5120, ... }
+RESULT { <span class="s">"id"</span>:<span class="s">"1001"</span>, <span class="s">"fw"</span>:5120, ... }
+RESULT { <span class="s">"id"</span>:<span class="s">"1002"</span>, <span class="s">"fw"</span>:5120, ... }
 
-SESSION_ID abc</code></pre>
+SESSION_ID abc</code></div></pre>
 
-<p>Failed uploads are re-queued with exponential backoff. Results older than
-1 hour or with more than 5 failed attempts are dropped.</p>
+      <p>Failed uploads are re-queued with exponential backoff. Results older than one hour or with more than five failed attempts are dropped.</p>
+    </section>
 
-<h2>State &amp; Directories</h2>
+    <section id="state">
+      <h2 class="section"><span class="num">07</span>State &amp; directories</h2>
 
-<pre><code>State directory (persistent):
-  probe_key         SSH private key (generated on first run)
-  probe_key.pub     SSH public key (register this at atlas.ripe.net)
-  probe_id          Assigned probe ID
-  known_hosts       Controller SSH host keys (TOFU)
+      <pre><div class="pre-head"><span class="lang">tree</span><span>state layout</span></div><div class="pre-body"><code>State directory <span class="c">(persistent):</span>
+  probe_key         <span class="c">// SSH private key (generated on first run)</span>
+  probe_key.pub     <span class="c">// SSH public key (register at atlas.ripe.net)</span>
+  probe_id          <span class="c">// assigned probe ID</span>
+  known_hosts       <span class="c">// controller SSH host keys (TOFU)</span>
 
-Runtime directory (ephemeral):
-  starla.sock       Status socket for tray app communication (when enabled)</code></pre>
+Runtime directory <span class="c">(ephemeral):</span>
+  starla.sock       <span class="c">// status socket for tray-app communication</span></code></div></pre>
 
-<p>Path resolution priority: CLI flag &gt; systemd env &gt; container paths
-(<code>/state</code>, <code>/config</code>) &gt; XDG &gt; standard Linux paths.
-See <a href="api/starla_common/paths/index.html">paths module</a> for details.</p>
+      <p>Path resolution priority: CLI flag &gt; systemd env &gt; container paths (<code>/state</code>, <code>/config</code>) &gt; XDG &gt; standard Linux paths. See the <a href="api/starla_common/paths/index.html">paths module</a> for details.</p>
 
-<p>For the full protocol specification including all command formats, result line
-quirks, and known issues, see the <a href="protocol.html">Protocol Reference</a>.</p>
+      <p style="margin-top:18px">For the full protocol specification — every command format, result-line quirk, and known issue — see the <a href="protocol.html">Protocol Reference →</a></p>
+    </section>
+
+    <hr class="divider">
+
+  </main>
+
+  <aside class="rail-r">
+    <div class="rail-block">
+      <div class="rail-label">Wire</div>
+      <dl>
+        <dt>Transport</dt><dd>SSH (russh)</dd>
+        <dt>Inbound</dt><dd>reverse tunnel</dd>
+        <dt>Outbound</dt><dd>direct-tcpip</dd>
+        <dt>Format</dt><dd>HTTP/1.1 POST</dd>
+        <dt>Cadence</dt><dd>60s</dd>
+      </dl>
+    </div>
+
+    <div class="rail-block">
+      <div class="rail-label">Runtime</div>
+      <dl>
+        <dt>Async</dt><dd>tokio</dd>
+        <dt>Concurrency</dt><dd>tokio::spawn</dd>
+        <dt>Queue</dt><dd>in-memory · bounded</dd>
+        <dt>Drop policy</dt><dd>oldest first</dd>
+      </dl>
+    </div>
+
+    <div class="rail-block">
+      <div class="rail-label">See also</div>
+      <ul class="toc">
+        <li><a href="protocol.html">Protocol Reference</a></li>
+        <li><a href="api/starla_common/index.html">API Docs</a></li>
+      </ul>
+    </div>
+  </aside>
+
+  <footer>
+    <span>starla · 03 · architecture</span>
+    <span><a href="https://github.com/ananthb/starla">github.com/ananthb/starla</a></span>
+    <span>AGPL-3.0-or-later</span>
+  </footer>
 
 </div>
+
+<script>
+  (function(){
+    var btn = document.getElementById('themeToggle');
+    if (!btn) return;
+    var glyph = btn.querySelector('.glyph');
+    var label = btn.querySelector('.theme-label');
+    var states = ['auto','light','dark'];
+    var glyphs = { auto: '◐', light: '☀', dark: '☾' };
+    function current() {
+      var t = document.documentElement.getAttribute('data-theme');
+      return (t === 'light' || t === 'dark') ? t : 'auto';
+    }
+    function render(state) {
+      glyph.textContent = glyphs[state];
+      label.textContent = state;
+    }
+    render(current());
+    btn.addEventListener('click', function(){
+      var i = states.indexOf(current());
+      var next = states[(i + 1) % states.length];
+      if (next === 'auto') {
+        document.documentElement.removeAttribute('data-theme');
+        try { localStorage.removeItem('starla-theme'); } catch(e){}
+      } else {
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('starla-theme', next); } catch(e){}
+      }
+      render(next);
+    });
+  })();
+</script>
+
+<script>
+  (function(){
+    var mast = document.getElementById('mastVersion');
+    if (!mast) return;
+    fetch('https://api.github.com/repos/ananthb/starla/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github+json' }
+    })
+      .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(rel){ if (rel.tag_name) mast.textContent = rel.tag_name; })
+      .catch(function(){});
+  })();
+</script>
 </body>
 </html>

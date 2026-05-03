@@ -3,106 +3,361 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Starla - RIPE Atlas Software Probe</title>
-<style>
-  :root { --bg: #fff; --fg: #1a1a1a; --muted: #666; --accent: #2b6cb0; --code-bg: #f5f5f5; --border: #e2e2e2; --max-w: 740px; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #1a1a1a; --fg: #e0e0e0; --muted: #999; --accent: #63b3ed; --code-bg: #2d2d2d; --border: #404040; } }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.6; }
-  .container { max-width: var(--max-w); margin: 0 auto; padding: 2rem 1.5rem; }
-  h1 { font-size: 2rem; margin-bottom: 0.5rem; }
-  h1 small { font-size: 1rem; color: var(--muted); font-weight: normal; }
-  h2 { font-size: 1.3rem; margin-top: 2rem; margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
-  p { margin: 0.5rem 0; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  ul { margin: 0.5rem 0 0.5rem 1.5rem; }
-  li { margin: 0.3rem 0; }
-  code { background: var(--code-bg); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.9em; }
-  pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; margin: 0.75rem 0; }
-  pre code { background: none; padding: 0; }
-  nav { display: flex; gap: 1.5rem; margin: 1rem 0; flex-wrap: wrap; }
-  nav a { padding: 0.4rem 0.8rem; background: var(--code-bg); border-radius: 4px; font-weight: 500; }
-  .badges { display: flex; gap: 0.5rem; margin: 0.5rem 0; flex-wrap: wrap; }
-  .badges img { height: 20px; }
-  pre[class*="language-"], code[class*="language-"] { background: var(--code-bg) !important; }
-</style>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" media="(prefers-color-scheme: light)">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-dark.min.css" media="(prefers-color-scheme: dark)">
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-nix.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-toml.min.js"></script>
+<title>starla — RIPE Atlas software probe</title>
+<meta name="description" content="An alternative implementation of the RIPE Atlas software probe, written in Rust.">
+<link rel="icon" type="image/png" href="logo.png">
+<link rel="stylesheet" href="style.css">
+<script>
+  (function(){
+    try {
+      var t = localStorage.getItem('starla-theme');
+      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+    } catch(e) {}
+  })();
+</script>
 </head>
 <body>
-<div class="container">
-<p style="text-align:center; margin-bottom:1rem;"><img src="logo.png" width="128" height="128" alt="Starla logo" style="border-radius:16px;"></p>
-<h1>Starla <small>RIPE Atlas Software Probe</small></h1>
+<div class="shell">
 
-<div class="badges">
-  <a href="https://github.com/ananthb/starla"><img src="https://img.shields.io/github/license/ananthb/starla" alt="License"></a>
-  <a href="https://github.com/ananthb/starla/releases"><img src="https://img.shields.io/github/v/release/ananthb/starla" alt="Release"></a>
-  <a href="https://ghcr.io/ananthb/starla"><img src="https://img.shields.io/badge/container-ghcr.io-blue" alt="Container"></a>
-</div>
+  <header class="mast">
+    <a class="brand" href="index.html">
+      <img src="logo.png" alt="">
+      <span class="word">starla</span>
+    </a>
+    <div class="meta">
+      <span id="mastVersion">v0.3.1</span>
+      <span>AGPL-3.0</span>
+      <span>rust 2024</span>
+      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme"><span class="glyph" aria-hidden="true">◐</span><span class="theme-label">auto</span></button>
+    </div>
+  </header>
 
-<p>Starla is an alternative unofficial <a href="https://atlas.ripe.net/">RIPE Atlas</a>
-software probe written in Rust. It connects to the RIPE Atlas controller
-infrastructure, receives measurement requests, executes them, and reports
-results back to the API.</p>
+  <aside class="rail-l">
+    <div class="rail-label">Pages</div>
+    <ul class="toc">
+      <li><span class="num">01</span><a class="current" href="index.html">Overview</a></li>
+      <li><span class="num">02</span><a href="install.html">Install &amp; run</a></li>
+      <li><span class="num">03</span><a href="architecture.html">Architecture</a></li>
+      <li><span class="num">04</span><a href="protocol.html">Protocol</a></li>
+      <li><span class="num">05</span><a href="verify.html">Verify</a></li>
+      <li><span class="num">06</span><a href="api/starla_common/index.html">API docs</a></li>
+      <li><span class="num">↗</span><a href="https://github.com/ananthb/starla">Source</a></li>
+    </ul>
 
-<nav>
-  <a href="install.html">Install &amp; Run</a>
-  <a href="architecture.html">Architecture</a>
-  <a href="protocol.html">Protocol</a>
-  <a href="verify.html">Verify</a>
-  <a href="api/starla_common/index.html">API Docs</a>
-  <a href="https://github.com/ananthb/starla">Source</a>
-</nav>
+    <div class="rail-label" style="margin-top:32px">On this page</div>
+    <ul class="toc">
+      <li><a href="#what">What it is</a></li>
+      <li><a href="#features">Features</a></li>
+      <li><a href="#quick">Quick start</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#register">Register</a></li>
+    </ul>
+  </aside>
 
-<h2>Features</h2>
-<ul>
-  <li><strong>All measurement types</strong>: Ping, Traceroute, DNS, HTTP, TLS, NTP</li>
-  <li><strong>Pure Rust SSH</strong>: no OpenSSH dependency, uses <code>russh</code></li>
-  <li><strong>No local ports</strong>: all communication flows through the SSH tunnel</li>
-  <li><strong>Minimal container image</strong>: just the binary + CA certs, multi-arch (amd64/arm64)</li>
-  <li><strong>NixOS module</strong>: declarative configuration with systemd hardening</li>
-  <li><strong>Prometheus metrics</strong>: optional observability export</li>
-  <li><strong>Bounded in-memory result queue</strong>: configurable capacity, drops oldest when full</li>
-</ul>
+  <main class="content">
 
-<h2>Quick Start</h2>
-<pre><code class="language-bash"># Container (simplest)
+    <section class="hero">
+      <p class="eyebrow">01 · overview</p>
+      <h1 class="display">A drop-in RIPE Atlas probe,<br>written in Rust.</h1>
+      <p class="lede">
+        starla is an alternative unofficial implementation of the
+        <a href="https://atlas.ripe.net/">RIPE&nbsp;Atlas</a> software probe.
+        Same wire protocol, same result format. Distributed as a single statically-linked
+        binary that runs on Linux, macOS, and Windows &mdash; on bare metal, in a container,
+        or as a Nix module.
+      </p>
+
+      <div class="cta-row">
+        <a class="btn primary" href="install.html">Install <span class="arrow">→</span></a>
+        <a class="btn" href="https://github.com/ananthb/starla">Source</a>
+        <a class="btn" href="architecture.html">Architecture</a>
+        <a class="btn" href="protocol.html">Protocol</a>
+      </div>
+
+      <div class="hero-meta">
+        <span><strong>amd64</strong> · arm64</span>
+        <span>linux · macOS · windows</span>
+        <span>~<strong>4&nbsp;MB</strong> binary</span>
+        <span>zero local ports</span>
+      </div>
+    </section>
+
+    <section id="what">
+      <h2 class="section"><span class="num">01</span>What it is</h2>
+      <p>
+        RIPE Atlas is a global measurement network: thousands of probes run scheduled
+        ping, traceroute, DNS, HTTP, TLS, and NTP measurements from their vantage points
+        and ship the results back to the RIPE NCC. The reference probe is a daemon
+        originally written in C, intended for embedded hardware.
+      </p>
+      <p>
+        starla is the same daemon, rewritten as one Rust binary. It connects to the
+        same controller infrastructure, accepts the same CRONLINE and ONEOFF commands,
+        and produces RESULT lines that are byte-compatible with the reference probe's
+        output (field order, spacing, numeric precision included).
+      </p>
+      <p class="spec">
+        Same wire protocol. Different runtime &mdash; one binary, no OpenSSH, no subprocesses, no listening ports.
+      </p>
+    </section>
+
+    <section id="features">
+      <h2 class="section"><span class="num">02</span>Features</h2>
+
+      <div class="feat-grid">
+        <div class="feat">
+          <div class="id">measurements</div>
+          <h3>All six measurement types</h3>
+          <p>Ping, traceroute, DNS, HTTP, TLS, NTP. RESULT line format byte-compatible with the reference probe.</p>
+          <div class="chips">
+            <span class="chip">ping</span><span class="chip">trace</span><span class="chip">dns</span>
+            <span class="chip">http</span><span class="chip">tls</span><span class="chip">ntp</span>
+          </div>
+        </div>
+        <div class="feat">
+          <div class="id">transport</div>
+          <h3>Pure-Rust SSH (russh)</h3>
+          <p>No OpenSSH dependency, no subprocess fan-out. One async runtime, one binary.</p>
+        </div>
+        <div class="feat">
+          <div class="id">network</div>
+          <h3>No local listening ports</h3>
+          <p>All communication flows through the SSH tunnel; commands arrive over a reverse tunnel and uploads go out via direct-tcpip channels.</p>
+        </div>
+        <div class="feat">
+          <div class="id">packaging</div>
+          <h3>Container, .deb, .rpm, NixOS, brew, MSI</h3>
+          <p>Multi-arch (amd64/arm64). Minimal container image &mdash; binary plus CA certs. NixOS &amp; Home-Manager modules with systemd hardening.</p>
+        </div>
+        <div class="feat">
+          <div class="id">observability</div>
+          <h3>Optional Prometheus exporter</h3>
+          <p>Measurement counts, queue depth, upload latency, SSH state. Configurable listen address.</p>
+        </div>
+        <div class="feat">
+          <div class="id">storage</div>
+          <h3>Bounded in-memory result queue</h3>
+          <p>Configurable capacity. Drops oldest first when full or when the controller link goes dark.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="quick">
+      <h2 class="section"><span class="num">03</span>Quick start</h2>
+      <p>Pick a runtime. Each ships with sensible defaults; configuration is optional.</p>
+
+      <div class="qs">
+        <div class="qs-tabs" role="tablist">
+          <button role="tab" aria-selected="true" data-target="qs-docker">Docker</button>
+          <button role="tab" aria-selected="false" data-target="qs-nixos">NixOS</button>
+          <button role="tab" aria-selected="false" data-target="qs-debian">Debian / Ubuntu</button>
+          <button role="tab" aria-selected="false" data-target="qs-rhel">Fedora / RHEL</button>
+          <button role="tab" aria-selected="false" data-target="qs-mac">macOS</button>
+          <button role="tab" aria-selected="false" data-target="qs-tar">Tarball</button>
+        </div>
+
+        <div class="qs-panel active" id="qs-docker">
+          <pre><div class="pre-head"><span class="lang">shell</span><span>docker · podman</span></div><div class="pre-body"><code><span class="c"># persistent state, raw sockets for ping/trace</span>
 docker run -d --name starla \
   -v starla-state:/state \
   --cap-add NET_RAW \
-  ghcr.io/ananthb/starla:latest
+  ghcr.io/ananthb/starla:latest</code></div></pre>
+        </div>
 
-# NixOS
-services.starla.enable = true;
+        <div class="qs-panel" id="qs-nixos">
+          <pre><div class="pre-head"><span class="lang">nix</span><span>flake input + module</span></div><div class="pre-body"><code>inputs.starla.url = <span class="s">"github:ananthb/starla"</span>;
 
-# Binary
-curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz
-tar xzf starla-amd64.tar.gz && sudo ./starla/starla</code></pre>
+<span class="c"># in your nixos config:</span>
+imports = [ starla.nixosModules.default ];
+services.starla.enable = <span class="k">true</span>;</code></div></pre>
+        </div>
 
-<p>See the <a href="install.html">full installation guide</a> for all options.</p>
+        <div class="qs-panel" id="qs-debian">
+          <pre><div class="pre-head"><span class="lang">shell</span><span>apt</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_amd64.deb
+sudo dpkg -i starla_*.deb
+sudo systemctl enable --now starla</code></div></pre>
+        </div>
 
-<h2>How It Works</h2>
-<p>On first run, starla generates an SSH key pair and registers with the RIPE Atlas
-registration servers. After registration, it connects to an assigned controller via
-SSH, receives measurement schedules over a reverse-tunneled telnet interface,
-executes measurements, and uploads results through SSH direct-tcpip channels.</p>
+        <div class="qs-panel" id="qs-rhel">
+          <pre><div class="pre-head"><span class="lang">shell</span><span>dnf</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla.x86_64.rpm
+sudo dnf install ./starla*.rpm
+sudo systemctl enable --now starla</code></div></pre>
+        </div>
 
-<p>Probe state (SSH keys, probe ID, known hosts) is stored in the state directory
-and persists across restarts. Pending measurement results are held in a bounded
-in-memory queue and are not retained across restarts.</p>
+        <div class="qs-panel" id="qs-mac">
+          <pre><div class="pre-head"><span class="lang">shell</span><span>homebrew</span></div><div class="pre-body"><code>brew install ananthb/starla/starla
+brew services start starla
 
-<h2>Registration</h2>
-<p>After first startup, register your probe at
-<a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.
-You'll need the probe's public key, which is printed in the log output and saved to
-the state directory as <code>probe_key.pub</code>.</p>
+<span class="c"># optional GUI tray applet</span>
+brew install --cask ananthb/starla/starla-tray</code></div></pre>
+        </div>
+
+        <div class="qs-panel" id="qs-tar">
+          <pre><div class="pre-head"><span class="lang">shell</span><span>release tarball</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz
+tar xzf starla-amd64.tar.gz
+sudo ./starla/starla</code></div></pre>
+        </div>
+      </div>
+
+      <p style="margin-top:14px">
+        Full options, configuration, and signature verification are in the
+        <a href="install.html">installation guide</a>.
+      </p>
+    </section>
+
+    <section id="how">
+      <h2 class="section"><span class="num">04</span>How it works</h2>
+      <p>
+        On first run, starla generates an SSH key pair and registers with a
+        RIPE&nbsp;Atlas registration server. After registration it opens a
+        single long-lived SSH connection to the assigned controller and
+        receives measurement schedules over a reverse-tunneled telnet stream.
+        Results are uploaded back through SSH <code>direct-tcpip</code> channels.
+      </p>
+      <p>
+        Probe state (SSH keys, probe ID, known hosts) is persisted in the state directory and
+        survives restarts. Pending result uploads live in a bounded in-memory queue and do not.
+      </p>
+      <p style="margin-top:14px">
+        See <a href="architecture.html">architecture</a> for the data flow, or
+        <a href="protocol.html">protocol</a> for the wire-level details.
+      </p>
+    </section>
+
+    <section id="register">
+      <h2 class="section"><span class="num">05</span>Register your probe</h2>
+      <p>
+        After first start, copy the public key from the log output (or
+        <code>probe_key.pub</code> in the state directory) and paste it into the
+        application form at
+        <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.
+        starla retries in the background; once approved, it connects and begins running
+        measurements.
+      </p>
+
+      <div class="callout">
+        <div class="label">note</div>
+        <p>Each probe is bound to its SSH key. If you lose the state directory, generate a
+        new key and re-apply &mdash; old probes can't be recovered.</p>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+  </main>
+
+  <aside class="rail-r">
+    <div class="rail-block">
+      <div class="rail-label">Latest release</div>
+      <dl id="latestRelease">
+        <dt>Version</dt><dd><a id="rel-link" href="https://github.com/ananthb/starla/releases/latest"><span id="rel-tag">v0.3.1</span></a></dd>
+        <dt>Released</dt><dd id="rel-date">—</dd>
+        <dt>License</dt><dd>AGPL-3.0</dd>
+        <dt>Language</dt><dd>Rust 2024</dd>
+        <dt>OS</dt><dd>linux · macOS · win</dd>
+        <dt>Arch</dt><dd>amd64 · arm64</dd>
+        <dt>fw</dt><dd>5120</dd>
+        <dt>mver</dt><dd>2.6.4</dd>
+      </dl>
+    </div>
+
+    <div class="rail-block">
+      <div class="rail-label">Related</div>
+      <ul class="toc">
+        <li><a href="https://atlas.ripe.net/">RIPE Atlas</a></li>
+        <li><a href="https://atlas.ripe.net/apply/swprobe/">Apply for probe</a></li>
+        <li><a href="https://github.com/RIPE-NCC/ripe-atlas-software-probe">Reference probe</a></li>
+        <li><a href="https://github.com/ananthb/starla/releases">All releases</a></li>
+      </ul>
+    </div>
+  </aside>
+
+  <footer>
+    <span>starla · 01 · overview</span>
+    <span><a href="https://github.com/ananthb/starla">github.com/ananthb/starla</a></span>
+    <span>AGPL-3.0-or-later</span>
+  </footer>
 
 </div>
+
+<script>
+  document.querySelectorAll('.qs-tabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.target;
+      const tabs = btn.closest('.qs-tabs');
+      const root = btn.closest('.qs');
+      tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-selected', b === btn));
+      root.querySelectorAll('.qs-panel').forEach(p => p.classList.toggle('active', p.id === target));
+    });
+  });
+</script>
+
+<script>
+  (function(){
+    var btn = document.getElementById('themeToggle');
+    if (!btn) return;
+    var glyph = btn.querySelector('.glyph');
+    var label = btn.querySelector('.theme-label');
+    var states = ['auto','light','dark'];
+    var glyphs = { auto: '◐', light: '☀', dark: '☾' };
+    function current() {
+      var t = document.documentElement.getAttribute('data-theme');
+      return (t === 'light' || t === 'dark') ? t : 'auto';
+    }
+    function render(state) {
+      glyph.textContent = glyphs[state];
+      label.textContent = state;
+    }
+    render(current());
+    btn.addEventListener('click', function(){
+      var i = states.indexOf(current());
+      var next = states[(i + 1) % states.length];
+      if (next === 'auto') {
+        document.documentElement.removeAttribute('data-theme');
+        try { localStorage.removeItem('starla-theme'); } catch(e){}
+      } else {
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('starla-theme', next); } catch(e){}
+      }
+      render(next);
+    });
+  })();
+</script>
+
+<script>
+  (function(){
+    function fmtDate(s){
+      try {
+        var d = new Date(s);
+        var diff = (Date.now() - d.getTime()) / 86400000;
+        var rel;
+        if (diff < 1) rel = 'today';
+        else if (diff < 2) rel = 'yesterday';
+        else if (diff < 30) rel = Math.floor(diff) + ' days ago';
+        else if (diff < 365) rel = Math.floor(diff / 30) + ' mo ago';
+        else rel = Math.floor(diff / 365) + ' yr ago';
+        return d.toISOString().slice(0,10) + ' · ' + rel;
+      } catch(e) { return s || '—'; }
+    }
+    fetch('https://api.github.com/repos/ananthb/starla/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github+json' }
+    })
+      .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(rel){
+        var tag = rel.tag_name || rel.name;
+        if (tag) {
+          var tagEl = document.getElementById('rel-tag');
+          var mast = document.getElementById('mastVersion');
+          if (tagEl) tagEl.textContent = tag;
+          if (mast) mast.textContent = tag;
+        }
+        var link = document.getElementById('rel-link');
+        if (link && rel.html_url) link.href = rel.html_url;
+        var dateEl = document.getElementById('rel-date');
+        if (dateEl && rel.published_at) dateEl.textContent = fmtDate(rel.published_at);
+      })
+      .catch(function(){ /* keep static fallback */ });
+  })();
+</script>
 </body>
 </html>
