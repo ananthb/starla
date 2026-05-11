@@ -147,6 +147,12 @@
               contents = [
                 self.packages.${system}.default
                 pkgs.cacert
+                # Identify the image to starla's registration sub_arch
+                # (read from /etc/os-release, matching the original C probe).
+                (pkgs.writeTextDir "etc/os-release" ''
+                  ID=starlaOCI
+                  NAME="Starla Nix OCI image"
+                '')
               ];
               config = {
                 Entrypoint = [ "/bin/starla" ];
