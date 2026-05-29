@@ -108,8 +108,7 @@ impl ProbeInitInfo {
         let mut msg = String::new();
         msg.push_str("P_TO_R_INIT\n");
 
-        let arch = std::env::consts::ARCH;
-        let sub_arch = format!("generic/unknown/{}", arch);
+        let sub_arch = detect_sub_arch();
 
         msg.push_str(&format!(
             "TOKEN_SPECS fluffy 1000 {} {}\n",
@@ -119,6 +118,74 @@ impl ProbeInitInfo {
         msg.push_str(&format!("REASON_FOR_REGISTRATION {}\n", self.reason));
         msg
     }
+}
+
+/// Detect the probe sub-architecture string sent during registration.
+///
+/// Format: `<os_id>/<os_version>/<arch>/starla/<starla_version>`,
+/// e.g. `debian/13/x86_64/starla/0.3.0`. Mirrors the original C probe's
+/// `get_sub_arch` (sourced `/etc/os-release`, `uname -m`) with
+/// platform fallbacks so the same binary works on Linux, macOS, and Windows.
+fn detect_sub_arch() -> String {
+    let (id, version_id) = detect_os_id_version();
+    let arch = std::env::consts::ARCH;
+    let starla_version = env!("CARGO_PKG_VERSION");
+    format!("{}/{}/{}/starla/{}", id, version_id, arch, starla_version)
+}
+
+fn detect_os_id_version() -> (String, String) {
+    #[cfg(target_os = "linux")]
+    {
+        let (id, version_id) = read_os_release();
+        return (
+            id.unwrap_or_else(|| "generic".to_string()),
+            version_id.unwrap_or_else(|| "unknown".to_string()),
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let version = std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "unknown".to_string());
+        return ("macos".to_string(), version);
+    }
+
+    #[cfg(target_os = "windows")]
+    return ("windows".to_string(), "unknown".to_string());
+
+    #[allow(unreachable_code)]
+    ("generic".to_string(), "unknown".to_string())
+}
+
+/// Parse `/etc/os-release`, returning `ID` and `VERSION_ID` independently.
+/// Each is `None` if the file is unreadable or the line is absent, letting
+/// the caller apply per-field defaults (matching the original Bash, which
+/// pre-set ID=generic / VERSION_ID=unknown before sourcing the file).
+#[cfg(target_os = "linux")]
+fn read_os_release() -> (Option<String>, Option<String>) {
+    let Ok(content) = std::fs::read_to_string("/etc/os-release") else {
+        return (None, None);
+    };
+    let mut id = None;
+    let mut version_id = None;
+    for line in content.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim().trim_matches(|c| c == '"' || c == '\'');
+        match key.trim() {
+            "ID" => id = Some(value.to_string()),
+            "VERSION_ID" => version_id = Some(value.to_string()),
+            _ => {}
+        }
+    }
+    (id, version_id)
 }
 
 /// Known SSH host keys for server verification (TOFU model)
