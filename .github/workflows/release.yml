@@ -7,7 +7,21 @@ on:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+            nix-system: x86_64-linux
+            rpm-arch: x86_64
+            appimage-arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            nix-system: aarch64-linux
+            rpm-arch: aarch64
+            appimage-arch: aarch64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: write
       packages: write
@@ -24,68 +38,52 @@ jobs:
 
       - uses: sigstore/cosign-installer@v3
 
-      # Build release tarballs
-      - name: Build x86_64 release
-        run: nix build .#packages.x86_64-linux.release -o result-x86_64
+      - name: Build release tarball
+        run: nix build .#packages.${{ matrix.nix-system }}.release -o result
 
-      - name: Build aarch64 release
-        run: nix build .#packages.aarch64-linux.release -o result-aarch64
-
-      # Build headless + GUI packages
       - name: Build packages
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          ARCH="${{ matrix.arch }}"
+          RPM_ARCH="${{ matrix.rpm-arch }}"
 
-          for arch_pair in "x86_64:amd64:x86_64" "aarch64:arm64:aarch64"; do
-            IFS=: read -r nix_arch deb_arch rpm_arch <<< "$arch_pair"
-            dir="pkg-${deb_arch}"
-            mkdir -p "$dir"
+          # Extract binaries from tarball (includes both starla and starla-tray)
+          mkdir -p pkg
+          tar -xzf "$(readlink result)" -C pkg
+          cp packaging/nfpm.yaml packaging/starla.gpg packaging/starla.sources packaging/starla.repo pkg/starla/
 
-            # Extract binary from tarball (includes both starla and starla-tray)
-            tar -xzf "$(readlink result-${nix_arch})" -C "${dir}"
-            cp packaging/nfpm.yaml packaging/starla.gpg packaging/starla.sources packaging/starla.repo "${dir}/starla/"
+          # Headless packages
+          cd pkg/starla
+          ARCH="$ARCH" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+            nfpm package -p deb -f nfpm.yaml
+          ARCH="$RPM_ARCH" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+            nfpm package -p rpm -f nfpm.yaml
+          cd ../..
 
-            # Build headless packages
-            cd "${dir}/starla"
-            ARCH="$deb_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-              nfpm package -p deb -f nfpm.yaml
-            ARCH="$rpm_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-              nfpm package -p rpm -f nfpm.yaml
-            cd ../..
+          # GUI packages
+          mkdir -p gui-pkg
+          cp pkg/starla/starla-tray gui-pkg/
+          cp packaging/nfpm-gui.yaml packaging/starla-tray.desktop gui-pkg/
+          cd gui-pkg
+          ARCH="$ARCH" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+            nfpm package -p deb -f nfpm-gui.yaml
+          ARCH="$RPM_ARCH" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
+            nfpm package -p rpm -f nfpm-gui.yaml
+          cd ..
 
-            # Build GUI packages
-            gui_dir="gui-pkg-${deb_arch}"
-            mkdir -p "$gui_dir"
-            cp "${dir}/starla/starla-tray" "$gui_dir/"
-            cp packaging/nfpm-gui.yaml packaging/starla-tray.desktop "$gui_dir/"
-            cd "$gui_dir"
-            ARCH="$deb_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-              nfpm package -p deb -f nfpm-gui.yaml
-            ARCH="$rpm_arch" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-              nfpm package -p rpm -f nfpm-gui.yaml
-            cd ..
-          done
+          # AppImage
+          nix build .#packages.${{ matrix.nix-system }}.appimage -o result-appimage
 
-          # Build AppImages
-          nix build .#packages.x86_64-linux.appimage -o result-appimage-x86_64
-          nix build .#packages.aarch64-linux.appimage -o result-appimage-aarch64
-
-          # Collect artifacts
+          # Collect
           mkdir -p dist
-          cp "$(readlink result-x86_64)" dist/starla-amd64.tar.gz
-          cp "$(readlink result-aarch64)" dist/starla-arm64.tar.gz
-          cp "$(readlink result-appimage-x86_64)" dist/starla-tray-x86_64.AppImage
-          cp "$(readlink result-appimage-aarch64)" dist/starla-tray-aarch64.AppImage
-          mv pkg-amd64/starla/*.deb pkg-amd64/starla/*.rpm dist/
-          mv pkg-arm64/starla/*.deb pkg-arm64/starla/*.rpm dist/
-          mv gui-pkg-amd64/*.deb gui-pkg-amd64/*.rpm dist/
-          mv gui-pkg-arm64/*.deb gui-pkg-arm64/*.rpm dist/
+          cp "$(readlink result)" "dist/starla-${ARCH}.tar.gz"
+          cp "$(readlink result-appimage)" "dist/starla-tray-${{ matrix.appimage-arch }}.AppImage"
+          mv pkg/starla/*.deb pkg/starla/*.rpm dist/
+          mv gui-pkg/*.deb gui-pkg/*.rpm dist/
 
-      # Sign
-      - name: Generate checksums and sign artifacts
+      - name: Sign artifacts
         run: |
           cd dist
-          sha256sum * > SHA256SUMS
           for f in *; do
             cosign sign-blob --yes \
               --output-signature "${f}.sig" \
@@ -95,26 +93,40 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-artifacts
+          name: linux-artifacts-${{ matrix.arch }}
           path: dist/
 
-      # OCI images
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      - name: Build and push x86_64 OCI image
+      - name: Build and push OCI image
         run: |
-          nix build .#packages.x86_64-linux.oci -o result-oci-x86_64
+          nix build .#packages.${{ matrix.nix-system }}.oci -o result-oci
           skopeo copy \
-            "docker-archive:$(readlink result-oci-x86_64)" \
-            "docker://ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-amd64"
+            "docker-archive:$(readlink result-oci)" \
+            "docker://ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-${{ matrix.arch }}"
 
-      - name: Build and push aarch64 OCI image
+      - name: Sign per-arch image
+        env:
+          COSIGN_YES: "true"
         run: |
-          nix build .#packages.aarch64-linux.oci -o result-oci-aarch64
-          skopeo copy \
-            "docker-archive:$(readlink result-oci-aarch64)" \
-            "docker://ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-arm64"
+          cosign login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
+          cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-${{ matrix.arch }}"
+
+  linux-manifest:
+    needs: linux
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: cachix/cachix-action@v15
+        with:
+          name: ananthb
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: sigstore/cosign-installer@v3
 
       - name: Create multi-arch manifest
         run: |
@@ -133,13 +145,11 @@ jobs:
             --template "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-ARCH" \
             --target "ghcr.io/ananthb/starla:latest"
 
-      - name: Sign container images
+      - name: Sign multi-arch tags
         env:
           COSIGN_YES: "true"
         run: |
           cosign login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
-          cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-amd64"
-          cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-arm64"
           cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
           cosign sign "ghcr.io/ananthb/starla:latest"
 
