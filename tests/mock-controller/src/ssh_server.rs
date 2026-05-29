@@ -1,10 +1,9 @@
 //! Mock SSH server implementation using russh
 
-use anyhow::{Context, Result};
-use async_trait::async_trait;
+use anyhow::Result;
+use russh::keys::ssh_key::{Algorithm, PrivateKey, PublicKey};
 use russh::server::{Auth, Msg, Session};
-use russh::{Channel, ChannelId, CryptoVec};
-use russh_keys::key::KeyPair;
+use russh::{Channel, ChannelId};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,13 +24,16 @@ impl MockSshServer {
     /// * `port` - Port to listen on (0 for random available port)
     pub async fn new(port: u16) -> Result<Self> {
         // Generate Ed25519 server key
-        let server_key = KeyPair::generate_ed25519().context("Failed to generate server key")?;
+        let server_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)?;
 
         let config = russh::server::Config {
-            server_id: russh::SshId::Standard(format!(
-                "SSH-2.0-MockAtlasController_{}",
-                env!("CARGO_PKG_VERSION")
-            )),
+            server_id: russh::SshId::Standard(
+                format!(
+                    "SSH-2.0-MockAtlasController_{}",
+                    env!("CARGO_PKG_VERSION")
+                )
+                .into(),
+            ),
             keys: vec![server_key],
             auth_rejection_time: std::time::Duration::from_secs(1),
             auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
@@ -106,7 +108,6 @@ impl SshSession {
     }
 }
 
-#[async_trait]
 impl russh::server::Handler for SshSession {
     type Error = anyhow::Error;
 
@@ -123,7 +124,7 @@ impl russh::server::Handler for SshSession {
     async fn auth_publickey(
         &mut self,
         user: &str,
-        _public_key: &russh_keys::key::PublicKey,
+        _public_key: &PublicKey,
     ) -> Result<Auth, Self::Error> {
         debug!("Public key authentication attempt for user: {}", user);
 
@@ -136,6 +137,7 @@ impl russh::server::Handler for SshSession {
             warn!("Authentication rejected for user: {}", user);
             Ok(Auth::Reject {
                 proceed_with_methods: None,
+                partial_success: false,
             })
         }
     }
@@ -157,10 +159,10 @@ impl russh::server::Handler for SshSession {
         };
 
         // Send response
-        session.data(channel, CryptoVec::from(response.into_bytes()));
-        session.exit_status_request(channel, 0);
-        session.eof(channel);
-        session.close(channel);
+        let _ = session.data(channel, response.into_bytes());
+        let _ = session.exit_status_request(channel, 0);
+        let _ = session.eof(channel);
+        let _ = session.close(channel);
 
         Ok(())
     }

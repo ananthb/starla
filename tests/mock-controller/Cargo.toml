@@ -14,7 +14,7 @@ path = "src/lib.rs"
 starla-common = { path = "../../crates/starla-common", version = "0.4.0" }
 tokio = { workspace = true }
 russh = { workspace = true }
-russh-keys = { workspace = true }
+rand = { version = "0.10", features = ["thread_rng"] }
 axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

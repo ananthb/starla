@@ -6,11 +6,10 @@
 //! - Keepalive handling (KEEP command)
 //! - Reverse port forwarding for telnet interface
 
-use async_trait::async_trait;
 use russh::client::{self, Handle, Msg};
+use russh::keys::ssh_key::{self, Algorithm};
+use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKey, PublicKeyBase64};
 use russh::{kex, Channel, ChannelMsg, Preferred};
-use russh_keys::key::{KeyPair, PublicKey};
-use russh_keys::PublicKeyBase64;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -239,7 +238,8 @@ impl KnownHosts {
         key: &PublicKey,
     ) -> Result<bool, anyhow::Error> {
         let host_port = format!("{}:{}", host, port);
-        let key_type = key.name();
+        let key_algo = key.algorithm();
+        let key_type = key_algo.as_str();
         let key_b64 = key.public_key_base64();
         let presented = format!("{} {}", key_type, key_b64);
 
@@ -306,7 +306,6 @@ struct AtlasClientHandler {
     session_id: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
-#[async_trait]
 impl client::Handler for AtlasClientHandler {
     type Error = anyhow::Error;
 
@@ -377,7 +376,7 @@ impl SshConnection {
     pub async fn connect(
         host: &str,
         port: u16,
-        key: &KeyPair,
+        key: &PrivateKey,
         config: SshConfig,
         known_hosts: KnownHosts,
         telnet_state: Option<TelnetState>,
@@ -428,12 +427,15 @@ impl SshConnection {
 
         let mut session = session;
 
-        // Authenticate
+        // Authenticate. Ed25519 keys don't need an RSA hash; pass None.
         let auth_res = session
-            .authenticate_publickey("atlas", Arc::new(key.clone()))
+            .authenticate_publickey(
+                "atlas",
+                PrivateKeyWithHashAlg::new(Arc::new(key.clone()), None),
+            )
             .await?;
 
-        if !auth_res {
+        if !auth_res.success() {
             anyhow::bail!("SSH authentication failed");
         }
 
@@ -450,7 +452,7 @@ impl SshConnection {
     pub async fn connect_with_retry(
         host: &str,
         port: u16,
-        key: &KeyPair,
+        key: &PrivateKey,
         config: SshConfig,
         known_hosts: KnownHosts,
         telnet_state: Option<TelnetState>,
@@ -500,7 +502,7 @@ impl SshConnection {
     /// Try connecting to multiple servers in order
     pub async fn connect_to_servers(
         servers: &[&str],
-        key: &KeyPair,
+        key: &PrivateKey,
         config: SshConfig,
         known_hosts: KnownHosts,
     ) -> anyhow::Result<Self> {
@@ -707,7 +709,7 @@ impl SshConnection {
     pub async fn request_reverse_tunnel(&self, bind_port: u16) -> anyhow::Result<()> {
         debug!("Requesting reverse tunnel on port {}", bind_port);
 
-        let mut session = self.session.lock().await;
+        let session = self.session.lock().await;
 
         // Check if session is still connected
         if session.is_closed() {
@@ -1039,11 +1041,12 @@ impl SshConnection {
 }
 
 /// Compute the SHA256 fingerprint of a public key (e.g., "SHA256:abc123...")
-pub fn key_fingerprint(key: &KeyPair) -> anyhow::Result<String> {
+pub fn key_fingerprint(key: &PrivateKey) -> anyhow::Result<String> {
     use sha2::{Digest, Sha256};
 
-    let public_key = key.clone_public_key()?;
-    let key_type = public_key.name();
+    let public_key = key.public_key();
+    let key_algo = public_key.algorithm();
+    let key_type = key_algo.as_str();
     let key_b64 = public_key.public_key_base64();
 
     // The SSH fingerprint is SHA256 of the raw public key wire format
@@ -1058,72 +1061,45 @@ pub fn key_fingerprint(key: &KeyPair) -> anyhow::Result<String> {
 }
 
 /// Load SSH key from file
-pub async fn load_key(path: &Path) -> anyhow::Result<KeyPair> {
+pub async fn load_key(path: &Path) -> anyhow::Result<PrivateKey> {
     let key_data = tokio::fs::read(path).await?;
-    let key = russh_keys::decode_secret_key(&String::from_utf8(key_data)?, None)?;
+    let key = russh::keys::decode_secret_key(&String::from_utf8(key_data)?, None)?;
     Ok(key)
 }
 
 /// Load SSH key pair from a PEM string (e.g. from an environment variable)
-pub fn load_key_from_string(pem: &str) -> anyhow::Result<KeyPair> {
-    let key = russh_keys::decode_secret_key(pem, None)?;
+pub fn load_key_from_string(pem: &str) -> anyhow::Result<PrivateKey> {
+    let key = russh::keys::decode_secret_key(pem, None)?;
     Ok(key)
 }
 
 /// Generate a new SSH key pair
-pub fn generate_key() -> anyhow::Result<KeyPair> {
-    let key = KeyPair::generate_ed25519()
-        .ok_or_else(|| anyhow::anyhow!("Failed to generate Ed25519 key"))?;
+pub fn generate_key() -> anyhow::Result<PrivateKey> {
+    let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)?;
     Ok(key)
 }
 
 /// Save SSH key pair to files
-pub async fn save_key(key: &KeyPair, path: &Path) -> anyhow::Result<()> {
-    use russh_keys::PublicKeyBase64;
-
-    // Create parent directory if needed
+pub async fn save_key(key: &PrivateKey, path: &Path) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
 
-    // For Ed25519, we can extract the key and encode it using ssh-key crate
-    let public_key = key.clone_public_key()?;
-
-    // Save public key in OpenSSH format
+    // Save public key in OpenSSH format: "<algo> <base64> starla"
+    let public_key = key.public_key();
     let pub_path = path.with_extension("pub");
+    let pub_algo = public_key.algorithm();
     let pub_key_str = format!(
         "{} {} starla",
-        public_key.name(),
+        pub_algo.as_str(),
         public_key.public_key_base64()
     );
     tokio::fs::write(&pub_path, pub_key_str.as_bytes()).await?;
     debug!("Public key: {}", pub_key_str);
 
-    // For the private key, we'll use OpenSSH format via ssh-key crate
-    match key {
-        KeyPair::Ed25519(signing_key) => {
-            use ssh_key::private::Ed25519Keypair;
-            use ssh_key::PrivateKey;
-
-            // Extract the Ed25519 key bytes
-            let secret_bytes = signing_key.to_bytes();
-            let public_bytes = signing_key.verifying_key().to_bytes();
-
-            // Create ssh-key Ed25519Keypair
-            let keypair = Ed25519Keypair {
-                public: ssh_key::public::Ed25519PublicKey(public_bytes),
-                private: ssh_key::private::Ed25519PrivateKey::from_bytes(&secret_bytes),
-            };
-
-            let private_key = PrivateKey::from(keypair);
-            let openssh_pem = private_key.to_openssh(ssh_key::LineEnding::LF)?;
-            tokio::fs::write(path, openssh_pem.as_bytes()).await?;
-        }
-        _ => {
-            // For other key types, we'd need different handling
-            anyhow::bail!("Unsupported key type for saving");
-        }
-    }
+    // Save private key in OpenSSH format
+    let openssh_pem = key.to_openssh(ssh_key::LineEnding::LF)?;
+    tokio::fs::write(path, openssh_pem.as_bytes()).await?;
 
     // Set restrictive permissions on private key (Unix only)
     #[cfg(unix)]
@@ -1151,8 +1127,8 @@ mod tests {
     #[test]
     fn test_generate_key() {
         let key = generate_key().unwrap();
-        let public = key.clone_public_key().unwrap();
+        let public = key.public_key();
         // Just verify we can get the public key
-        assert!(matches!(public, russh_keys::key::PublicKey::Ed25519(_)));
+        assert_eq!(public.algorithm(), Algorithm::Ed25519);
     }
 }

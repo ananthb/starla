@@ -57,8 +57,7 @@ x509-parser = "0.16"
 rustls-pemfile = "2.0"
 
 # SSH (Pure Rust)
-russh = "0.44"
-russh-keys = "0.44"
+russh = "0.60"
 
 # Database
 
