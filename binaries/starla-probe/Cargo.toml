@@ -12,12 +12,12 @@ name = "starla"
 path = "src/main.rs"
 
 [dependencies]
-starla-common = { path = "../../crates/starla-common", version = "0.4.0" }
-starla-network = { path = "../../crates/starla-network", version = "0.4.0" }
-starla-scheduler = { path = "../../crates/starla-scheduler", version = "0.4.0" }
-starla-controller = { path = "../../crates/starla-controller", version = "0.4.0" }
-starla-results = { path = "../../crates/starla-results", version = "0.4.0" }
-starla-metrics = { path = "../../crates/starla-metrics", version = "0.4.0" }
+starla-common = { path = "../../crates/starla-common", version = "0.5.0" }
+starla-network = { path = "../../crates/starla-network", version = "0.5.0" }
+starla-scheduler = { path = "../../crates/starla-scheduler", version = "0.5.0" }
+starla-controller = { path = "../../crates/starla-controller", version = "0.5.0" }
+starla-results = { path = "../../crates/starla-results", version = "0.5.0" }
+starla-metrics = { path = "../../crates/starla-metrics", version = "0.5.0" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 clap = { workspace = true }
