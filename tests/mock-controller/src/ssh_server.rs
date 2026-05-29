@@ -28,11 +28,7 @@ impl MockSshServer {
 
         let config = russh::server::Config {
             server_id: russh::SshId::Standard(
-                format!(
-                    "SSH-2.0-MockAtlasController_{}",
-                    env!("CARGO_PKG_VERSION")
-                )
-                .into(),
+                format!("SSH-2.0-MockAtlasController_{}", env!("CARGO_PKG_VERSION")).into(),
             ),
             keys: vec![server_key],
             auth_rejection_time: std::time::Duration::from_secs(1),
