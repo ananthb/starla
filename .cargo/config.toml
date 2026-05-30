@@ -1,0 +1,5 @@
+# rscamper's two static archives duplicate ~100 utils.o symbols; let ld
+# accept the first copy. Mirrors env.RUSTFLAGS in flake.nix for cargo
+# invocations outside the Nix build sandbox.
+[target.'cfg(target_os = "linux")']
+rustflags = ["-C", "link-arg=-Wl,--allow-multiple-definition"]
