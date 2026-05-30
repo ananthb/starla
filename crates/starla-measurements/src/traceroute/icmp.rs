@@ -60,7 +60,6 @@ pub struct TracerouteResult {
 
 #[cfg(unix)]
 pub async fn execute_traceroute(config: &TracerouteConfig) -> anyhow::Result<TracerouteResult> {
-    use rand::Rng;
     use starla_network::{
         build_icmpv4_echo_request, build_icmpv6_echo_request, new_icmpv4_socket, new_icmpv6_socket,
         parse_icmpv4_packet, parse_icmpv6_packet, IcmpResponse,
@@ -76,7 +75,7 @@ pub async fn execute_traceroute(config: &TracerouteConfig) -> anyhow::Result<Tra
     };
 
     let mut hops = Vec::new();
-    let identifier = rand::thread_rng().gen::<u16>();
+    let identifier = rand::random::<u16>();
     let is_dgram = socket.is_dgram();
     let dest = SocketAddr::new(config.target, 0);
 

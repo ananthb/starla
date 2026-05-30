@@ -1,7 +1,7 @@
 //! Measurement Scheduler
 
 use super::MeasurementJob;
-use rand::Rng;
+use rand::RngExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct ScheduledTask {
@@ -30,7 +30,7 @@ impl ScheduledTask {
             .unwrap()
             .as_secs() as i64;
         let initial_delay = if spread > 0 {
-            rand::thread_rng().gen_range(0..spread)
+            rand::rng().random_range(0..spread)
         } else {
             0
         };
