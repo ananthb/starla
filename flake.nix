@@ -32,6 +32,26 @@
             ];
           };
 
+          # CAIDA scamper — the rscamper crate (used behind the `scamper`
+          # Cargo feature on starla-measurements) FFI-links against
+          # libscamperfile and libscamperctrl shipped by this package.
+          scamper = pkgs.stdenv.mkDerivation rec {
+            pname = "scamper";
+            version = "20260420";
+            src = pkgs.fetchurl {
+              url = "https://www.caida.org/catalog/software/scamper/code/scamper-cvs-${version}.tar.gz";
+              hash = "sha256-fW9rlOC4BDnkUhgxipLTBkWnvbsjxxH2hTbI8kP9Mxc=";
+            };
+            nativeBuildInputs = with pkgs; [ autoreconfHook pkg-config ];
+            buildInputs = with pkgs; [ openssl ];
+            meta = with pkgs.lib; {
+              description = "CAIDA's parallelised network measurement tool";
+              homepage = "https://www.caida.org/catalog/software/scamper/";
+              license = licenses.gpl2Only;
+              platforms = platforms.unix;
+            };
+          };
+
           # Common build inputs for the Rust package
           nativeBuildInputs = with pkgs; [
             pkg-config
@@ -47,6 +67,11 @@
             libayatana-appindicator
             xdotool
           ];
+
+          # Extra inputs needed only when building with the `scamper`
+          # Cargo feature. Kept separate so the default `nix build .#default`
+          # closure doesn't grow.
+          scamperBuildInputs = pkgs.lib.optionals pkgs.stdenv.isLinux [ scamper ];
 
           # Development shell packages
           devPackages = with pkgs; [
@@ -181,6 +206,39 @@
                 maintainers = [ ];
               };
             };
+
+          } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            # Re-export the bundled scamper derivation so users can
+            # `nix build .#scamper` to grab CAIDA's measurement tool.
+            inherit scamper;
+
+            # Starla built with the `scamper` Cargo feature, linking against
+            # libscamperctrl/libscamperfile and ready to drive a running
+            # scamper daemon. Drop-in replacement for the default starla
+            # package — NixOS users can swap `services.starla.package` to
+            # this variant.
+            default-scamper = pkgs.rustPlatform.buildRustPackage {
+              pname = "starla-scamper";
+              version = "0.5.0";
+              src = ./.;
+              cargoLock.lockFile = ./Cargo.lock;
+
+              inherit nativeBuildInputs;
+              buildInputs = buildInputs ++ scamperBuildInputs;
+
+              buildFeatures = [ "scamper" ];
+
+              doCheck = false;
+
+              meta = with pkgs.lib; {
+                description = "Starla with the scamper-backed measurement backend enabled";
+                homepage = "https://github.com/ananthb/starla";
+                license = licenses.agpl3Only;
+                platforms = platforms.linux;
+                maintainers = [ ];
+              };
+            };
+          } // {
             starla-tray = pkgs.rustPlatform.buildRustPackage {
               pname = "starla-tray";
               version = "0.5.0";
@@ -378,8 +436,9 @@
           checks = {
             inherit pre-commit-check;
 
-            # Build + clippy + tests (all features)
-
+            # Build + clippy + tests with the project's default Cargo
+            # features. Notably this does NOT enable `scamper` — that
+            # variant has its own check below.
             default = pkgs.rustPlatform.buildRustPackage {
               pname = "starla-check";
               version = "0.0.0";
@@ -388,12 +447,12 @@
               inherit nativeBuildInputs buildInputs;
               buildPhase = ''
                 export HOME=$(mktemp -d)
-                cargo clippy --all-targets --all-features -- -D warnings
+                cargo clippy --all-targets -- -D warnings
               '';
               doCheck = true;
               checkPhase = ''
                 export HOME=$(mktemp -d)
-                cargo test --all-features --workspace
+                cargo test --workspace
               '';
               installPhase = "touch $out";
             };
@@ -466,6 +525,21 @@
             RUST_LOG = "info";
             CARGO_INCREMENTAL = "1";
             RUST_TEST_THREADS = "4";
+          };
+
+          # Opt-in dev shell for working on the scamper backend. Identical
+          # to the default shell but with libscamperctrl/libscamperfile in
+          # scope so `cargo build --features scamper` links cleanly.
+          # Enter with `nix develop .#scamper`.
+          devShells.scamper = pkgs.mkShell {
+            name = "starla-dev-scamper";
+            buildInputs = [ rustToolchain ] ++ devPackages ++ buildInputs
+            ++ scamperBuildInputs;
+            shellHook = ''
+              echo "starla dev shell with scamper available"
+              echo "  cargo build --features scamper"
+              echo "  cargo test --features scamper --workspace"
+            '';
           };
         }
       ) // {

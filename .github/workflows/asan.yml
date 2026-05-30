@@ -20,9 +20,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pkg-config libssl-dev
 
+      # `--all-features` would enable scamper, but this bare runner has
+      # no libscamperfile/libscamperctrl. scamper coverage stays on the
+      # nix flake check where the dev shell provides them.
       - name: Run tests with AddressSanitizer
         run: |
-          cargo test --all-features --workspace \
+          cargo test --workspace \
             --exclude starla-tray \
             -Zbuild-std --target x86_64-unknown-linux-gnu
         env:

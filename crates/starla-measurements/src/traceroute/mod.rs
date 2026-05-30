@@ -1,6 +1,8 @@
 //! Traceroute measurement implementation
 
 pub mod icmp;
+#[cfg(feature = "scamper")]
+pub mod scamper;
 #[cfg(unix)]
 pub mod tcp;
 #[cfg(unix)]
@@ -24,6 +26,16 @@ pub enum TracerouteProtocol {
     TCP,
 }
 
+/// Which implementation runs the traceroute. See [`super::ping::PingBackend`]
+/// for the same trade-off applied to ping.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TracerouteBackend {
+    #[default]
+    Native,
+    Scamper,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TracerouteConfig {
     pub target: IpAddr,
@@ -33,6 +45,8 @@ pub struct TracerouteConfig {
     pub paris: u16, // Paris traceroute ID
     pub size: u16,
     pub timeout_ms: u64,
+    #[serde(default)]
+    pub backend: TracerouteBackend,
 }
 
 /// Format traceroute hops matching exact C probe output.
@@ -93,16 +107,24 @@ impl Measurement for Traceroute {
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
         let start_time = Timestamp::now().0;
 
-        let results = match self.config.protocol {
-            TracerouteProtocol::ICMP => icmp::execute_traceroute(&self.config).await?,
-            #[cfg(unix)]
-            TracerouteProtocol::UDP => udp::execute_traceroute(&self.config).await?,
-            #[cfg(unix)]
-            TracerouteProtocol::TCP => tcp::execute_traceroute(&self.config).await?,
-            #[cfg(not(unix))]
-            TracerouteProtocol::UDP | TracerouteProtocol::TCP => {
-                anyhow::bail!("UDP and TCP traceroute are not supported on this platform; use ICMP")
-            }
+        let results = match self.config.backend {
+            #[cfg(feature = "scamper")]
+            TracerouteBackend::Scamper => scamper::execute_traceroute(&self.config).await?,
+            #[cfg(not(feature = "scamper"))]
+            TracerouteBackend::Scamper => anyhow::bail!(
+                "scamper backend requested but starla was built without the `scamper` feature"
+            ),
+            TracerouteBackend::Native => match self.config.protocol {
+                TracerouteProtocol::ICMP => icmp::execute_traceroute(&self.config).await?,
+                #[cfg(unix)]
+                TracerouteProtocol::UDP => udp::execute_traceroute(&self.config).await?,
+                #[cfg(unix)]
+                TracerouteProtocol::TCP => tcp::execute_traceroute(&self.config).await?,
+                #[cfg(not(unix))]
+                TracerouteProtocol::UDP | TracerouteProtocol::TCP => anyhow::bail!(
+                    "UDP and TCP traceroute are not supported on this platform; use ICMP"
+                ),
+            },
         };
 
         let endtime = Timestamp::now().0;

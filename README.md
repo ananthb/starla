@@ -21,6 +21,12 @@ An alternative unofficial [RIPE Atlas](https://atlas.ripe.net) software probe wr
 - **macOS app bundle**: Starla Tray.app with DMG installer and Install CLI script
 - **Prometheus metrics**: optional observability export
 - **Bounded in-memory result queue**: configurable capacity, drops oldest when full
+- **Optional scamper backend**: ping and traceroute can be driven by a running
+  scamper daemon via the [`rscamper`](https://crates.io/crates/rscamper)
+  bindings. Build with `--features scamper` and select per measurement with
+  `"backend": "scamper"` in the spec. Requires libscamperfile / libscamperctrl
+  at link time and a scamper unix socket (defaulting to
+  `/var/run/scamper/scamperd.sock`, overridable via `STARLA_SCAMPER_SOCKET`).
 
 ## Quick Start
 

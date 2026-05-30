@@ -13,8 +13,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@nightly
 
+      # The `scamper` feature pulls in rscamper, which doesn't build on
+      # Windows (uses libc::suseconds_t/time_t types that aren't defined
+      # for MSVC targets). Stick to the default feature set here.
       - name: Build probe
-        run: cargo build --bin starla --all-features
+        run: cargo build --bin starla
 
       - name: Run tests
-        run: cargo test --workspace --all-features --exclude starla-tray
+        run: cargo test --workspace --exclude starla-tray
