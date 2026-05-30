@@ -5440,7 +5440,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "open",
- "png 0.17.16",
+ "png 0.18.1",
  "serde_json",
  "starla-common",
  "tray-icon",

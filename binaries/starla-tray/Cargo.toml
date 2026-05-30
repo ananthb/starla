@@ -19,4 +19,4 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 open = "5"
 arboard = "3"
-png = "0.17"
+png = "0.18"
