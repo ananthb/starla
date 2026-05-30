@@ -23,7 +23,7 @@ repository = "https://github.com/ananthb/starla"
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1.40", features = ["full"] }
+tokio = { version = "1.52", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec", "rt"] }
 
 # Serialization
@@ -44,7 +44,7 @@ hickory-proto = "0.24"
 
 # HTTP
 reqwest = { version = "0.12", features = ["http2", "rustls-tls", "json"], default-features = false }
-hyper = { version = "1.0", features = ["http2", "server", "client"] }
+hyper = { version = "1.10", features = ["http2", "server", "client"] }
 hyper-util = "0.1"
 http-body-util = "0.1"
 
@@ -94,7 +94,7 @@ async-trait = "0.1"
 # Utilities
 bytes = "1.7"
 rand = "0.8"
-uuid = { version = "1.10", features = ["v4", "serde"] }
+uuid = { version = "1.23", features = ["v4", "serde"] }
 base64 = "0.22"
 hex = "0.4"
 sha2 = "0.10"
