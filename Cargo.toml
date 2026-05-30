@@ -32,7 +32,7 @@ serde_json = { version = "1.0", features = ["preserve_order", "raw_value"] }
 toml = "1.1"
 
 # Networking
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 pnet = "0.35"
 pnet_packet = "0.35"
 
