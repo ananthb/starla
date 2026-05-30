@@ -180,8 +180,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
 
+      # `--all-features` would enable scamper, which doesn't build on
+      # Windows; default features cover what the Windows MSI ships.
       - name: Build probe
-        run: cargo build --release --bin starla --all-features
+        run: cargo build --release --bin starla
 
       - name: Build MSI
         shell: bash

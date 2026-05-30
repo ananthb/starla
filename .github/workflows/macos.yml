@@ -17,6 +17,9 @@ jobs:
           nix build .#default
           nix build .#starla-tray
 
+      # `--all-features` would enable scamper, but the macOS dev shell
+       # doesn't ship libscamperfile/libscamperctrl so linking fails.
+       # scamper coverage stays on Linux's nix flake check.
       - name: Run tests
         run: |
-          nix develop -c cargo test --workspace --all-features
+          nix develop -c cargo test --workspace
