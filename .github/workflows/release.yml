@@ -260,57 +260,66 @@ jobs:
           name: ananthb
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      - name: Publish starla-common
-        run: nix develop -c cargo publish -p starla-common
+      # crates.io rate-limits new crate publishes at 1 per ~10min per user.
+      # Skip already-published versions so this step is idempotent across
+      # re-runs, and sleep ~10min between each new crate so the limiter
+      # doesn't 429 us mid-batch.
+      - name: Publish workspace crates
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
 
-      - name: Wait for crates.io indexing
-        run: sleep 30
+          # In dep order — each crate's deps must be on crates.io first.
+          CRATES=(
+            starla-common
+            starla-network
+            starla-controller
+            starla-metrics
+            starla-measurements
+            starla-results
+            starla-scheduler
+            starla
+            starla-tray
+          )
+          VER="${VERSION#v}"
 
-      - name: Publish starla-network
-        run: nix develop -c cargo publish -p starla-network
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          is_published() {
+            local name=$1
+            local code
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              "https://crates.io/api/v1/crates/${name}/${VER}")
+            [[ "$code" == "200" ]]
+          }
 
-      - name: Publish starla-controller
-        run: nix develop -c cargo publish -p starla-controller
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          # Filter out crates whose current version is already on crates.io.
+          pending=()
+          for crate in "${CRATES[@]}"; do
+            if is_published "$crate"; then
+              echo "✓ ${crate} ${VER} already published — skipping"
+            else
+              pending+=("$crate")
+            fi
+          done
 
-      - name: Publish starla-metrics
-        run: nix develop -c cargo publish -p starla-metrics
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          if [[ ${#pending[@]} -eq 0 ]]; then
+            echo "All workspace crates already published at ${VER}."
+            exit 0
+          fi
 
-      - name: Wait for crates.io indexing
-        run: sleep 30
+          for i in "${!pending[@]}"; do
+            crate="${pending[$i]}"
+            echo "→ Publishing ${crate}"
+            nix develop -c cargo publish -p "$crate"
 
-      - name: Publish starla-measurements
-        run: nix develop -c cargo publish -p starla-measurements
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-      - name: Publish starla-results
-        run: nix develop -c cargo publish -p starla-results
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-      - name: Wait for crates.io indexing
-        run: sleep 30
-
-      - name: Publish starla-scheduler
-        run: nix develop -c cargo publish -p starla-scheduler
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
-      - name: Wait for crates.io indexing
-        run: sleep 30
-
-      - name: Publish starla
-        run: nix develop -c cargo publish -p starla
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+            # crates.io rate limit: 1 NEW crate per ~10min. Skip the wait
+            # after the last one in the batch.
+            if (( i < ${#pending[@]} - 1 )); then
+              echo "Sleeping 605s before next new-crate publish (rate limit)"
+              sleep 605
+            fi
+          done
 
       - name: Publish starla-tray
         run: nix develop -c cargo publish -p starla-tray
