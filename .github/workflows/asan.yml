@@ -11,21 +11,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: cachix/cachix-action@v17
         with:
-          components: rust-src
+          name: ananthb
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
-
-      # `--all-features` would enable scamper, but this bare runner has
-      # no libscamperfile/libscamperctrl. scamper coverage stays on the
-      # nix flake check where the dev shell provides them.
       - name: Run tests with AddressSanitizer
         run: |
-          cargo test --workspace \
+          nix develop -c cargo test --workspace \
             --exclude starla-tray \
             -Zbuild-std --target x86_64-unknown-linux-gnu
         env:
