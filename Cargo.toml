@@ -67,7 +67,7 @@ caps = "0.5"
 libc = "0.2"
 
 # Observability - Metrics (feature-gated)
-prometheus = { version = "0.13" }
+prometheus = { version = "0.14" }
 metrics = { version = "0.23" }
 metrics-exporter-prometheus = { version = "0.15" }
 axum = { version = "0.7" }
