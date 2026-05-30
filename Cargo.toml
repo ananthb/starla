@@ -39,7 +39,7 @@ pnet_packet = "0.35"
 # DNS
 hickory-dns = "0.24"
 hickory-resolver = "0.24"
-hickory-client = "0.24"
+hickory-client = "0.25"
 hickory-proto = "0.24"
 
 # HTTP
