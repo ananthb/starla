@@ -8,7 +8,16 @@ description = "Network measurement implementations for the Starla RIPE Atlas sof
 repository.workspace = true
 readme = "README.md"
 
+[features]
+default = []
+# Enable scamper-backed measurement implementations. Requires libscamperfile
+# and libscamperctrl from the scamper distribution to be installed at build
+# time, and a running scamper daemon reachable over the configured socket at
+# runtime.
+scamper = ["dep:rscamper"]
+
 [dependencies]
+rscamper = { version = "0.2", optional = true }
 starla-common = { path = "../starla-common", version = "0.5.0" }
 starla-network = { path = "../starla-network", version = "0.5.0" }
 tokio = { workspace = true }
