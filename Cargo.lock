@@ -2987,22 +2987,23 @@ dependencies = [
 
 [[package]]
 name = "muda"
-version = "0.15.3"
+version = "0.19.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdae9c00e61cc0579bcac625e8ad22104c60548a025bfc972dc83868a28e1484"
+checksum = "47a2e3dff89cd322c66647942668faee0a2b1f88ea6cbb4d374b4a8d7e92528c"
 dependencies = [
  "crossbeam-channel",
  "dpi",
  "gtk",
  "keyboard-types",
  "libxdo",
- "objc2 0.5.2",
- "objc2-app-kit 0.2.2",
- "objc2-foundation 0.2.2",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
  "once_cell",
- "png 0.17.16",
- "thiserror 1.0.69",
- "windows-sys 0.59.0",
+ "png 0.18.1",
+ "thiserror 2.0.18",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5938,9 +5939,9 @@ dependencies = [
 
 [[package]]
 name = "tray-icon"
-version = "0.19.3"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eadd75f5002e2513eaa19b2365f533090cc3e93abd38788452d9ea85cff7b48a"
+checksum = "e47e6d063cfe4ad2e416fcbb310be3a37c5fd85c745b62cb562bfa4a003df674"
 dependencies = [
  "crossbeam-channel",
  "dirs",
@@ -5952,9 +5953,9 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "once_cell",
- "png 0.17.16",
+ "png 0.18.1",
  "thiserror 2.0.18",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
