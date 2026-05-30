@@ -20,6 +20,14 @@ updates:
     labels:
       - dependencies
       - rust
+    ignore:
+      # The hickory family (proto/resolver/client/dns) shares types across
+      # crates, so bumping just one creates a version mismatch. We pin all
+      # four in lockstep — skip dependabot's partial-bump proposals.
+      - dependency-name: hickory-proto
+      - dependency-name: hickory-resolver
+      - dependency-name: hickory-client
+      - dependency-name: hickory-dns
     groups:
       # Patch + minor bumps land in one weekly PR so review fatigue stays
       # low. Major updates still get their own PRs.
