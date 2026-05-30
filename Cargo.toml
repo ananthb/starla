@@ -69,7 +69,7 @@ libc = "0.2"
 # Observability - Metrics (feature-gated)
 prometheus = { version = "0.13" }
 metrics = { version = "0.23" }
-metrics-exporter-prometheus = { version = "0.15" }
+metrics-exporter-prometheus = { version = "0.18" }
 axum = { version = "0.7" }
 
 # Observability - Logging
