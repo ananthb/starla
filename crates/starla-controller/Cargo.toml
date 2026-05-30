@@ -25,5 +25,5 @@ tracing = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
 hostname = "0.4.2"
-sha2 = "0.10"
+sha2 = "0.11"
 base64 = "0.22"

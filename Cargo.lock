@@ -5243,7 +5243,7 @@ dependencies = [
  "russh",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "ssh-key 0.6.7",
  "starla-common",
  "thiserror 1.0.69",
