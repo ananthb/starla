@@ -1,7 +1,7 @@
 //! Traceroute measurement implementation
 
 pub mod icmp;
-#[cfg(feature = "scamper")]
+#[cfg(target_os = "linux")]
 pub mod scamper;
 #[cfg(unix)]
 pub mod tcp;
@@ -108,12 +108,12 @@ impl Measurement for Traceroute {
         let start_time = Timestamp::now().0;
 
         let results = match self.config.backend {
-            #[cfg(feature = "scamper")]
+            #[cfg(target_os = "linux")]
             TracerouteBackend::Scamper => scamper::execute_traceroute(&self.config).await?,
-            #[cfg(not(feature = "scamper"))]
-            TracerouteBackend::Scamper => anyhow::bail!(
-                "scamper backend requested but starla was built without the `scamper` feature"
-            ),
+            #[cfg(not(target_os = "linux"))]
+            TracerouteBackend::Scamper => {
+                anyhow::bail!("scamper backend is only available on Linux")
+            }
             TracerouteBackend::Native => match self.config.protocol {
                 TracerouteProtocol::ICMP => icmp::execute_traceroute(&self.config).await?,
                 #[cfg(unix)]

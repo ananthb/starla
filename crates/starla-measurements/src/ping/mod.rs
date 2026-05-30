@@ -1,7 +1,7 @@
 //! Ping measurement implementation
 
 pub mod icmp;
-#[cfg(feature = "scamper")]
+#[cfg(target_os = "linux")]
 pub mod scamper;
 
 use crate::traits::Measurement;
@@ -17,8 +17,8 @@ use std::net::IpAddr;
 ///
 /// `Native` is the in-process ICMP socket implementation and is always
 /// available. `Scamper` delegates to a running scamper daemon via the
-/// rscamper bindings; selecting it without building the crate with the
-/// `scamper` feature is an error.
+/// rscamper bindings; it is compiled in on Linux only, so selecting it on
+/// any other platform is a runtime error.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PingBackend {
@@ -66,12 +66,12 @@ impl Measurement for Ping {
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
         let results = match self.config.backend {
             PingBackend::Native => icmp::execute_ping(&self.config).await?,
-            #[cfg(feature = "scamper")]
+            #[cfg(target_os = "linux")]
             PingBackend::Scamper => scamper::execute_ping(&self.config).await?,
-            #[cfg(not(feature = "scamper"))]
-            PingBackend::Scamper => anyhow::bail!(
-                "scamper backend requested but starla was built without the `scamper` feature"
-            ),
+            #[cfg(not(target_os = "linux"))]
+            PingBackend::Scamper => {
+                anyhow::bail!("scamper backend is only available on Linux")
+            }
         };
 
         // Get the source address that would be used for this destination
