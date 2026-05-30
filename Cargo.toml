@@ -70,7 +70,7 @@ libc = "0.2"
 prometheus = { version = "0.13" }
 metrics = { version = "0.23" }
 metrics-exporter-prometheus = { version = "0.15" }
-axum = { version = "0.7" }
+axum = { version = "0.8" }
 
 # Observability - Logging
 tracing = "0.1"
