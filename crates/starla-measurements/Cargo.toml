@@ -13,7 +13,7 @@ default = []
 # Enable scamper-backed measurement implementations. Requires libscamperfile
 # and libscamperctrl from the scamper distribution to be installed at build
 # time, and a running scamper daemon reachable over the configured socket at
-# runtime.
+# runtime. Unix-only; not built on Windows.
 scamper = ["dep:rscamper"]
 
 [dependencies]

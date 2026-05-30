@@ -12,7 +12,7 @@
 
 use super::icmp::PingReplyOrTimeout;
 use super::PingConfig;
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use std::time::Duration;
 
 const DEFAULT_SCAMPER_SOCKET: &str = "/var/run/scamper/scamperd.sock";
@@ -22,8 +22,12 @@ pub async fn execute_ping(config: &PingConfig) -> anyhow::Result<Vec<PingReplyOr
     // daemon to push responses back, so run it on a blocking thread to
     // keep the tokio runtime healthy.
     let config = config.clone();
-    let total_timeout =
-        Duration::from_millis(config.timeout_ms.saturating_mul(config.count as u64).max(1_000));
+    let total_timeout = Duration::from_millis(
+        config
+            .timeout_ms
+            .saturating_mul(config.count as u64)
+            .max(1_000),
+    );
 
     tokio::task::spawn_blocking(move || run_ping_blocking(&config, total_timeout))
         .await
@@ -34,32 +38,49 @@ fn run_ping_blocking(
     config: &PingConfig,
     total_timeout: Duration,
 ) -> anyhow::Result<Vec<PingReplyOrTimeout>> {
-    use rscamper::ctrl::ScamperCtrl;
+    use rscamper::ctrl::{ResponseItem, ScamperCtrl};
+    use rscamper::file::ScamperObject;
 
     let socket = std::env::var("STARLA_SCAMPER_SOCKET")
         .unwrap_or_else(|_| DEFAULT_SCAMPER_SOCKET.to_string());
 
-    let mut ctrl = ScamperCtrl::new(false, None).context("ScamperCtrl::new failed")?;
+    let mut ctrl = ScamperCtrl::new(false, None).map_err(|e| anyhow!("ScamperCtrl::new: {}", e))?;
     let inst = ctrl
         .add_unix(&socket)
-        .with_context(|| format!("failed to connect to scamper at {}", socket))?;
+        .map_err(|e| anyhow!("connect to scamper at {}: {}", socket, e))?;
 
     let target = config.target.to_string();
     ctrl.do_ping(
         &inst,
         &target,
-        Some(config.count as u16),
-        Some(config.size),
-        Some(config.ttl),
-        Some(Duration::from_millis(config.timeout_ms)),
+        None,                                           // tcp_ack
+        None,                                           // tcp_seq
+        Some(config.count as u16),                      // attempts
+        None,                                           // icmp_id
+        None,                                           // icmp_seq
+        None,                                           // icmp_sum
+        None,                                           // dport
+        None,                                           // sport
+        None,                                           // wait_probe
+        Some(config.ttl),                               // ttl
+        None,                                           // mtu
+        None,                                           // stop_count
+        None,                                           // method
+        None,                                           // payload
+        None,                                           // rtr
+        None,                                           // recordroute
+        Some(config.size),                              // size
+        None,                                           // src
+        Some(Duration::from_millis(config.timeout_ms)), // wait_timeout
+        None,                                           // tos
+        None,                                           // userid
     )
-    .context("scheduling scamper ping failed")?;
+    .map_err(|e| anyhow!("scheduling scamper ping: {}", e))?;
 
     let mut replies: Vec<PingReplyOrTimeout> = Vec::with_capacity(config.count as usize);
 
-    for item in ctrl.responses(Some(total_timeout)) {
-        let rscamper::ctrl::ResponseItem { obj, .. } = item;
-        if let rscamper::ctrl::ScamperObject::Ping(ping) = obj {
+    for ResponseItem { obj, .. } in ctrl.responses(Some(total_timeout)) {
+        if let ScamperObject::Ping(ping) = obj {
             let sent = ping.sent();
             for i in 0..sent {
                 let rtt_ms = ping
