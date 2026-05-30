@@ -37,10 +37,10 @@ pnet = "0.35"
 pnet_packet = "0.35"
 
 # DNS
-hickory-dns = "0.24"
-hickory-resolver = "0.24"
-hickory-client = "0.24"
-hickory-proto = "0.24"
+hickory-dns = "0.25"
+hickory-resolver = "0.26"
+hickory-client = "0.25"
+hickory-proto = "0.26"
 
 # HTTP
 reqwest = { version = "0.12", features = ["http2", "rustls-tls", "json"], default-features = false }
@@ -67,10 +67,10 @@ caps = "0.5"
 libc = "0.2"
 
 # Observability - Metrics (feature-gated)
-prometheus = { version = "0.13" }
-metrics = { version = "0.23" }
-metrics-exporter-prometheus = { version = "0.15" }
-axum = { version = "0.7" }
+prometheus = { version = "0.14" }
+metrics = { version = "0.24" }
+metrics-exporter-prometheus = { version = "0.18" }
+axum = { version = "0.8" }
 
 # Observability - Logging
 tracing = "0.1"
@@ -79,7 +79,7 @@ tracing-appender = "0.2"
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
