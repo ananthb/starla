@@ -7,7 +7,7 @@ use super::{DnsConfig, DnsProtocol};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use hickory_proto::op::{Message, MessageType, OpCode, Query};
+use hickory_proto::op::{Edns, Message, MessageType, OpCode, Query};
 use hickory_proto::rr::{DNSClass, Name, RecordType};
 use hickory_proto::serialize::binary::BinDecodable;
 use rand::{distr::Alphanumeric, RngExt};
@@ -52,11 +52,8 @@ fn build_query(config: &DnsConfig, probe_id: u32) -> anyhow::Result<(Message, Ve
     let record_type = RecordType::from_str(&config.query_type).unwrap_or(RecordType::A);
     let dns_class = DNSClass::from_str(&config.query_class).unwrap_or(DNSClass::IN);
 
-    let mut msg = Message::new();
-    msg.set_id(rand::random());
-    msg.set_message_type(MessageType::Query);
-    msg.set_op_code(OpCode::Query);
-    msg.set_recursion_desired(config.recursion_desired);
+    let mut msg = Message::new(rand::random(), MessageType::Query, OpCode::Query);
+    msg.metadata.recursion_desired = config.recursion_desired;
     msg.add_query(
         Query::query(name, record_type)
             .set_query_class(dns_class)
@@ -65,11 +62,12 @@ fn build_query(config: &DnsConfig, probe_id: u32) -> anyhow::Result<(Message, Ve
 
     if config.dnssec || config.edns_buf_size.is_some() {
         let buf_size = config.edns_buf_size.unwrap_or(4096);
-        let edns = msg.extensions_mut().get_or_insert_with(Default::default);
+        let mut edns = Edns::new();
         edns.set_max_payload(buf_size);
         if config.dnssec {
             edns.set_dnssec_ok(true);
         }
+        msg.set_edns(edns);
     }
 
     let wire = msg.to_vec()?;
@@ -95,11 +93,11 @@ pub fn parse_response(raw: &[u8]) -> anyhow::Result<(u16, u16, u16, u16, u16)> {
 fn parse_answers(raw: &[u8]) -> Option<Vec<AnswerRecord>> {
     let msg = Message::from_bytes(raw).ok()?;
     let answers: Vec<AnswerRecord> = msg
-        .answers()
+        .answers
         .iter()
         .map(|rr| AnswerRecord {
             record_type: format!("{}", rr.record_type()),
-            name: rr.name().to_string(),
+            name: rr.name.to_string(),
             rdata: format_rdata(rr),
         })
         .collect();
@@ -118,11 +116,9 @@ pub struct AnswerRecord {
 }
 
 fn format_rdata(rr: &hickory_proto::rr::Record) -> Vec<String> {
-    let Some(data) = rr.data() else {
-        return vec![];
-    };
-    match data {
+    match &rr.data {
         hickory_proto::rr::RData::TXT(txt) => txt
+            .txt_data
             .iter()
             .map(|s| String::from_utf8_lossy(s).to_string())
             .collect(),
@@ -130,18 +126,12 @@ fn format_rdata(rr: &hickory_proto::rr::Record) -> Vec<String> {
         hickory_proto::rr::RData::AAAA(aaaa) => vec![aaaa.to_string()],
         hickory_proto::rr::RData::CNAME(name) => vec![name.to_string()],
         hickory_proto::rr::RData::MX(mx) => {
-            vec![format!("{} {}", mx.preference(), mx.exchange())]
+            vec![format!("{} {}", mx.preference, mx.exchange)]
         }
         hickory_proto::rr::RData::NS(name) => vec![name.to_string()],
         hickory_proto::rr::RData::SOA(soa) => vec![format!(
             "{} {} {} {} {} {} {}",
-            soa.mname(),
-            soa.rname(),
-            soa.serial(),
-            soa.refresh(),
-            soa.retry(),
-            soa.expire(),
-            soa.minimum()
+            soa.mname, soa.rname, soa.serial, soa.refresh, soa.retry, soa.expire, soa.minimum
         )],
         other => vec![format!("{:?}", other)],
     }
