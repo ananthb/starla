@@ -534,7 +534,7 @@
           devShells.scamper = pkgs.mkShell {
             name = "starla-dev-scamper";
             buildInputs = [ rustToolchain ] ++ devPackages ++ buildInputs
-              ++ scamperBuildInputs;
+            ++ scamperBuildInputs;
             shellHook = ''
               echo "starla dev shell with scamper available"
               echo "  cargo build --features scamper"
