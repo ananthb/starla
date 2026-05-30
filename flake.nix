@@ -87,15 +87,16 @@
           rustFlagsLinux = pkgs.lib.optionalString pkgs.stdenv.isLinux
             "-C link-arg=-Wl,--allow-multiple-definition";
 
-          # Fix rscamper 0.2.2's hardcoded `as i8` casts in the vendored
-          # source; libc::c_char is u8 on aarch64 so the upstream build fails.
+          # Fix rscamper 0.2.2's hardcoded i8 uses in the vendored source;
+          # libc::c_char is u8 on aarch64 so the upstream build fails.
           rscamperPostPatch = ''
             for f in "$NIX_BUILD_TOP"/*/rscamper-*/src/inst.rs \
                      "$NIX_BUILD_TOP"/*/rscamper-*/src/file.rs; do
               [ -f "$f" ] || continue
               substituteInPlace "$f" \
                 --replace-quiet "b'r' as i8" "b'r' as libc::c_char" \
-                --replace-quiet "mode as i8" "mode as libc::c_char"
+                --replace-quiet "mode as i8" "mode as libc::c_char" \
+                --replace-quiet "[0i8; 128]" "[0 as libc::c_char; 128]"
             done
           '';
 
