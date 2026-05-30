@@ -1,0 +1,49 @@
+# Dependabot config for starla.
+# Nix flake inputs aren't covered (no dependabot ecosystem for nix); run
+# `nix flake update` periodically to refresh those.
+
+version: 2
+updates:
+  # Rust workspace — one root Cargo.toml controls every member crate, so a
+  # single update entry covers the whole workspace.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    labels:
+      - dependencies
+      - rust
+    groups:
+      # Patch + minor bumps land in one weekly PR so review fatigue stays
+      # low. Major updates still get their own PRs.
+      cargo-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+      include: scope
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch
