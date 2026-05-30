@@ -10,7 +10,7 @@ use base64::Engine;
 use hickory_proto::op::{Message, MessageType, OpCode, Query};
 use hickory_proto::rr::{DNSClass, Name, RecordType};
 use hickory_proto::serialize::binary::BinDecodable;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, RngExt};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -266,8 +266,8 @@ fn expand_query_templates(query_name: &str, probe_id: u32) -> String {
 }
 
 fn random_label() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
+    rand::rng()
+        .sample_iter(Alphanumeric)
         .take(8)
         .map(char::from)
         .collect::<String>()

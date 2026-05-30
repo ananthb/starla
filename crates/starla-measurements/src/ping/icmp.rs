@@ -66,7 +66,6 @@ pub fn ping_stats(results: &PingResults) -> (f64, f64, f64, u32, u32) {
 
 #[cfg(unix)]
 pub async fn execute_ping(config: &PingConfig) -> anyhow::Result<PingResults> {
-    use rand::Rng;
     use starla_network::{
         build_icmpv4_echo_request, build_icmpv6_echo_request, new_icmpv4_socket, new_icmpv6_socket,
         parse_icmpv4_echo_reply, parse_icmpv6_echo_reply,
@@ -87,7 +86,7 @@ pub async fn execute_ping(config: &PingConfig) -> anyhow::Result<PingResults> {
     }
 
     let mut results = Vec::new();
-    let identifier = rand::thread_rng().gen::<u16>();
+    let identifier = rand::random::<u16>();
     let is_dgram = socket.is_dgram();
 
     // We send to the target address on port 0

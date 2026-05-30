@@ -14,9 +14,10 @@ const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../assets/tray.png");
 /// Tint the embedded icon's opaque pixels with the given RGB color, preserving
 /// alpha.
 fn tint_icon(r: u8, g: u8, b: u8) -> Icon {
-    let decoder = png::Decoder::new(TRAY_ICON_PNG);
+    // png 0.18's Decoder requires Read + Seek; wrap the embedded bytes.
+    let decoder = png::Decoder::new(std::io::Cursor::new(TRAY_ICON_PNG));
     let mut reader = decoder.read_info().expect("Failed to read PNG header");
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let mut buf = vec![0u8; reader.output_buffer_size().expect("PNG too large")];
     let info = reader.next_frame(&mut buf).expect("Failed to decode PNG");
     buf.truncate(info.buffer_size());
 
