@@ -4544,6 +4544,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rscamper"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "398a2775e8cfbc5ca4a6dfad071722e419177905496de8e6a841071888de96f8"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "russh"
 version = "0.60.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5340,6 +5349,7 @@ dependencies = [
  "pnet_packet",
  "rand 0.8.5",
  "reqwest",
+ "rscamper",
  "rustls",
  "serde",
  "serde_json",

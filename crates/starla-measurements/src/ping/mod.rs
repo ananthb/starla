@@ -1,6 +1,8 @@
 //! Ping measurement implementation
 
 pub mod icmp;
+#[cfg(feature = "scamper")]
+pub mod scamper;
 
 use crate::traits::Measurement;
 use async_trait::async_trait;
@@ -11,6 +13,20 @@ use starla_common::{
 use starla_network::get_source_addr_for_dest;
 use std::net::IpAddr;
 
+/// Which implementation runs the ping.
+///
+/// `Native` is the in-process ICMP socket implementation and is always
+/// available. `Scamper` delegates to a running scamper daemon via the
+/// rscamper bindings; selecting it without building the crate with the
+/// `scamper` feature is an error.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PingBackend {
+    #[default]
+    Native,
+    Scamper,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PingConfig {
     pub target: IpAddr,
@@ -18,6 +34,8 @@ pub struct PingConfig {
     pub size: u16,
     pub ttl: u8,
     pub timeout_ms: u64,
+    #[serde(default)]
+    pub backend: PingBackend,
 }
 
 /// Format ping results as a C-probe-compatible string.
@@ -46,7 +64,15 @@ impl Measurement for Ping {
     }
 
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
-        let results = icmp::execute_ping(&self.config).await?;
+        let results = match self.config.backend {
+            PingBackend::Native => icmp::execute_ping(&self.config).await?,
+            #[cfg(feature = "scamper")]
+            PingBackend::Scamper => scamper::execute_ping(&self.config).await?,
+            #[cfg(not(feature = "scamper"))]
+            PingBackend::Scamper => anyhow::bail!(
+                "scamper backend requested but starla was built without the `scamper` feature"
+            ),
+        };
 
         // Get the source address that would be used for this destination
         let src_addr = get_source_addr_for_dest(self.config.target).ok();

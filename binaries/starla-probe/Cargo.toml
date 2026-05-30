@@ -32,3 +32,6 @@ observability = ["metrics-export", "structured-logging"]
 metrics-export = ["starla-metrics/export"]
 structured-logging = ["starla-common/json"]
 minimal = []
+# Build with scamper-backed measurement implementations. See
+# starla-measurements/Cargo.toml for the system requirements.
+scamper = ["starla-scheduler/scamper"]
