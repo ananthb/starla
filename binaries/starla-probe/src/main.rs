@@ -273,7 +273,7 @@ async fn main() -> Result<()> {
     #[cfg(feature = "metrics-export")]
     let metrics_for_results = metrics.clone();
     #[cfg(not(feature = "metrics-export"))]
-    let metrics_for_results = starla_metrics::MetricsRegistry::default();
+    let metrics_for_results = starla_metrics::MetricsRegistry;
 
     let result_handler = Arc::new(ResultHandler::new(
         transport,
@@ -289,7 +289,7 @@ async fn main() -> Result<()> {
     #[cfg(feature = "metrics-export")]
     let metrics_for_scheduler = metrics.clone();
     #[cfg(not(feature = "metrics-export"))]
-    let metrics_for_scheduler = starla_metrics::MetricsRegistry::default();
+    let metrics_for_scheduler = starla_metrics::MetricsRegistry;
 
     let mut scheduler = starla_scheduler::Scheduler::new(probe_id, metrics_for_scheduler);
     scheduler.set_result_handler(result_handler.clone());
