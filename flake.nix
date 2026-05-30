@@ -436,23 +436,23 @@
           checks = {
             inherit pre-commit-check;
 
-            # Build + clippy + tests (all features)
-
+            # Build + clippy + tests with the project's default Cargo
+            # features. Notably this does NOT enable `scamper` — that
+            # variant has its own check below.
             default = pkgs.rustPlatform.buildRustPackage {
               pname = "starla-check";
               version = "0.0.0";
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
-              inherit nativeBuildInputs;
-              buildInputs = buildInputs ++ scamperBuildInputs;
+              inherit nativeBuildInputs buildInputs;
               buildPhase = ''
                 export HOME=$(mktemp -d)
-                cargo clippy --all-targets --all-features -- -D warnings
+                cargo clippy --all-targets -- -D warnings
               '';
               doCheck = true;
               checkPhase = ''
                 export HOME=$(mktemp -d)
-                cargo test --all-features --workspace
+                cargo test --workspace
               '';
               installPhase = "touch $out";
             };
@@ -484,7 +484,7 @@
           devShells.default = pkgs.mkShell {
             name = "starla-dev";
 
-            buildInputs = [ rustToolchain ] ++ devPackages ++ buildInputs ++ scamperBuildInputs;
+            buildInputs = [ rustToolchain ] ++ devPackages ++ buildInputs;
 
             shellHook = ''
               ${pre-commit-check.shellHook}
@@ -525,6 +525,21 @@
             RUST_LOG = "info";
             CARGO_INCREMENTAL = "1";
             RUST_TEST_THREADS = "4";
+          };
+
+          # Opt-in dev shell for working on the scamper backend. Identical
+          # to the default shell but with libscamperctrl/libscamperfile in
+          # scope so `cargo build --features scamper` links cleanly.
+          # Enter with `nix develop .#scamper`.
+          devShells.scamper = pkgs.mkShell {
+            name = "starla-dev-scamper";
+            buildInputs = [ rustToolchain ] ++ devPackages ++ buildInputs
+              ++ scamperBuildInputs;
+            shellHook = ''
+              echo "starla dev shell with scamper available"
+              echo "  cargo build --features scamper"
+              echo "  cargo test --features scamper --workspace"
+            '';
           };
         }
       ) // {
