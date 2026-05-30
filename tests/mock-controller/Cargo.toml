@@ -11,7 +11,7 @@ name = "mock_controller"
 path = "src/lib.rs"
 
 [dependencies]
-starla-common = { path = "../../crates/starla-common", version = "0.5.0" }
+starla-common = { path = "../../crates/starla-common", version = "0.6.0" }
 tokio = { workspace = true }
 russh = { workspace = true }
 rand = { version = "0.10", features = ["thread_rng"] }

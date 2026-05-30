@@ -8,15 +8,11 @@ description = "Measurement scheduling and execution for the Starla RIPE Atlas so
 repository.workspace = true
 readme = "README.md"
 
-[features]
-default = []
-scamper = ["starla-measurements/scamper"]
-
 [dependencies]
-starla-common = { path = "../starla-common", version = "0.5.0" }
-starla-measurements = { path = "../starla-measurements", version = "0.5.0" }
-starla-results = { path = "../starla-results", version = "0.5.0" }
-starla-metrics = { path = "../starla-metrics", version = "0.5.0" }
+starla-common = { path = "../starla-common", version = "0.6.0" }
+starla-measurements = { path = "../starla-measurements", version = "0.6.0" }
+starla-results = { path = "../starla-results", version = "0.6.0" }
+starla-metrics = { path = "../starla-metrics", version = "0.6.0" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 chrono = { workspace = true }
