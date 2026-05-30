@@ -2048,7 +2048,7 @@ dependencies = [
  "hickory-proto",
  "once_cell",
  "radix_trie",
- "rand 0.8.5",
+ "rand 0.8.6",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -2070,7 +2070,7 @@ dependencies = [
  "idna",
  "ipnet",
  "once_cell",
- "rand 0.8.5",
+ "rand 0.8.6",
  "thiserror 1.0.69",
  "tinyvec",
  "tokio",
@@ -2091,7 +2091,7 @@ dependencies = [
  "lru-cache",
  "once_cell",
  "parking_lot",
- "rand 0.8.5",
+ "rand 0.8.6",
  "resolv-conf",
  "smallvec",
  "thiserror 1.0.69",
@@ -3102,7 +3102,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "serde",
  "smallvec",
  "zeroize",
@@ -4267,9 +4267,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -5346,7 +5346,7 @@ dependencies = [
  "hickory-resolver",
  "pnet",
  "pnet_packet",
- "rand 0.8.5",
+ "rand 0.10.1",
  "reqwest",
  "rscamper",
  "rustls",
@@ -5422,7 +5422,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
- "rand 0.8.5",
+ "rand 0.10.1",
  "starla-common",
  "starla-measurements",
  "starla-metrics",
