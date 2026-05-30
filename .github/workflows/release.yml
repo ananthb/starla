@@ -91,7 +91,7 @@ jobs:
               "$f"
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-artifacts-${{ matrix.arch }}
           path: dist/
@@ -169,7 +169,7 @@ jobs:
           mkdir -p dist
           cp "$(readlink result-dmg)" dist/starla-macos-arm64.dmg
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-artifacts
           path: dist/
@@ -203,7 +203,7 @@ jobs:
           mkdir -p dist
           cp msi-staging/starla.msi dist/starla-windows-amd64.msi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-artifacts
           path: dist/
