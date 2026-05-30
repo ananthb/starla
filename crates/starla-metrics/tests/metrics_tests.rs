@@ -14,7 +14,7 @@ mod with_export {
         registry.update_queue_depth(0);
 
         let metrics = registry.gather();
-        let names: Vec<_> = metrics.iter().map(|m| m.get_name()).collect();
+        let names: Vec<_> = metrics.iter().map(|m| m.name()).collect();
         assert!(names.contains(&"starla_measurements_started_total"));
         assert!(names.contains(&"starla_upload_queue_depth"));
     }
@@ -28,7 +28,7 @@ mod with_export {
         let metrics = registry.gather();
         let completed = metrics
             .iter()
-            .find(|m| m.get_name() == "starla_measurements_completed_total")
+            .find(|m| m.name() == "starla_measurements_completed_total")
             .unwrap();
         assert!(!completed.get_metric().is_empty());
     }
@@ -42,15 +42,15 @@ mod with_export {
         let metrics = registry.gather();
         let queue = metrics
             .iter()
-            .find(|m| m.get_name() == "starla_upload_queue_depth")
+            .find(|m| m.name() == "starla_upload_queue_depth")
             .unwrap();
-        assert_eq!(queue.get_metric()[0].get_gauge().get_value(), 10.0);
+        assert_eq!(queue.get_metric()[0].get_gauge().value(), 10.0);
 
         let conn = metrics
             .iter()
-            .find(|m| m.get_name() == "starla_controller_connected")
+            .find(|m| m.name() == "starla_controller_connected")
             .unwrap();
-        assert_eq!(conn.get_metric()[0].get_gauge().get_value(), 1.0);
+        assert_eq!(conn.get_metric()[0].get_gauge().value(), 1.0);
     }
 
     #[tokio::test]
