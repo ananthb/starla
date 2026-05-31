@@ -158,7 +158,8 @@ impl RawSocket {
         if self.protocol == Protocol::ICMPV6 {
             self.inner.get_ref().set_unicast_hops_v6(ttl)
         } else {
-            self.inner.get_ref().set_ttl(ttl)
+            // socket2 0.6 renamed IPv4 setters with a _v4 suffix.
+            self.inner.get_ref().set_ttl_v4(ttl)
         }
     }
 }
