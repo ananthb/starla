@@ -12,10 +12,11 @@
 //! are intentionally omitted: starla runs on a regular Linux host where the
 //! host's memory manager / orchestrator is responsible for those decisions.
 
-use std::collections::{hash_map::DefaultHasher, HashMap};
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -36,9 +37,11 @@ pub enum HostTelemetryKind {
 pub struct HostTelemetry {
     pending: Mutex<Vec<String>>,
     tasks: Mutex<HashMap<HostTelemetryKind, JoinHandle<()>>>,
+    #[cfg(target_os = "linux")]
     rptaddrs_cache: Mutex<RptaddrsCache>,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Default)]
 struct RptaddrsCache {
     last_hash: Option<u64>,
@@ -121,6 +124,7 @@ impl HostTelemetry {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -213,6 +217,9 @@ fn read_uptime_secs() -> Option<u64> {
 pub fn rptaddrs_line(msm_id: u32, telem: &Arc<HostTelemetry>) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
         let body = build_rptaddrs_body()?;
 
         let mut hasher = DefaultHasher::new();
@@ -518,6 +525,7 @@ fn dns_resolvers() -> String {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn hex_v4_round_trip() {
         // /proc/net/route stores destinations in little-endian hex.
@@ -525,6 +533,7 @@ mod tests {
         assert_eq!(hex_to_v4("00000000"), "0.0.0.0");
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn hex_v6_groups() {
         // 2001:0db8::1 in /proc/net/if_inet6's 32-char hex.
