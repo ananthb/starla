@@ -96,62 +96,80 @@ jobs:
           name: linux-artifacts-${{ matrix.arch }}
           path: dist/
 
-      - name: Log in to ghcr.io
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-      - name: Build and push OCI image
+      - name: Build OCI image
         run: |
           nix build .#packages.${{ matrix.nix-system }}.oci -o result-oci
-          skopeo copy \
-            "docker-archive:$(readlink result-oci)" \
-            "docker://ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-${{ matrix.arch }}"
+          mkdir -p oci-stage
+          cp -L "$(readlink result-oci)" "oci-stage/starla-${{ matrix.arch }}.oci.tar.gz"
 
-      - name: Sign per-arch image
-        env:
-          COSIGN_YES: "true"
-        run: |
-          cosign login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
-          cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: oci-${{ matrix.arch }}
+          path: oci-stage/
 
-  linux-manifest:
+  linux-image:
     needs: linux
     runs-on: ubuntu-latest
     permissions:
       packages: write
       id-token: write
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
     steps:
-      - uses: actions/checkout@v6
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: cachix/cachix-action@v17
-        with:
-          name: ananthb
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - uses: sigstore/cosign-installer@v3
 
-      - name: Create multi-arch manifest
-        run: |
-          nix shell nixpkgs#manifest-tool -c manifest-tool \
-            --username "${{ github.actor }}" \
-            --password "${{ secrets.GITHUB_TOKEN }}" \
-            push from-args \
-            --platforms linux/amd64,linux/arm64 \
-            --template "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-ARCH" \
-            --target "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
-          nix shell nixpkgs#manifest-tool -c manifest-tool \
-            --username "${{ github.actor }}" \
-            --password "${{ secrets.GITHUB_TOKEN }}" \
-            push from-args \
-            --platforms linux/amd64,linux/arm64 \
-            --template "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}-ARCH" \
-            --target "ghcr.io/ananthb/starla:latest"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: oci-*
+          path: oci
 
-      - name: Sign multi-arch tags
+      - name: Push per-arch OCI archives to local registry
+        run: |
+          for arch in amd64 arm64; do
+            skopeo copy --dest-tls-verify=false \
+              "docker-archive:oci/oci-${arch}/starla-${arch}.oci.tar.gz" \
+              "docker://localhost:5000/starla:${GITHUB_REF_NAME}-${arch}"
+          done
+
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assemble and push multi-arch image
+        id: imagetools
+        run: |
+          docker buildx imagetools create \
+            --tag "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}" \
+            --tag "ghcr.io/ananthb/starla:latest" \
+            "localhost:5000/starla:${GITHUB_REF_NAME}-amd64" \
+            "localhost:5000/starla:${GITHUB_REF_NAME}-arm64"
+
+          raw=$(docker buildx imagetools inspect "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}" --raw)
+          {
+            echo "amd64_digest=$(echo "$raw" | jq -r '.manifests[] | select(.platform.architecture=="amd64") | .digest')"
+            echo "arm64_digest=$(echo "$raw" | jq -r '.manifests[] | select(.platform.architecture=="arm64") | .digest')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Sign images
         env:
           COSIGN_YES: "true"
         run: |
-          cosign login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
           cosign sign "ghcr.io/ananthb/starla:${GITHUB_REF_NAME}"
           cosign sign "ghcr.io/ananthb/starla:latest"
+          cosign sign "ghcr.io/ananthb/starla@${{ steps.imagetools.outputs.amd64_digest }}"
+          cosign sign "ghcr.io/ananthb/starla@${{ steps.imagetools.outputs.arm64_digest }}"
 
   macos:
     runs-on: macos-latest
