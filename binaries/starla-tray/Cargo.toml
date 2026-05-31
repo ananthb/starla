@@ -12,7 +12,7 @@ name = "starla-tray"
 path = "src/main.rs"
 
 [dependencies]
-starla-common = { path = "../../crates/starla-common", version = "0.6.1" }
+starla-common = { path = "../../crates/starla-common", version = "0.6.2" }
 tray-icon = "0.24"
 winit = "0.30"
 serde_json = { workspace = true }

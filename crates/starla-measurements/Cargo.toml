@@ -9,8 +9,8 @@ repository.workspace = true
 readme = "README.md"
 
 [dependencies]
-starla-common = { path = "../starla-common", version = "0.6.1" }
-starla-network = { path = "../starla-network", version = "0.6.1" }
+starla-common = { path = "../starla-common", version = "0.6.2" }
+starla-network = { path = "../starla-network", version = "0.6.2" }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
