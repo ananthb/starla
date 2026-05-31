@@ -40,9 +40,9 @@ pub async fn execute_traceroute(config: &TracerouteConfig) -> anyhow::Result<Tra
             };
             let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
 
-            // Set TTL
+            // Set TTL. socket2 0.6 renamed IPv4 setters with a _v4 suffix.
             if config.target.is_ipv4() {
-                socket.set_ttl(ttl as u32)?;
+                socket.set_ttl_v4(ttl as u32)?;
             } else {
                 socket.set_unicast_hops_v6(ttl as u32)?;
             }
