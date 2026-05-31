@@ -246,7 +246,10 @@ impl KnownHosts {
         let mut hosts = self.hosts.lock().await;
 
         if let Some(saved) = hosts.get(&host_port) {
-            if *saved == presented {
+            // Match on key blob only: RFC 8332 reuses the ssh-rsa blob for
+            // rsa-sha2-{256,512}.
+            let saved_blob = saved.split_whitespace().nth(1).unwrap_or("");
+            if saved_blob == key_b64 {
                 debug!("Host key for {} matches known key", host_port);
                 Ok(true)
             } else {
@@ -1130,5 +1133,80 @@ mod tests {
         let public = key.public_key();
         // Just verify we can get the public key
         assert_eq!(public.algorithm(), Algorithm::Ed25519);
+    }
+
+    fn tmp_path(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "starla-kh-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_verify_matches_on_blob_across_algorithm_names() {
+        let path = tmp_path("xalgo");
+        let kh = KnownHosts::load(&path);
+
+        let priv_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let pub_key = priv_key.public_key();
+        let blob = pub_key.public_key_base64();
+
+        kh.hosts
+            .lock()
+            .await
+            .insert("atlas.example.com:443".into(), format!("ssh-rsa {}", blob));
+
+        let ok = kh.verify("atlas.example.com", 443, pub_key).await.unwrap();
+        assert!(ok, "blob match should win over algorithm-prefix difference");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_verify_rejects_different_blob() {
+        let path = tmp_path("mitm");
+        let kh = KnownHosts::load(&path);
+
+        let pinned = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let attacker = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+
+        kh.hosts.lock().await.insert(
+            "atlas.example.com:443".into(),
+            format!("ssh-ed25519 {}", pinned.public_key().public_key_base64()),
+        );
+
+        let ok = kh
+            .verify("atlas.example.com", 443, attacker.public_key())
+            .await
+            .unwrap();
+        assert!(!ok, "verify must reject a different key blob");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_verify_tofu_on_first_sight() {
+        let path = tmp_path("tofu");
+        let kh = KnownHosts::load(&path);
+
+        let priv_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let ok = kh
+            .verify("atlas.example.com", 443, priv_key.public_key())
+            .await
+            .unwrap();
+        assert!(ok, "first sight should TOFU-trust the key");
+
+        let ok = kh
+            .verify("atlas.example.com", 443, priv_key.public_key())
+            .await
+            .unwrap();
+        assert!(ok, "subsequent verifications with the same key must match");
+
+        let _ = std::fs::remove_file(&path);
     }
 }
