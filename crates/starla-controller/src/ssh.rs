@@ -246,13 +246,8 @@ impl KnownHosts {
         let mut hosts = self.hosts.lock().await;
 
         if let Some(saved) = hosts.get(&host_port) {
-            // Compare on the public-key blob, not the algorithm-name prefix.
-            // RFC 8332 reuses the ssh-rsa public-key wire format for the
-            // rsa-sha2-256 and rsa-sha2-512 signature algorithms, so the same
-            // RSA host key can be presented under any of those three algorithm
-            // names depending on what the SSH library negotiates. Comparing
-            // only the blob keeps pre-existing known_hosts entries valid
-            // across russh upgrades that change signature-hash negotiation.
+            // Match on key blob only: RFC 8332 reuses the ssh-rsa blob for
+            // rsa-sha2-{256,512}.
             let saved_blob = saved.split_whitespace().nth(1).unwrap_or("");
             if saved_blob == key_b64 {
                 debug!("Host key for {} matches known key", host_port);
@@ -1152,11 +1147,6 @@ mod tests {
         ))
     }
 
-    // Regression: russh 0.61's signature-hash negotiation can present the
-    // same RSA host key under a different algorithm name (e.g. rsa-sha2-256
-    // instead of ssh-rsa). The pinned blob is identical — RFC 8332 reuses
-    // the ssh-rsa public-key wire format for all three signature names —
-    // and verify must accept it.
     #[tokio::test]
     async fn test_verify_matches_on_blob_across_algorithm_names() {
         let path = tmp_path("xalgo");
@@ -1166,20 +1156,13 @@ mod tests {
         let pub_key = priv_key.public_key();
         let blob = pub_key.public_key_base64();
 
-        // Pin under a deliberately-different algorithm name to emulate the
-        // cross-library-version case where the stored entry's algo prefix
-        // no longer matches what the current russh negotiates.
         kh.hosts
             .lock()
             .await
             .insert("atlas.example.com:443".into(), format!("ssh-rsa {}", blob));
 
         let ok = kh.verify("atlas.example.com", 443, pub_key).await.unwrap();
-        assert!(
-            ok,
-            "verify should match when the key blob is identical even if the saved algorithm \
-             prefix differs"
-        );
+        assert!(ok, "blob match should win over algorithm-prefix difference");
 
         let _ = std::fs::remove_file(&path);
     }
@@ -1218,7 +1201,6 @@ mod tests {
             .unwrap();
         assert!(ok, "first sight should TOFU-trust the key");
 
-        // Verifying again with the same key must continue to match.
         let ok = kh
             .verify("atlas.example.com", 443, priv_key.public_key())
             .await
