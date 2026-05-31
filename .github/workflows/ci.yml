@@ -1,16 +1,25 @@
-name: CI
+name: Nix flake check
 
 on:
   push:
     branches: [main]
   pull_request:
+    paths-ignore:
+      - 'doc/**'
+      - '**/*.md'
+      - 'README.md'
+      - '.github/dependabot.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@v22
       - uses: cachix/cachix-action@v17
         with:
           name: ananthb
