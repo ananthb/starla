@@ -9,7 +9,8 @@ use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 
 /// Embedded tray icon (star with signal arcs, RGBA PNG).
-const TRAY_ICON_PNG: &[u8] = include_bytes!("../../../assets/tray.png");
+/// Kept inside the crate so `cargo publish`'s packaged tarball can find it.
+const TRAY_ICON_PNG: &[u8] = include_bytes!("../tray.png");
 
 /// Tint the embedded icon's opaque pixels with the given RGB color, preserving
 /// alpha.
