@@ -19,6 +19,6 @@ pub use ssh::{
     InitResponse, KnownHosts, ProbeInitInfo, SshConfig, SshConnection, TelnetState,
 };
 pub use telnet::{
-    DnsSpec, HttpSpec, NtpSpec, PingSpec, ScheduleSpec, TelnetCommand, TelnetServer, TlsSpec,
-    TracerouteSpec,
+    DnsSpec, HostTelemetryKind, HostTelemetrySpec, HttpSpec, NtpSpec, PingSpec, ScheduleSpec,
+    TelnetCommand, TelnetServer, TlsSpec, TracerouteSpec,
 };

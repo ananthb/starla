@@ -146,8 +146,27 @@ Probe 1015186 (hostname) login: </code></div></pre>
       <h3>JSON</h3>
       <pre><div class="pre-head"><span class="lang">json</span><span>direct command</span></div><div class="pre-body"><code>{"type":"ping","msm_id":1001,"target":"8.8.8.8","af":4,"packets":3}</code></div></pre>
 
+      <h3>Host-telemetry commands</h3>
+      <p>The controller also schedules small applets that report the probe's runtime environment rather than running measurements. starla emits matching <code>RESULT</code> JSON so the RIPE backend sees the same shape an embedded probe would.</p>
+      <table>
+        <thead><tr><th>Command</th><th>id</th><th>What it reports</th></tr></thead>
+        <tbody>
+          <tr><td><code>buddyinfo</code></td><td>9001</td><td><code>/proc/buddyinfo</code> block counts, derived <code>freemem</code> KB, and <code>uptime</code>. The official applet self-reboots on low memory if <code>LOWMEM_REBOOT</code> is set; starla never reboots — the host's memory manager owns that decision.</td></tr>
+          <tr><td><code>rptaddrs</code></td><td>9104 (from <code>-A</code>)</td><td><code>inet-addresses</code>, <code>inet-routes</code>, <code>inet6-addresses</code>, <code>inet6-routes</code>, and <code>dns</code> resolvers, derived from <code>/proc/net/{route,if_inet6,ipv6_route}</code> and <code>/etc/resolv.conf</code>. Cached: re-emits only when state changes or after 1 hour, matching the C applet.</td></tr>
+        </tbody>
+      </table>
+
       <h3>Ignored commands</h3>
-      <p><code>CRONTAB</code>, <code>httppost</code>, <code>condmv</code>, <code>rptaddrs</code>, <code>buddyinfo</code>, <code>conntrack</code>, <code>dfrm</code>: internal Atlas utilities starla doesn't need.</p>
+      <p>Four CRONLINE commands are accepted but produce no output. Each is parsed deliberately (not as <code>Unknown</code>) so the absence of a reply is intentional:</p>
+      <table>
+        <thead><tr><th>Command</th><th>What the embedded probe does with it</th><th>Why starla ignores it</th></tr></thead>
+        <tbody>
+          <tr><td><code>CRONTAB</code></td><td>Names which on-disk cron directory the following CRONLINEs belong to.</td><td>starla doesn't persist schedules to a filesystem cron layout; jobs live in memory keyed by <code>msm_id</code>.</td></tr>
+          <tr><td><code>httppost</code></td><td>POSTs queued result files to the RIPE backend over the SSH tunnel.</td><td>starla uploads natively from <code>starla-results::uploader</code>; this CRONLINE is a redundant trigger.</td></tr>
+          <tr><td><code>condmv</code> / <code>dfrm</code></td><td>Rotates result files between <code>data/new/ → data/out/ → data/storage/</code> and clears stale spool when disk is low.</td><td>starla queues results in a bounded in-memory queue; no on-disk spool to manage.</td></tr>
+          <tr><td><code>conntrack</code></td><td>Reports kernel <code>nf_conntrack</code> table fullness (self-watchdog for the probe's tiny kernel).</td><td>The applet isn't present in our vendored reference busybox tree at <code>reference/probe-busybox/</code>, so the canonical <code>RESULT</code> format is unknown. Held rather than guessed; revisit if a reference impl surfaces.</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <section id="measure">
