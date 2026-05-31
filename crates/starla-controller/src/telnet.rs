@@ -25,6 +25,9 @@ pub enum TelnetCommand {
     Tls(TlsSpec),
     /// NTP measurement
     Ntp(NtpSpec),
+    /// Schedule a host-telemetry report (buddyinfo / rptaddrs).
+    /// Not a measurement — produces a synthesized RESULT line each interval.
+    HostTelemetry(HostTelemetrySpec),
     /// Status query
     Status,
     /// Stop a running measurement
@@ -34,6 +37,27 @@ pub enum TelnetCommand {
     Ignored(String),
     /// Unknown command
     Unknown(String),
+}
+
+/// Which host-telemetry reporter the controller is asking us to run.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum HostTelemetryKind {
+    Buddyinfo,
+    Rptaddrs,
+}
+
+/// Host-telemetry scheduling spec parsed from a CRONLINE.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostTelemetrySpec {
+    pub kind: HostTelemetryKind,
+    /// Interval between runs (0 = one-shot).
+    pub interval: u64,
+    /// Controller-assigned measurement id (from `-A`).
+    /// buddyinfo's official applet hardcodes 9001 so this is optional;
+    /// rptaddrs is invoked as `-A 9104 ...`.
+    pub msm_id: Option<u32>,
+    /// buddyinfo's lowmem threshold (KB) — recorded but not acted on.
+    pub lowmem: Option<u32>,
 }
 
 /// Common scheduling fields for recurring measurements
@@ -562,16 +586,82 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
         "evhttpget" => parse_evhttpget(measurement_args, interval, end_time, spread),
         "evsslgetcert" => parse_evsslgetcert(measurement_args, interval, end_time, spread),
         "evntp" => parse_evntp(measurement_args, interval, end_time, spread),
-        // Internal Atlas commands - not measurements, ignore silently
-        "httppost" | "condmv" | "rptaddrs" | "buddyinfo" | "conntrack" | "dfrm" => {
-            trace!("Ignoring internal Atlas command: {}", measurement_cmd);
+
+        // Host-telemetry reporters. Match the official probe's RESULT JSON
+        // so the RIPE backend sees no difference.
+        "buddyinfo" => parse_buddyinfo(measurement_args, interval),
+        "rptaddrs" => parse_rptaddrs(measurement_args, interval),
+
+        // Result-upload transport. starla uploads natively via
+        // starla-results::uploader, so this CRONLINE is redundant.
+        "httppost" => {
+            trace!("Ignoring httppost CRONLINE (uploader handles uploads natively)");
             TelnetCommand::Ignored(cmd.to_string())
         }
+
+        // Hardware-probe spool plumbing: rotates result files between
+        // data/new/ → data/out/ → data/storage/ and clears stale spool.
+        // starla queues results in memory, so the spool model doesn't apply.
+        "condmv" | "dfrm" => {
+            trace!(
+                "Ignoring {} CRONLINE (no on-disk spool to manage)",
+                measurement_cmd
+            );
+            TelnetCommand::Ignored(cmd.to_string())
+        }
+
+        // conntrack: the controller occasionally schedules a 'conntrack'
+        // applet, but it's not in the reference busybox tree we vendored
+        // (reference/probe-busybox/), so the RESULT id and field names are
+        // unknown. Stay silent rather than guess — see doc/protocol.html.
+        "conntrack" => {
+            trace!("Ignoring conntrack CRONLINE (no reference impl available)");
+            TelnetCommand::Ignored(cmd.to_string())
+        }
+
         _ => {
             warn!("Unknown measurement command: {}", measurement_cmd);
             TelnetCommand::Unknown(cmd.to_string())
         }
     }
+}
+
+/// Parse a `buddyinfo [lowmem_kb] [logfile]` CRONLINE.
+/// The applet hardcodes id=9001 and accepts a single positional `lowmem`.
+fn parse_buddyinfo(args: &[String], interval: u64) -> TelnetCommand {
+    let lowmem = args.first().and_then(|s| s.parse::<u32>().ok());
+    TelnetCommand::HostTelemetry(HostTelemetrySpec {
+        kind: HostTelemetryKind::Buddyinfo,
+        interval,
+        msm_id: None,
+        lowmem,
+    })
+}
+
+/// Parse `rptaddrs [-A msm_id] [-c cache] [-O output]` CRONLINE.
+/// Per reference/probe-busybox/networking/rptaddrs.c: only `-A`, `-c`, `-O`
+/// are accepted. We need `-A` (the result id); other paths are ignored.
+fn parse_rptaddrs(args: &[String], interval: u64) -> TelnetCommand {
+    let mut msm_id: Option<u32> = None;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "-A" => {
+                msm_id = it.next().and_then(|s| s.parse().ok());
+            }
+            "-c" | "-O" => {
+                // Path arg — drop next token; starla doesn't use the spool.
+                let _ = it.next();
+            }
+            _ => {}
+        }
+    }
+    TelnetCommand::HostTelemetry(HostTelemetrySpec {
+        kind: HostTelemetryKind::Rptaddrs,
+        interval,
+        msm_id,
+        lowmem: None,
+    })
 }
 
 /// Tokenize a CRONLINE command, handling quoted strings
@@ -1783,5 +1873,57 @@ mod tests {
             }
             _ => panic!("Expected Ntp command, got {:?}", cmd),
         }
+    }
+
+    #[test]
+    fn test_parse_cronline_buddyinfo() {
+        let cmd = parse_command("CRONLINE 600 0 0 UNIFORM 5 buddyinfo 2048");
+        match cmd {
+            TelnetCommand::HostTelemetry(spec) => {
+                assert_eq!(spec.kind, HostTelemetryKind::Buddyinfo);
+                assert_eq!(spec.interval, 600);
+                assert_eq!(spec.lowmem, Some(2048));
+                assert_eq!(spec.msm_id, None);
+            }
+            _ => panic!("Expected HostTelemetry/Buddyinfo, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_parse_cronline_rptaddrs() {
+        let cmd = parse_command(
+            r#"CRONLINE 14400 0 0 UNIFORM 30 rptaddrs -A 9104 -c /home/atlas/data/new/v6addr.vol -O /home/atlas/data/new/v6addr.txt"#,
+        );
+        match cmd {
+            TelnetCommand::HostTelemetry(spec) => {
+                assert_eq!(spec.kind, HostTelemetryKind::Rptaddrs);
+                assert_eq!(spec.interval, 14400);
+                assert_eq!(spec.msm_id, Some(9104));
+            }
+            _ => panic!("Expected HostTelemetry/Rptaddrs, got {:?}", cmd),
+        }
+    }
+
+    #[test]
+    fn test_parse_cronline_httppost_ignored() {
+        // httppost shouldn't be dispatched — we upload natively.
+        let cmd = parse_command(
+            "CRONLINE 60 0 0 UNIFORM 5 httppost -O /home/atlas/data/out/foo --post-file foo",
+        );
+        assert!(matches!(cmd, TelnetCommand::Ignored(_)));
+    }
+
+    #[test]
+    fn test_parse_cronline_condmv_ignored() {
+        let cmd = parse_command(
+            "CRONLINE 60 0 0 UNIFORM 5 condmv /home/atlas/data/new/foo /home/atlas/data/out/foo",
+        );
+        assert!(matches!(cmd, TelnetCommand::Ignored(_)));
+    }
+
+    #[test]
+    fn test_parse_cronline_conntrack_ignored() {
+        let cmd = parse_command("CRONLINE 600 0 0 UNIFORM 5 conntrack");
+        assert!(matches!(cmd, TelnetCommand::Ignored(_)));
     }
 }
