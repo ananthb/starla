@@ -7,12 +7,14 @@
 //! - RIPE Atlas result format wrapping
 
 pub mod format;
+pub mod host_telemetry;
 mod queue;
 mod system_status;
 mod time_sync;
 mod uploader;
 
 pub use format::{AtlasResult, ResultBundle};
+pub use host_telemetry::{HostTelemetry, HostTelemetryKind};
 pub use queue::{QueueStats, QueuedResult, ResultQueue};
 pub use time_sync::TimeSyncTracker;
 pub use uploader::{ResultUploader, UploadStream, UploadTransport, UploaderConfig};
@@ -58,6 +60,7 @@ pub struct ResultHandler {
     config: ResultHandlerConfig,
     time_sync: Arc<TimeSyncTracker>,
     session_id: Arc<Mutex<Option<String>>>,
+    host_telemetry: Arc<HostTelemetry>,
     metrics: starla_metrics::MetricsRegistry,
 }
 
@@ -70,7 +73,13 @@ impl ResultHandler {
         metrics: starla_metrics::MetricsRegistry,
     ) -> Self {
         let queue = ResultQueue::new(config.max_queue_size);
-        let uploader = ResultUploader::new(transport, uploader_config, metrics.clone());
+        let host_telemetry = HostTelemetry::new();
+        let uploader = ResultUploader::new(
+            transport,
+            uploader_config,
+            metrics.clone(),
+            Arc::clone(&host_telemetry),
+        );
 
         Self {
             queue: Arc::new(Mutex::new(queue)),
@@ -78,8 +87,16 @@ impl ResultHandler {
             config,
             time_sync: Arc::new(TimeSyncTracker::new()),
             session_id: Arc::new(Mutex::new(None)),
+            host_telemetry,
             metrics,
         }
+    }
+
+    /// Get a handle to the host-telemetry registry.
+    /// Returned `Arc` is shared with the uploader; callers schedule reports
+    /// via [`HostTelemetry::schedule_buddyinfo`] etc.
+    pub fn host_telemetry(&self) -> Arc<HostTelemetry> {
+        Arc::clone(&self.host_telemetry)
     }
 
     /// Set the upload endpoint path (call after controller connection)

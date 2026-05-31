@@ -316,6 +316,7 @@ async fn main() -> Result<()> {
     let metrics_cmd = metrics.clone();
     let scheduler_tx_cmd = scheduler_tx.clone();
     let scheduler_cancel_cmd = scheduler_cancel.clone();
+    let host_telemetry_cmd = result_handler.host_telemetry();
     tokio::spawn(async move {
         // Track scheduled measurements for batched logging
         let mut scheduled_counts: std::collections::HashMap<&'static str, u32> =
@@ -492,6 +493,23 @@ async fn main() -> Result<()> {
                         packets: spec.packets,
                     })
                 ),
+                TelnetCommand::HostTelemetry(spec) => {
+                    debug!(?spec.kind, interval = spec.interval, "Scheduling host telemetry");
+                    match spec.kind {
+                        starla_controller::HostTelemetryKind::Buddyinfo => {
+                            host_telemetry_cmd
+                                .schedule_buddyinfo(spec.interval, spec.lowmem, spec.msm_id)
+                                .await;
+                        }
+                        starla_controller::HostTelemetryKind::Rptaddrs => {
+                            let msm_id = spec.msm_id.unwrap_or(9104);
+                            host_telemetry_cmd
+                                .schedule_rptaddrs(spec.interval, msm_id)
+                                .await;
+                        }
+                    }
+                    Ok(())
+                }
                 TelnetCommand::Status => {
                     debug!("Status request received");
                     Ok(())
