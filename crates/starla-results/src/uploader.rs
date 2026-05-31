@@ -4,10 +4,12 @@
 //! In production this is an SSH channel; for testing it can be anything.
 
 use super::format::AtlasResult;
+use super::host_telemetry::HostTelemetry;
 use super::queue::QueuedResult;
 use super::system_status;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, trace, warn};
@@ -50,6 +52,8 @@ pub struct ResultUploader {
     config: UploaderConfig,
     /// Process start time (unix timestamp) for uptime reporting
     start_time: u64,
+    /// Host telemetry registry; pending lines are drained per upload batch.
+    host_telemetry: Arc<HostTelemetry>,
     metrics: starla_metrics::MetricsRegistry,
 }
 
@@ -59,6 +63,7 @@ impl ResultUploader {
         transport: Box<dyn UploadTransport>,
         config: UploaderConfig,
         metrics: starla_metrics::MetricsRegistry,
+        host_telemetry: Arc<HostTelemetry>,
     ) -> Self {
         let start_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -68,6 +73,7 @@ impl ResultUploader {
             transport,
             config,
             start_time,
+            host_telemetry,
             metrics,
         }
     }
@@ -120,6 +126,12 @@ impl ResultUploader {
         // The controller expects these alongside measurement results
         let status = system_status::system_status_lines(lts, self.start_time);
         body.extend_from_slice(status.as_bytes());
+
+        // Host telemetry RESULT lines (buddyinfo, rptaddrs) accumulated since
+        // the last upload. Pushed by HostTelemetry's periodic reporters.
+        for line in self.host_telemetry.drain().await {
+            body.extend_from_slice(line.as_bytes());
+        }
 
         for queued in results {
             let atlas_result =
