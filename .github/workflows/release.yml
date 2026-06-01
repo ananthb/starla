@@ -336,8 +336,3 @@ jobs:
               sleep 605
             fi
           done
-
-      - name: Publish starla-tray
-        run: nix develop -c cargo publish -p starla-tray
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
