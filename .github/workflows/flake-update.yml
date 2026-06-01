@@ -29,7 +29,7 @@ jobs:
       - name: Verify flake still checks
         run: nix flake check
 
-      - uses: peter-evans/create-pull-request@v7
+      - uses: peter-evans/create-pull-request@v8
         with:
           # Reuse the existing commit nix flake update produced.
           branch: chore/flake-update
