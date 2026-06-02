@@ -945,8 +945,14 @@ async fn main() -> Result<()> {
                 result_handler.set_session_id(session_id.clone()).await;
 
                 // Step 4: Connection loop with automatic reconnection
-                let mut reconnect_delay = Duration::from_secs(5);
+                let initial_reconnect_delay = Duration::from_secs(5);
                 let max_reconnect_delay = Duration::from_secs(300);
+                // Successful connect() does not imply a healthy session: a
+                // session can drop within seconds of being established. Only
+                // reset backoff after the session has stayed up this long,
+                // otherwise a flapping link produces a tight reconnect storm.
+                let stable_session_threshold = Duration::from_secs(60);
+                let mut reconnect_delay = initial_reconnect_delay;
                 let mut connection_attempt = 0u32;
                 let mut upload_loop_started = false;
 
@@ -973,11 +979,7 @@ async fn main() -> Result<()> {
                     )
                     .await
                     {
-                        Ok(ssh) => {
-                            // Reset delay on successful connection
-                            reconnect_delay = Duration::from_secs(5);
-                            ssh
-                        }
+                        Ok(ssh) => ssh,
                         Err(e) => {
                             error!("Failed to connect for KEEP: {}", e);
                             warn!("Retrying connection in {:?}...", reconnect_delay);
@@ -1018,6 +1020,7 @@ async fn main() -> Result<()> {
                     );
 
                     info!("Controller connection established successfully");
+                    let session_started_at = std::time::Instant::now();
                     probe_status.lock().await.connected = true;
                     #[cfg(feature = "metrics-export")]
                     metrics.set_connected(true);
@@ -1076,6 +1079,17 @@ async fn main() -> Result<()> {
 
                     if !should_reconnect {
                         break 'connection_loop;
+                    }
+
+                    let session_uptime = session_started_at.elapsed();
+                    if session_uptime >= stable_session_threshold {
+                        reconnect_delay = initial_reconnect_delay;
+                    } else {
+                        reconnect_delay = std::cmp::min(reconnect_delay * 2, max_reconnect_delay);
+                        debug!(
+                            "Session lasted only {:?} (< {:?}); escalating backoff to {:?}",
+                            session_uptime, stable_session_threshold, reconnect_delay
+                        );
                     }
 
                     // Wait before reconnecting
