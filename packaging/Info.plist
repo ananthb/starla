@@ -11,9 +11,9 @@
     <key>CFBundleDisplayName</key>
     <string>Starla Tray</string>
     <key>CFBundleVersion</key>
-    <string>0.3.0</string>
+    <string>0.6.3</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.0</string>
+    <string>0.6.3</string>
     <key>CFBundleIconFile</key>
     <string>icon</string>
     <key>CFBundlePackageType</key>
