@@ -17,6 +17,7 @@ tray-icon = "0.24"
 winit = "0.30"
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+chrono = { workspace = true }
 open = "5"
 arboard = "3"
 png = "0.18"

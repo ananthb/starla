@@ -561,7 +561,11 @@ async fn main() -> Result<()> {
             uptime_secs: 0,
             measurements: std::collections::HashMap::new(),
             queue_depth: 0,
-            public_key: None,
+            public_key: std::fs::read_to_string(starla_common::probe_pubkey_path())
+                .ok()
+                .map(|s| s.trim().to_string()),
+            last_connection_error: None,
+            pause: starla_common::read_pause_state(),
         },
     ));
     if config.network.status_socket {
@@ -573,6 +577,28 @@ async fn main() -> Result<()> {
         tokio::spawn(async move {
             if let Err(e) = run_status_socket(status, start_time).await {
                 debug!("Status socket ended: {}", e);
+            }
+        });
+
+        // Mirror the on-disk pause file into the in-memory status so
+        // the tray's read_status() shows current state without having
+        // to also read the file itself.
+        let status = probe_status.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(5));
+            loop {
+                tick.tick().await;
+                let current = starla_common::read_pause_state().and_then(|s| {
+                    if s.is_active(chrono::Utc::now()) {
+                        Some(s)
+                    } else {
+                        None
+                    }
+                });
+                let mut s = status.lock().await;
+                if s.pause != current {
+                    s.pause = current;
+                }
             }
         });
     }
@@ -702,6 +728,7 @@ async fn main() -> Result<()> {
             }
             Err(e) => {
                 debug!("Failed to connect to registration server: {}", e);
+                probe_status.lock().await.last_connection_error = Some(e.to_string());
                 if !printed_key {
                     let pubkey_path = starla_common::probe_pubkey_path();
                     if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
@@ -731,12 +758,16 @@ async fn main() -> Result<()> {
             Ok(InitResponse::Controller(info)) => {
                 info!("Got controller assignment: {}:{}", info.host, info.port);
 
-                if info.probe_id != 0 {
-                    probe_id = starla_common::ProbeId(info.probe_id);
-                    info!("Probe ID: {}", info.probe_id);
-                    probe_status.lock().await.probe_id = info.probe_id;
+                {
+                    let mut s = probe_status.lock().await;
+                    if info.probe_id != 0 {
+                        probe_id = starla_common::ProbeId(info.probe_id);
+                        info!("Probe ID: {}", info.probe_id);
+                        s.probe_id = info.probe_id;
+                    }
+                    s.controller = Some(format!("{}:{}", info.host, info.port));
+                    s.last_connection_error = None;
                 }
-                probe_status.lock().await.controller = Some(format!("{}:{}", info.host, info.port));
 
                 break info;
             }
@@ -751,6 +782,10 @@ async fn main() -> Result<()> {
                     info!("Retrying registration until probe is approved...");
                     printed_key = true;
                 }
+                probe_status.lock().await.last_connection_error = Some(
+                    "Probe key not yet approved by RIPE Atlas — register the public key above"
+                        .to_string(),
+                );
                 debug!("Waiting for registration approval...");
             }
             Ok(InitResponse::ControllerReady { .. }) => {
@@ -791,6 +826,12 @@ async fn main() -> Result<()> {
     {
         Ok(ctrl_ssh) => {
             info!("Connected to controller");
+
+            {
+                let mut s = probe_status.lock().await;
+                s.connected = true;
+                s.last_connection_error = None;
+            }
 
             // Step 3: Controller INIT - get REMOTE_PORT (may need to retry on
             // WAIT/OK)
@@ -1047,6 +1088,9 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             error!("Failed to connect to controller: {}", e);
+            let mut s = probe_status.lock().await;
+            s.connected = false;
+            s.last_connection_error = Some(e.to_string());
         }
     }
 
