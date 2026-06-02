@@ -21,3 +21,6 @@ chrono = { workspace = true }
 open = "5"
 arboard = "3"
 png = "0.18"
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }

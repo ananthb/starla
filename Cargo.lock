@@ -5521,6 +5521,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "chrono",
+ "libc",
  "open",
  "png",
  "serde_json",

@@ -1,12 +1,15 @@
 //! Starla tray app: system tray icon showing probe status
 
+mod daemon;
+
 use anyhow::Result;
 use chrono::{DateTime, Local, Utc};
 use starla_common::pause::PauseState;
 use starla_common::status::ProbeStatus;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
-use tray_icon::{Icon, TrayIconBuilder};
+use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 
@@ -127,11 +130,21 @@ struct Ids {
     open_atlas: MenuId,
     quit: MenuId,
     resume: MenuId,
+    start_daemon: MenuId,
+    restart_daemon: MenuId,
+    stop_daemon: MenuId,
 }
 
 struct App {
     _icon: Icon,
     status: Arc<Mutex<Option<ProbeStatus>>>,
+    /// Bumped by the background refresh thread and by menu event handlers
+    /// whenever the cached status changes. The main loop notices a bump
+    /// and rebuilds the menu — without this the menu is frozen to whatever
+    /// the status was when the tray launched.
+    status_version: Arc<AtomicU64>,
+    last_built_version: u64,
+    tray: Option<TrayIcon>,
     ids: Ids,
 }
 
@@ -187,8 +200,32 @@ impl App {
                 }
                 let _ = menu.append(&submenu);
             }
+
+            if daemon::SUPPORTED {
+                let _ = menu.append(&PredefinedMenuItem::separator());
+                let _ = menu.append(&MenuItem::with_id(
+                    self.ids.restart_daemon.clone(),
+                    "Restart probe",
+                    true,
+                    None,
+                ));
+                let _ = menu.append(&MenuItem::with_id(
+                    self.ids.stop_daemon.clone(),
+                    "Stop probe",
+                    true,
+                    None,
+                ));
+            }
         } else {
             let _ = menu.append(&MenuItem::new("Probe not running", false, None));
+            if daemon::SUPPORTED {
+                let _ = menu.append(&MenuItem::with_id(
+                    self.ids.start_daemon.clone(),
+                    "Start probe",
+                    true,
+                    None,
+                ));
+            }
         }
 
         let _ = menu.append(&PredefinedMenuItem::separator());
@@ -252,6 +289,22 @@ impl ApplicationHandler for App {
             } else if event.id == self.ids.resume {
                 let _ = starla_common::write_pause_state(None);
                 refresh_status_from_disk(&self.status);
+                self.status_version.fetch_add(1, Ordering::Release);
+            } else if event.id == self.ids.start_daemon {
+                if let Err(e) = daemon::start() {
+                    eprintln!("Failed to start probe: {}", e);
+                }
+                self.bump_after_daemon_command();
+            } else if event.id == self.ids.restart_daemon {
+                if let Err(e) = daemon::restart() {
+                    eprintln!("Failed to restart probe: {}", e);
+                }
+                self.bump_after_daemon_command();
+            } else if event.id == self.ids.stop_daemon {
+                if let Err(e) = daemon::stop() {
+                    eprintln!("Failed to stop probe: {}", e);
+                }
+                self.bump_after_daemon_command();
             } else if let Some((_, _, dur)) = pause_options()
                 .into_iter()
                 .find(|(id, _, _)| event.id == *id)
@@ -262,8 +315,35 @@ impl ApplicationHandler for App {
                 };
                 let _ = starla_common::write_pause_state(Some(new_state));
                 refresh_status_from_disk(&self.status);
+                self.status_version.fetch_add(1, Ordering::Release);
             }
         }
+
+        // Rebuild the menu if the cached status has changed since we last
+        // rendered. Without this, the menu only ever reflects what was
+        // true at tray startup.
+        let v = self.status_version.load(Ordering::Acquire);
+        if v != self.last_built_version {
+            self.last_built_version = v;
+            let menu = self.build_menu();
+            if let Some(tray) = self.tray.as_ref() {
+                tray.set_menu(Some(Box::new(menu)));
+            }
+        }
+    }
+}
+
+impl App {
+    /// Daemon commands (start/stop/restart) don't update the cached
+    /// status themselves — the socket may take a moment to come up or
+    /// go away. Re-read it now so the menu reflects the new state on
+    /// the next about_to_wait tick, even before the 30s refresh fires.
+    fn bump_after_daemon_command(&self) {
+        let new_status = read_status();
+        let mut guard = self.status.lock().unwrap();
+        *guard = new_status;
+        drop(guard);
+        self.status_version.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -289,17 +369,24 @@ fn main() -> Result<()> {
     let icon = load_icon();
 
     let status: Arc<Mutex<Option<ProbeStatus>>> = Arc::new(Mutex::new(read_status()));
+    let status_version = Arc::new(AtomicU64::new(1));
 
     let ids = Ids {
         copy_key: MenuId::new("copy_key"),
         open_atlas: MenuId::new("open_atlas"),
         quit: MenuId::new("quit"),
         resume: MenuId::new("resume"),
+        start_daemon: MenuId::new("start_daemon"),
+        restart_daemon: MenuId::new("restart_daemon"),
+        stop_daemon: MenuId::new("stop_daemon"),
     };
 
     let mut app = App {
         _icon: icon.clone(),
         status: status.clone(),
+        status_version: status_version.clone(),
+        last_built_version: 1,
+        tray: None,
         ids,
     };
 
@@ -325,19 +412,42 @@ fn main() -> Result<()> {
     #[cfg(target_os = "macos")]
     let tray_builder = tray_builder.with_icon_as_template(true);
 
-    let _tray = tray_builder.build()?;
+    app.tray = Some(tray_builder.build()?);
 
-    // Background thread: refresh status every 30s
+    // Background thread: refresh status every 30s.
+    // Bump the version on every refresh so the main loop knows to
+    // re-render the menu; this is what lets the menu recover after the
+    // daemon comes back from a restart or crash.
     let bg_status = status.clone();
+    let bg_version = status_version.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(30));
-        if let Some(new_status) = read_status() {
-            *bg_status.lock().unwrap() = Some(new_status);
-        } else {
-            *bg_status.lock().unwrap() = None;
+        let new_status = read_status();
+        let mut guard = bg_status.lock().unwrap();
+        let changed = match (&*guard, &new_status) {
+            (None, None) => false,
+            (Some(a), Some(b)) => !status_equivalent(a, b),
+            _ => true,
+        };
+        *guard = new_status;
+        drop(guard);
+        if changed {
+            bg_version.fetch_add(1, Ordering::Release);
         }
     });
 
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+/// Compare two statuses for "would render the same menu". We deliberately
+/// ignore uptime/queue/measurement deltas because rebuilding the menu on
+/// every 30s tick just to bump an uptime counter is wasteful and would
+/// disrupt an open menu on macOS.
+fn status_equivalent(a: &ProbeStatus, b: &ProbeStatus) -> bool {
+    a.probe_id == b.probe_id
+        && a.connected == b.connected
+        && a.pause == b.pause
+        && a.last_connection_error == b.last_connection_error
+        && a.public_key == b.public_key
 }
