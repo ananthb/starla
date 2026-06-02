@@ -5358,6 +5358,7 @@ name = "starla"
 version = "0.6.3"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "rustls",
  "serde_json",
@@ -5519,6 +5520,7 @@ version = "0.6.3"
 dependencies = [
  "anyhow",
  "arboard",
+ "chrono",
  "open",
  "png",
  "serde_json",

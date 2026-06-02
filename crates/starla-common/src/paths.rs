@@ -199,6 +199,11 @@ pub fn probe_id_path() -> PathBuf {
     state_dir().join("probe_id")
 }
 
+/// Path of the file recording the active pause-until state.
+pub fn paused_until_path() -> PathBuf {
+    state_dir().join("paused_until")
+}
+
 /// Read the probe ID from the state directory
 ///
 /// Returns None if the file doesn't exist or can't be parsed

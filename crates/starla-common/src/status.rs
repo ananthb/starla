@@ -2,6 +2,7 @@
 //!
 //! Serialized as JSON over a Unix domain socket (or named pipe on Windows).
 
+use crate::pause::PauseState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -24,4 +25,12 @@ pub struct ProbeStatus {
     /// SSH public key (for registration)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_key: Option<String>,
+    /// Most recent controller/registration error. Lets the tray show
+    /// *why* the probe is disconnected instead of just a red dot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_connection_error: Option<String>,
+    /// Active pause (suppresses measurement dispatch). Tray writes the
+    /// underlying file; probe reads it back on every scheduler tick.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pause: Option<PauseState>,
 }

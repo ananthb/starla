@@ -238,6 +238,15 @@ impl Scheduler {
 
     /// Check and execute due tasks
     async fn check_due_tasks(&self) {
+        if let Some(state) = starla_common::read_pause_state() {
+            if state.is_active(chrono::Utc::now()) {
+                return;
+            }
+            // Stale pause file (timestamp elapsed) — clear it so the
+            // tray's status panel stops claiming we're still paused.
+            let _ = starla_common::write_pause_state(None);
+        }
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
