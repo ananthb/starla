@@ -12,9 +12,20 @@
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # nix-appimage bundles the full closure into the squashfs and mounts
+    # /nix/store via user namespaces at runtime, so the binary's ELF
+    # interpreter and RUNPATH resolve on any modern Linux box. Replaces
+    # the previous hand-rolled AppRun, which baked host /nix/store paths
+    # into LD_LIBRARY_PATH while leaving PT_INTERP pointing at /nix/store
+    # — the kernel couldn't exec it off the build host.
+    nix-appimage = {
+      url = "github:ralismark/nix-appimage";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.flake-utils.follows = "flake-utils";
+    };
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils, git-hooks }:
+  outputs = { self, nixpkgs, rust-overlay, flake-utils, git-hooks, nix-appimage }:
     flake-utils.lib.eachDefaultSystem
       (system:
         let
@@ -293,85 +304,11 @@
                 tar -czvf $out -C . starla
               '';
 
-            appimage =
-              let
-                tray = self.packages.${system}.starla-tray;
-                arch = if system == "x86_64-linux" then "x86_64" else "aarch64";
-
-                appimageRuntime = pkgs.fetchurl (if system == "x86_64-linux" then {
-                  url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64";
-                  hash = "sha256-L8qLRDySUQ8Ug6iD9gBhrQm0a5eLJjHIB82HOkfsJg0=";
-                } else {
-                  url = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-aarch64";
-                  hash = "sha256-AMvfz5F8xsD/bTNH1Z4Moff0Wm3xpCig1tinhmTYdEQ=";
-                });
-
-                libDeps = with pkgs; [
-                  glib
-                  gtk3
-                  libayatana-appindicator
-                  pango
-                  cairo
-                  gdk-pixbuf
-                  atk
-                  harfbuzz
-                  fontconfig
-                  freetype
-                  xorg.libX11
-                  xorg.libXcursor
-                  xorg.libXrandr
-                  xorg.libXi
-                  xorg.libXext
-                  xorg.libXrender
-                  xorg.libXfixes
-                  xorg.libXcomposite
-                  xorg.libXdamage
-                  xorg.libxcb
-                  libxkbcommon
-                  wayland
-                  xdotool
-                ];
-              in
-              pkgs.runCommand "starla-tray-${arch}.AppImage"
-                {
-                  nativeBuildInputs = with pkgs; [ squashfsTools patchelf ];
-                } ''
-                mkdir -p AppDir/usr/bin
-                mkdir -p AppDir/usr/lib
-                mkdir -p AppDir/usr/share/applications
-
-                cp ${tray}/bin/starla-tray AppDir/usr/bin/
-                chmod +w AppDir/usr/bin/*
-                patchelf --remove-rpath AppDir/usr/bin/starla-tray
-
-                # Bundle shared libraries so the AppImage is self-contained.
-                for dir in ${pkgs.lib.concatStringsSep " " (map (d: "${d}/lib") libDeps)}; do
-                  if [ -d "$dir" ]; then
-                    for so in "$dir"/*.so "$dir"/*.so.*; do
-                      [ -e "$so" ] || continue
-                      cp -n "$(readlink -f "$so")" "AppDir/usr/lib/$(basename "$so")" 2>/dev/null || true
-                    done
-                  fi
-                done
-
-                cp ${./packaging/starla-tray.desktop} AppDir/starla-tray.desktop
-                cp ${./packaging/starla-tray.desktop} AppDir/usr/share/applications/
-
-                cat > AppDir/AppRun << 'APPRUN'
-                #!/bin/bash
-                set -e
-                SELF=$(readlink -f "$0")
-                APPDIR=''${SELF%/*}
-                export LD_LIBRARY_PATH="''${APPDIR}/usr/lib:''${LD_LIBRARY_PATH}"
-                export GSETTINGS_SCHEMA_DIR="/usr/share/glib-2.0/schemas:''${GSETTINGS_SCHEMA_DIR}"
-                exec "''${APPDIR}/usr/bin/starla-tray" "$@"
-                APPRUN
-                chmod +x AppDir/AppRun
-
-                mksquashfs AppDir appimage.squashfs -root-owned -noappend -comp zstd -quiet -no-progress
-                cat ${appimageRuntime} appimage.squashfs > $out
-                chmod +x $out
-              '';
+            appimage = nix-appimage.lib.${system}.mkAppImage {
+              program = "${self.packages.${system}.starla-tray}/bin/starla-tray";
+              pname = "starla-tray";
+              name = "starla-tray-${if system == "x86_64-linux" then "x86_64" else "aarch64"}.AppImage";
+            };
           } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
             release =
               let
@@ -403,6 +340,21 @@
                       base=$(basename "$dep")
                       install_name_tool -change "$dep" "/usr/lib/$base" "$bin"
                     done
+
+                    # Fail the build if anything else slipped through — a
+                    # /nix/store LC_LOAD_DYLIB or LC_RPATH will make dyld
+                    # abort on user Macs. Catching it here is much cheaper
+                    # than catching it from a bug report.
+                    if otool -L "$bin" | grep -q '/nix/store'; then
+                      echo "ERROR: $bin still references /nix/store dylibs:" >&2
+                      otool -L "$bin" | grep '/nix/store' >&2
+                      exit 1
+                    fi
+                    if otool -l "$bin" | grep -A2 LC_RPATH | grep -q '/nix/store'; then
+                      echo "ERROR: $bin has /nix/store in LC_RPATH:" >&2
+                      otool -l "$bin" | grep -A2 LC_RPATH >&2
+                      exit 1
+                    fi
                   done
 
                   # Include config example and launchd plist
