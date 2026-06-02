@@ -6,17 +6,22 @@
   <string>com.ananthb.starla</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/starla</string>
+    <string>/Applications/Starla Tray.app/Contents/MacOS/starla</string>
+    <string>--config</string>
+    <string>HOME_DIR/.config/starla/config.toml</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>ThrottleInterval</key>
   <integer>10</integer>
   <key>StandardErrorPath</key>
-  <string>/var/log/starla.log</string>
+  <string>HOME_DIR/Library/Logs/starla.log</string>
   <key>StandardOutPath</key>
-  <string>/var/log/starla.log</string>
+  <string>HOME_DIR/Library/Logs/starla.log</string>
 </dict>
 </plist>

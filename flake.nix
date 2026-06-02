@@ -542,14 +542,6 @@
       };
       nixosModules.starla = self.nixosModules.default;
 
-      darwinModules.default = { config, lib, pkgs, ... }: {
-        imports = [ ./nix/darwin-module.nix ];
-        config = lib.mkIf config.services.starla.enable {
-          services.starla.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-        };
-      };
-      darwinModules.starla = self.darwinModules.default;
-
       homeManagerModules.default = { config, lib, pkgs, ... }: {
         imports = [ ./nix/home-module.nix ];
         config = lib.mkIf config.services.starla.enable {

@@ -87,6 +87,17 @@ in
     tray = {
       enable = lib.mkEnableOption "Starla tray icon (desktop only)";
     };
+
+    sshKeyFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        Path to a file containing the SSH private key (OpenSSH PEM format).
+        When set, starla reads the key from this file via the STARLA_SSH_KEY
+        environment variable instead of generating one in the state directory.
+        Use this to inject keys from password-store, sops, etc.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -107,6 +118,8 @@ in
         ExecStart = "${cfg.package}/bin/starla --config %h/.config/starla/config.toml";
         Restart = "on-failure";
         RestartSec = 10;
+      } // lib.optionalAttrs (cfg.sshKeyFile != null) {
+        Environment = [ "STARLA_SSH_KEY=${cfg.sshKeyFile}" ];
       };
 
       Install = {
@@ -165,6 +178,10 @@ in
         ThrottleInterval = 10;
         StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/starla.log";
         StandardOutPath = "${config.home.homeDirectory}/Library/Logs/starla.log";
+      } // lib.optionalAttrs (cfg.sshKeyFile != null) {
+        EnvironmentVariables = {
+          STARLA_SSH_KEY = toString cfg.sshKeyFile;
+        };
       };
     };
 
