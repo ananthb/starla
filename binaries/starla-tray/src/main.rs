@@ -317,15 +317,13 @@ fn main() -> Result<()> {
         })
         .unwrap_or_else(|| "Starla: probe not running".to_string());
 
-    let mut tray_builder = TrayIconBuilder::new()
+    let tray_builder = TrayIconBuilder::new()
         .with_tooltip(&tooltip)
         .with_icon(icon)
         .with_menu(Box::new(app.build_menu()));
 
     #[cfg(target_os = "macos")]
-    {
-        tray_builder = tray_builder.with_icon_as_template(true);
-    }
+    let tray_builder = tray_builder.with_icon_as_template(true);
 
     let _tray = tray_builder.build()?;
 
