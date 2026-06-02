@@ -264,7 +264,6 @@ jobs:
           generate_release_notes: true
 
   crates-io:
-    needs: [linux, macos, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -276,10 +275,6 @@ jobs:
           name: ananthb
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      # crates.io rate-limits new crate publishes at 1 per ~10min per user.
-      # Skip already-published versions so this step is idempotent across
-      # re-runs, and sleep ~10min between each new crate so the limiter
-      # doesn't 429 us mid-batch.
       - name: Publish workspace crates
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
@@ -301,7 +296,7 @@ jobs:
           )
           VER="${VERSION#v}"
 
-          is_published() {
+          version_published() {
             local name=$1
             local code
             code=$(curl -sS -o /dev/null -w '%{http_code}' \
@@ -309,10 +304,18 @@ jobs:
             [[ "$code" == "200" ]]
           }
 
+          crate_exists() {
+            local name=$1
+            local code
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              "https://crates.io/api/v1/crates/${name}")
+            [[ "$code" == "200" ]]
+          }
+
           # Filter out crates whose current version is already on crates.io.
           pending=()
           for crate in "${CRATES[@]}"; do
-            if is_published "$crate"; then
+            if version_published "$crate"; then
               echo "✓ ${crate} ${VER} already published — skipping"
             else
               pending+=("$crate")
@@ -324,15 +327,21 @@ jobs:
             exit 0
           fi
 
+          is_new=()
+          for crate in "${pending[@]}"; do
+            if crate_exists "$crate"; then
+              is_new+=("false")
+            else
+              is_new+=("true")
+            fi
+          done
+
           for i in "${!pending[@]}"; do
             crate="${pending[$i]}"
-            echo "→ Publishing ${crate}"
-            nix develop -c cargo publish -p "$crate"
-
-            # crates.io rate limit: 1 NEW crate per ~10min. Skip the wait
-            # after the last one in the batch.
-            if (( i < ${#pending[@]} - 1 )); then
+            if [[ $i -gt 0 && "${is_new[$i]}" == "true" && "${is_new[$((i-1))]}" == "true" ]]; then
               echo "Sleeping 605s before next new-crate publish (rate limit)"
               sleep 605
             fi
+            echo "→ Publishing ${crate}"
+            nix develop -c cargo publish -p "$crate"
           done
