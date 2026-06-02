@@ -381,8 +381,22 @@
                   # Applications symlink for drag-and-drop install
                   ln -s /Applications staging/Applications
 
-                  hdiutil create -volname "Starla" -srcfolder staging \
-                    -ov -format UDZO $out
+                  # `hdiutil create -srcfolder` intermittently fails with
+                  # `Resource busy` on GitHub macOS runners — the internal
+                  # attach/convert step races with mds / runner agents that
+                  # touch the staging dir. A short retry covers it.
+                  attempt=1
+                  until hdiutil create -volname "Starla" -srcfolder staging \
+                    -ov -format UDZO "$out"; do
+                    if [ "$attempt" -ge 3 ]; then
+                      echo "hdiutil create failed after $attempt attempts" >&2
+                      exit 1
+                    fi
+                    echo "hdiutil create failed (attempt $attempt), retrying..." >&2
+                    rm -f "$out"
+                    sleep $((attempt * 5))
+                    attempt=$((attempt + 1))
+                  done
                 '';
           };
 
