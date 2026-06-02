@@ -188,7 +188,7 @@
           packages = {
             default = pkgs.rustPlatform.buildRustPackage {
               pname = "starla";
-              version = "0.6.3";
+              version = "0.6.4";
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
 
@@ -228,7 +228,7 @@
             # Minimal build without observability features
             minimal = pkgs.rustPlatform.buildRustPackage {
               pname = "starla-minimal";
-              version = "0.6.3";
+              version = "0.6.4";
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
 
@@ -252,7 +252,7 @@
           } // {
             starla-tray = pkgs.rustPlatform.buildRustPackage {
               pname = "starla-tray";
-              version = "0.6.3";
+              version = "0.6.4";
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
 
