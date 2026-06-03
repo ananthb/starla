@@ -440,14 +440,17 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Compare two statuses for "would render the same menu". We deliberately
-/// ignore uptime/queue/measurement deltas because rebuilding the menu on
-/// every 30s tick just to bump an uptime counter is wasteful and would
-/// disrupt an open menu on macOS.
+/// Compare two statuses for "would render the same menu". Uptime is
+/// compared at minute resolution because that's what `format_uptime`
+/// displays — finer-grained comparison would rebuild the menu twice
+/// per minute for no visible change. `queue_depth` is excluded because
+/// it isn't shown in the menu.
 fn status_equivalent(a: &ProbeStatus, b: &ProbeStatus) -> bool {
     a.probe_id == b.probe_id
         && a.connected == b.connected
         && a.pause == b.pause
         && a.last_connection_error == b.last_connection_error
         && a.public_key == b.public_key
+        && a.uptime_secs / 60 == b.uptime_secs / 60
+        && a.measurements == b.measurements
 }
