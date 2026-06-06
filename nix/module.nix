@@ -158,9 +158,7 @@ in
         Restart = "on-failure";
         RestartSec = 10;
 
-        # The scheduler bursts one fd per outbound probe; the distro
-        # default (1024) trips EMFILE at scale. Match the plist limit
-        # so behaviour is consistent across platforms.
+        # Scheduler bursts past the 1024 default under load.
         LimitNOFILE = 4096;
 
         DynamicUser = true;

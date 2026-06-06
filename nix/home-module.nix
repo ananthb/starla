@@ -178,10 +178,7 @@ in
         ThrottleInterval = 10;
         StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/starla.log";
         StandardOutPath = "${config.home.homeDirectory}/Library/Logs/starla.log";
-        # launchd's per-user default is 256, which the scheduler bursts
-        # past under load (one fd per outbound probe). Raise both limits
-        # so measurements don't fail with EMFILE and the status socket
-        # accept loop doesn't have to back off.
+        # launchd default is 256; the scheduler bursts past it.
         SoftResourceLimits = { NumberOfFiles = 4096; };
         HardResourceLimits = { NumberOfFiles = 8192; };
       } // lib.optionalAttrs (cfg.sshKeyFile != null) {

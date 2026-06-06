@@ -59,10 +59,7 @@ async fn run_status_socket(
         let (mut stream, _) = match listener.accept().await {
             Ok(pair) => pair,
             Err(e) => {
-                // EMFILE/ENFILE during fd starvation must not kill the
-                // listener — the tray would then see ConnectionRefused
-                // on a stale socket file forever, with no way to recover
-                // short of restarting the daemon. Back off and retry.
+                // Don't let EMFILE kill the listener — back off and retry.
                 warn!("Status socket accept failed: {} — retrying", e);
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 continue;

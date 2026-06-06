@@ -217,13 +217,8 @@ impl App {
                 ));
             }
         } else {
-            // The status read failed, but we can't tell whether the daemon
-            // is actually down or running with a dead status-socket task
-            // (e.g. its accept loop exited on EMFILE). "Start" via
-            // launchctl kickstart is a no-op when the daemon is already
-            // running, so on its own it leaves the user stuck. Expose
-            // Restart too — it stop+starts and always produces a fresh
-            // process, recovering both states.
+            // Status unreadable — daemon may be down or stuck. Restart
+            // recovers the stuck case; Start covers the down case.
             let _ = menu.append(&MenuItem::new("Probe not responding", false, None));
             if daemon::SUPPORTED {
                 let _ = menu.append(&MenuItem::with_id(

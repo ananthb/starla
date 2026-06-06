@@ -23,10 +23,7 @@
   <string>HOME_DIR/Library/Logs/starla.log</string>
   <key>StandardOutPath</key>
   <string>HOME_DIR/Library/Logs/starla.log</string>
-  <!-- launchd's per-user default is 256, which the scheduler bursts past
-       under load (one fd per outbound probe). The status socket task
-       used to die on the resulting EMFILE; raising the limit also lets
-       measurements complete instead of failing with "Too many open files". -->
+  <!-- launchd default is 256; the scheduler bursts past it. -->
   <key>SoftResourceLimits</key>
   <dict>
     <key>NumberOfFiles</key>
