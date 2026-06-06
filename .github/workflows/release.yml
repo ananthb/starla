@@ -6,7 +6,22 @@ on:
       - "v*"
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Tag matches workspace version
+        run: |
+          tag_ver="${GITHUB_REF_NAME#v}"
+          ws_ver=$(awk -F\" '/^\[workspace\.package\]/{f=1} f && /^version *=/ {print $2; exit}' Cargo.toml)
+          if [[ "$tag_ver" != "$ws_ver" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME (=$tag_ver) does not match Cargo.toml workspace version $ws_ver"
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches Cargo.toml workspace version $ws_ver"
+
   linux:
+    needs: check-version
     strategy:
       fail-fast: false
       matrix:
@@ -172,6 +187,7 @@ jobs:
           cosign sign "ghcr.io/ananthb/starla@${{ steps.imagetools.outputs.arm64_digest }}"
 
   macos:
+    needs: check-version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
@@ -193,6 +209,7 @@ jobs:
           path: dist/
 
   windows:
+    needs: check-version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
@@ -264,6 +281,7 @@ jobs:
           generate_release_notes: true
 
   crates-io:
+    needs: check-version
     runs-on: ubuntu-latest
     permissions:
       contents: read
