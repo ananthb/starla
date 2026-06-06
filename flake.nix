@@ -34,6 +34,9 @@
             inherit system overlays;
           };
 
+          # Single source of truth so the flake can't drift from a version bump.
+          cargoVersion = (pkgs.lib.importTOML ./Cargo.toml).workspace.package.version;
+
           rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
             extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
             targets = [
@@ -188,7 +191,7 @@
           packages = {
             default = pkgs.rustPlatform.buildRustPackage {
               pname = "starla";
-              version = "0.6.4";
+              version = cargoVersion;
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
 
@@ -228,7 +231,7 @@
             # Minimal build without observability features
             minimal = pkgs.rustPlatform.buildRustPackage {
               pname = "starla-minimal";
-              version = "0.6.4";
+              version = cargoVersion;
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
 
@@ -252,7 +255,7 @@
           } // {
             starla-tray = pkgs.rustPlatform.buildRustPackage {
               pname = "starla-tray";
-              version = "0.6.4";
+              version = cargoVersion;
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
 
