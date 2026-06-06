@@ -158,6 +158,9 @@ in
         Restart = "on-failure";
         RestartSec = 10;
 
+        # Scheduler bursts past the 1024 default under load.
+        LimitNOFILE = 4096;
+
         DynamicUser = true;
 
         # Directories: systemd sets CONFIGURATION_DIRECTORY, STATE_DIRECTORY,

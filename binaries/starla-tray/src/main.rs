@@ -217,11 +217,19 @@ impl App {
                 ));
             }
         } else {
-            let _ = menu.append(&MenuItem::new("Probe not running", false, None));
+            // Status unreadable — daemon may be down or stuck. Restart
+            // recovers the stuck case; Start covers the down case.
+            let _ = menu.append(&MenuItem::new("Probe not responding", false, None));
             if daemon::SUPPORTED {
                 let _ = menu.append(&MenuItem::with_id(
                     self.ids.start_daemon.clone(),
                     "Start probe",
+                    true,
+                    None,
+                ));
+                let _ = menu.append(&MenuItem::with_id(
+                    self.ids.restart_daemon.clone(),
+                    "Restart probe",
                     true,
                     None,
                 ));
@@ -402,7 +410,7 @@ fn main() -> Result<()> {
                 format!("Starla: {}", header)
             }
         })
-        .unwrap_or_else(|| "Starla: probe not running".to_string());
+        .unwrap_or_else(|| "Starla: probe not responding".to_string());
 
     let tray_builder = TrayIconBuilder::new()
         .with_tooltip(&tooltip)

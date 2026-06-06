@@ -56,7 +56,15 @@ async fn run_status_socket(
     debug!("Status socket listening on {}", socket_path.display());
 
     loop {
-        let (mut stream, _) = listener.accept().await?;
+        let (mut stream, _) = match listener.accept().await {
+            Ok(pair) => pair,
+            Err(e) => {
+                // Don't let EMFILE kill the listener — back off and retry.
+                warn!("Status socket accept failed: {} — retrying", e);
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
         let mut s = status.lock().await;
 
         // Update uptime

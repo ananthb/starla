@@ -9,6 +9,9 @@ ExecStart=/usr/bin/starla --config /etc/starla/config.toml
 Restart=on-failure
 RestartSec=10
 
+# Scheduler bursts past the 1024 default under load.
+LimitNOFILE=4096
+
 DynamicUser=true
 ConfigurationDirectory=starla
 ConfigurationDirectoryMode=0750

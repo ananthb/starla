@@ -23,5 +23,16 @@
   <string>HOME_DIR/Library/Logs/starla.log</string>
   <key>StandardOutPath</key>
   <string>HOME_DIR/Library/Logs/starla.log</string>
+  <!-- launchd default is 256; the scheduler bursts past it. -->
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>4096</integer>
+  </dict>
+  <key>HardResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>8192</integer>
+  </dict>
 </dict>
 </plist>

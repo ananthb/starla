@@ -178,6 +178,9 @@ in
         ThrottleInterval = 10;
         StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/starla.log";
         StandardOutPath = "${config.home.homeDirectory}/Library/Logs/starla.log";
+        # launchd default is 256; the scheduler bursts past it.
+        SoftResourceLimits = { NumberOfFiles = 4096; };
+        HardResourceLimits = { NumberOfFiles = 8192; };
       } // lib.optionalAttrs (cfg.sshKeyFile != null) {
         EnvironmentVariables = {
           STARLA_SSH_KEY = toString cfg.sshKeyFile;
