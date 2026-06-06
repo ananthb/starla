@@ -217,11 +217,24 @@ impl App {
                 ));
             }
         } else {
-            let _ = menu.append(&MenuItem::new("Probe not running", false, None));
+            // The status read failed, but we can't tell whether the daemon
+            // is actually down or running with a dead status-socket task
+            // (e.g. its accept loop exited on EMFILE). "Start" via
+            // launchctl kickstart is a no-op when the daemon is already
+            // running, so on its own it leaves the user stuck. Expose
+            // Restart too — it stop+starts and always produces a fresh
+            // process, recovering both states.
+            let _ = menu.append(&MenuItem::new("Probe not responding", false, None));
             if daemon::SUPPORTED {
                 let _ = menu.append(&MenuItem::with_id(
                     self.ids.start_daemon.clone(),
                     "Start probe",
+                    true,
+                    None,
+                ));
+                let _ = menu.append(&MenuItem::with_id(
+                    self.ids.restart_daemon.clone(),
+                    "Restart probe",
                     true,
                     None,
                 ));
@@ -402,7 +415,7 @@ fn main() -> Result<()> {
                 format!("Starla: {}", header)
             }
         })
-        .unwrap_or_else(|| "Starla: probe not running".to_string());
+        .unwrap_or_else(|| "Starla: probe not responding".to_string());
 
     let tray_builder = TrayIconBuilder::new()
         .with_tooltip(&tooltip)

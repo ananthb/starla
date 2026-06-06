@@ -9,6 +9,11 @@ ExecStart=/usr/bin/starla --config /etc/starla/config.toml
 Restart=on-failure
 RestartSec=10
 
+# The scheduler bursts one fd per outbound probe under load. The default
+# (1024 on most distros) is enough on small networks but trips EMFILE at
+# scale; raise it so measurements and the status socket survive bursts.
+LimitNOFILE=4096
+
 DynamicUser=true
 ConfigurationDirectory=starla
 ConfigurationDirectoryMode=0750

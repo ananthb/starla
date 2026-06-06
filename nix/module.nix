@@ -158,6 +158,11 @@ in
         Restart = "on-failure";
         RestartSec = 10;
 
+        # The scheduler bursts one fd per outbound probe; the distro
+        # default (1024) trips EMFILE at scale. Match the plist limit
+        # so behaviour is consistent across platforms.
+        LimitNOFILE = 4096;
+
         DynamicUser = true;
 
         # Directories: systemd sets CONFIGURATION_DIRECTORY, STATE_DIRECTORY,
