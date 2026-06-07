@@ -1,0 +1,167 @@
+# Goreleaser drives Linux packaging (deb/rpm/tar.gz fan-out across
+# daemon + GUI × amd64 + arm64), SHA256SUMS generation, cosign-
+# signing of the checksum file, and the GitHub release upload.
+# Non-Linux artifacts (macOS DMG, Windows MSI) and the tray
+# AppImage are produced upstream (nix-built / hdiutil / wix /
+# nix-appimage) and attached to the release via extra_files.
+#
+# Binary compilation stays in nix. The CI publish job downloads
+# nix-built starla + starla-tray binaries into `prebuilt/{os}_{arch}/`,
+# then invokes goreleaser; each build's `hooks.post` copies the
+# prebuilt binary into goreleaser's conventional output path
+# (`dist/{id}_{os}_{arch}_{variant}/{binary}`). The `gobinary: "true"`
+# turns the actual `go build` invocation into a no-op so nothing is
+# compiled in-process.
+version: 2
+project_name: starla
+
+builds:
+  - id: starla
+    binary: starla
+    builder: go
+    tool: "true"
+    no_main_check: true
+    goos: [linux]
+    goarch: [amd64, arm64]
+    goamd64: [v1]
+    goarm64: [v8.0]
+    hooks:
+      post:
+        - cp prebuilt/linux_{{ .Arch }}/starla "{{ .Path }}"
+
+  - id: starla-tray
+    binary: starla-tray
+    builder: go
+    tool: "true"
+    no_main_check: true
+    goos: [linux]
+    goarch: [amd64, arm64]
+    goamd64: [v1]
+    goarm64: [v8.0]
+    hooks:
+      post:
+        - cp prebuilt/linux_{{ .Arch }}/starla-tray "{{ .Path }}"
+
+# Replaces the per-arch nix `release` derivation's tarball. Same
+# layout: `starla/` directory containing both binaries, the systemd
+# unit, the example config, and the tray .desktop file.
+archives:
+  - id: tarball
+    ids: [starla, starla-tray]
+    formats: [tar.gz]
+    name_template: "starla-{{ .Arch }}"
+    wrap_in_directory: starla
+    files:
+      - src: starla.service
+        dst: starla.service
+      - src: config.toml.example
+        dst: config.toml.example
+      - src: packaging/starla-tray.desktop
+        dst: starla-tray.desktop
+
+# Daemon (starla) and GUI (starla-gui) package families. Each fans
+# out to deb + rpm × amd64 + arm64 = 8 packages, replacing the 8
+# inline `nix shell nixpkgs#nfpm -c …` invocations in the previous
+# release.yml. File names match the previous output:
+#   starla_0.6.6_amd64.deb         starla-0.6.6-1.x86_64.rpm
+#   starla-gui_0.6.6_arm64.deb     starla-gui-0.6.6-1.aarch64.rpm
+nfpms:
+  - id: starla
+    package_name: starla
+    file_name_template: "{{ .ConventionalFileName }}"
+    ids: [starla]
+    formats: [deb, rpm]
+    maintainer: Ananth Bhaskararaman <ab@calculon.tech>
+    description: A Rust implementation of the RIPE Atlas Software Probe
+    vendor: Starla Contributors
+    homepage: https://github.com/ananthb/starla
+    license: AGPL-3.0-or-later
+    section: net
+    deb:
+      compression: zstd
+    rpm:
+      compression: zstd
+      group: Applications/Internet
+    contents:
+      - src: starla.service
+        dst: /usr/lib/systemd/system/starla.service
+        type: config
+      - src: config.toml.example
+        dst: /etc/starla/config.toml.example
+      - dst: /etc/starla
+        type: dir
+        file_info:
+          mode: 0750
+      # apt repository auto-config
+      - src: packaging/starla.gpg
+        dst: /usr/share/keyrings/starla.gpg
+        packager: deb
+      - src: packaging/starla.sources
+        dst: /etc/apt/sources.list.d/starla.sources
+        type: config
+        packager: deb
+      # dnf/yum repository auto-config
+      - src: packaging/starla.repo
+        dst: /etc/yum.repos.d/starla.repo
+        type: config
+        packager: rpm
+
+  - id: starla-gui
+    package_name: starla-gui
+    file_name_template: "{{ .ConventionalFileName }}"
+    ids: [starla-tray]
+    formats: [deb, rpm]
+    maintainer: Ananth Bhaskararaman <ab@calculon.tech>
+    description: Starla system tray app for RIPE Atlas probe monitoring
+    vendor: Starla Contributors
+    homepage: https://github.com/ananthb/starla
+    license: AGPL-3.0-or-later
+    section: net
+    dependencies:
+      - starla
+    deb:
+      compression: zstd
+    rpm:
+      compression: zstd
+      group: Applications/Internet
+    contents:
+      - src: packaging/starla-tray.desktop
+        dst: /usr/share/applications/starla-tray.desktop
+      - src: packaging/starla-tray.desktop
+        dst: /etc/xdg/autostart/starla-tray.desktop
+        type: config
+
+checksum:
+  name_template: SHA256SUMS
+  # Include the artifacts goreleaser doesn't produce itself
+  # (AppImages, DMG, MSI) so SHA256SUMS covers the whole release.
+  extra_files:
+    - glob: extras/*
+
+# Sign only SHA256SUMS. Users cosign-verify-blob the checksum file,
+# then sha256sum -c against it to validate individual artifacts.
+signs:
+  - id: cosign-checksum
+    cmd: cosign
+    args:
+      - sign-blob
+      - --yes
+      - --output-signature=${signature}
+      - --output-certificate=${certificate}
+      - ${artifact}
+    artifacts: checksum
+    signature: ${artifact}.sig
+    certificate: ${artifact}.pem
+
+release:
+  github:
+    owner: ananthb
+    name: starla
+  # Pre-built artifacts the CI publish job stages under extras/
+  # before invoking goreleaser. Same glob is referenced from
+  # checksum.extra_files so SHA256SUMS covers them.
+  extra_files:
+    - glob: extras/*
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"

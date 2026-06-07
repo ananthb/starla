@@ -5,6 +5,13 @@ on:
     tags:
       - "v*"
 
+# Binary builds (Rust + static libscamper) stay in nix. Goreleaser
+# owns Linux packaging (deb/rpm/tar.gz fan-out, SHA256SUMS,
+# cosign-on-checksum, GH release upload). Non-Linux + AppImage
+# artifacts are produced by their respective tools and attached via
+# goreleaser's extra_files. See .goreleaser.yaml for the contract
+# between nix and goreleaser.
+
 jobs:
   check-version:
     runs-on: ubuntu-latest
@@ -29,16 +36,14 @@ jobs:
           - runner: ubuntu-latest
             arch: amd64
             nix-system: x86_64-linux
-            rpm-arch: x86_64
             appimage-arch: x86_64
           - runner: ubuntu-24.04-arm
             arch: arm64
             nix-system: aarch64-linux
-            rpm-arch: aarch64
             appimage-arch: aarch64
     runs-on: ${{ matrix.runner }}
     permissions:
-      contents: write
+      contents: read
       packages: write
       id-token: write
     steps:
@@ -51,55 +56,35 @@ jobs:
           name: ananthb
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      - uses: sigstore/cosign-installer@v3
-
-      - name: Build release tarball
-        run: nix build .#packages.${{ matrix.nix-system }}.release -o result
-
-      - name: Build packages
+      - name: Extract nix-built binaries
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ARCH="${{ matrix.arch }}"
-          RPM_ARCH="${{ matrix.rpm-arch }}"
-
-          # Extract binaries from tarball (includes both starla and starla-tray)
-          mkdir -p pkg
-          tar -xzf "$(readlink result)" -C pkg
-          cp packaging/nfpm.yaml packaging/starla.gpg packaging/starla.sources packaging/starla.repo pkg/starla/
-
-          # Headless packages
-          cd pkg/starla
-          ARCH="$ARCH" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-            nfpm package -p deb -f nfpm.yaml
-          ARCH="$RPM_ARCH" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-            nfpm package -p rpm -f nfpm.yaml
-          cd ../..
-
-          # GUI packages
-          mkdir -p gui-pkg
-          cp pkg/starla/starla-tray gui-pkg/
-          cp packaging/nfpm-gui.yaml packaging/starla-tray.desktop gui-pkg/
-          cd gui-pkg
-          ARCH="$ARCH" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-            nfpm package -p deb -f nfpm-gui.yaml
-          ARCH="$RPM_ARCH" VERSION="$VERSION" nix shell nixpkgs#nfpm -c \
-            nfpm package -p rpm -f nfpm-gui.yaml
-          cd ..
-
-          # AppImage
-          nix build .#packages.${{ matrix.nix-system }}.appimage -o result-appimage
-
-          # Collect
-          mkdir -p dist
-          cp "$(readlink result)" "dist/starla-${ARCH}.tar.gz"
-          cp "$(readlink result-appimage)" "dist/starla-tray-${{ matrix.appimage-arch }}.AppImage"
-          mv pkg/starla/*.deb pkg/starla/*.rpm dist/
-          mv gui-pkg/*.deb gui-pkg/*.rpm dist/
+          nix build .#packages.${{ matrix.nix-system }}.release -o result
+          mkdir -p binaries
+          # The nix release derivation produces starla-${arch}.tar.gz
+          # with a `starla/` directory containing both binaries plus
+          # service/config/desktop files. Pull just the binaries out
+          # for goreleaser to consume; the rest live in-repo.
+          tar -xzf "$(readlink result)" --strip-components=1 -C binaries \
+            starla/starla starla/starla-tray
 
       - uses: actions/upload-artifact@v7
         with:
-          name: linux-artifacts-${{ matrix.arch }}
-          path: dist/
+          name: linux-binaries-${{ matrix.arch }}
+          path: binaries/
+          if-no-files-found: error
+
+      - name: Build AppImage
+        run: |
+          nix build .#packages.${{ matrix.nix-system }}.appimage -o result-appimage
+          mkdir -p appimage
+          cp -L "$(readlink result-appimage)" \
+            "appimage/starla-tray-${{ matrix.appimage-arch }}.AppImage"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-appimage-${{ matrix.arch }}
+          path: appimage/
+          if-no-files-found: error
 
       - name: Build OCI image
         run: |
@@ -111,6 +96,7 @@ jobs:
         with:
           name: oci-${{ matrix.arch }}
           path: oci-stage/
+          if-no-files-found: error
 
   linux-image:
     needs: linux
@@ -190,13 +176,14 @@ jobs:
       - name: Build DMG
         run: |
           nix build .#packages.aarch64-darwin.release -o result-dmg
-          mkdir -p dist
-          cp "$(readlink result-dmg)" dist/starla-macos-arm64.dmg
+          mkdir -p dmg
+          cp "$(readlink result-dmg)" dmg/starla-macos-arm64.dmg
 
       - uses: actions/upload-artifact@v7
         with:
           name: macos-artifacts
-          path: dist/
+          path: dmg/
+          if-no-files-found: error
 
   windows:
     needs: check-version
@@ -223,13 +210,14 @@ jobs:
       - name: Package Windows release
         shell: bash
         run: |
-          mkdir -p dist
-          cp msi-staging/starla.msi dist/starla-windows-amd64.msi
+          mkdir -p msi
+          cp msi-staging/starla.msi msi/starla-windows-amd64.msi
 
       - uses: actions/upload-artifact@v7
         with:
           name: windows-artifacts
-          path: dist/
+          path: msi/
+          if-no-files-found: error
 
   publish:
     needs: [linux, macos, windows]
@@ -239,48 +227,55 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: sigstore/cosign-installer@v3
+      # Goreleaser still wants `go` in $PATH even with gobinary=true
+      # — it shells out to `go list -m` during gomod detection, then
+      # gracefully skips when it sees there's no go.mod.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
 
-      # The oci-* artifacts exist only so linux-image can push them
-      # to ghcr.io; they are not part of the GitHub release. The
-      # multi-arch image is the canonical artifact at
-      # ghcr.io/ananthb/starla:<tag>.
+      # Stage nix-built binaries where goreleaser's per-build
+      # hooks.post will look for them.
       - uses: actions/download-artifact@v8
         with:
-          path: artifacts
-          pattern: linux-artifacts-*
-          merge-multiple: true
+          name: linux-binaries-amd64
+          path: prebuilt/linux_amd64
       - uses: actions/download-artifact@v8
         with:
-          path: artifacts
-          pattern: macos-artifacts
-          merge-multiple: true
+          name: linux-binaries-arm64
+          path: prebuilt/linux_arm64
+      - name: Restore binary permissions
+        run: chmod +x prebuilt/linux_amd64/* prebuilt/linux_arm64/*
+
+      # Stage non-goreleaser-produced artifacts that should land in
+      # the release and be covered by SHA256SUMS.
       - uses: actions/download-artifact@v8
         with:
-          path: artifacts
-          pattern: windows-artifacts
-          merge-multiple: true
-
-      # Sign only SHA256SUMS. Users cosign-verify-blob the checksum
-      # file, then sha256sum -c against it for individual artifacts.
-      - name: Generate checksums and sign
-        working-directory: artifacts
-        # Write the checksum file via a tempfile so re-runs (where
-        # artifacts/SHA256SUMS may already exist) don't self-reference
-        # the freshly-truncated file via the `*` glob.
-        run: |
-          sha256sum * > ../SHA256SUMS
-          mv ../SHA256SUMS SHA256SUMS
-          cosign sign-blob --yes \
-            --output-signature SHA256SUMS.sig \
-            --output-certificate SHA256SUMS.pem \
-            SHA256SUMS
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+          name: linux-appimage-amd64
+          path: extras
+      - uses: actions/download-artifact@v8
         with:
-          files: artifacts/*
-          generate_release_notes: true
+          name: linux-appimage-arm64
+          path: extras
+      - uses: actions/download-artifact@v8
+        with:
+          name: macos-artifacts
+          path: extras
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-artifacts
+          path: extras
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   crates-io:
     needs: check-version
