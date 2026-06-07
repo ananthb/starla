@@ -738,10 +738,11 @@ async fn main() -> Result<()> {
             )
             .await
             {
-                Ok(ssh) => {
-                    reg_delay = Duration::from_secs(5);
-                    ssh
-                }
+                // Don't reset reg_delay here: the SSH handshake succeeds even
+                // when the registration server is going to refuse INIT, so an
+                // eager reset defeats backoff for Wait/Ok responses. #60 fixed
+                // the same anti-pattern in the controller-side KEEP loop.
+                Ok(ssh) => ssh,
                 Err(e) => {
                     debug!("Failed to connect to registration server: {}", e);
                     probe_status.lock().await.last_connection_error = Some(e.to_string());
@@ -769,8 +770,9 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // Send INIT
-            match reg_ssh.init(Some(&probe_info)).await {
+            // Send INIT. If the server explicitly tells us how long to wait
+            // (WAIT/TIMEOUT N), honor that exactly. Otherwise apply backoff.
+            let server_wait = match reg_ssh.init(Some(&probe_info)).await {
                 Ok(InitResponse::Controller(info)) => {
                     info!("Got controller assignment: {}:{}", info.host, info.port);
 
@@ -785,10 +787,27 @@ async fn main() -> Result<()> {
                         s.last_connection_error = None;
                     }
 
+                    reg_delay = Duration::from_secs(5);
                     break info;
                 }
-                Ok(InitResponse::Ok) | Ok(InitResponse::Wait { .. }) => {
-                    // Not yet registered: print key and keep retrying
+                Ok(InitResponse::Wait { timeout_secs }) => {
+                    if !printed_key {
+                        let pubkey_path = starla_common::probe_pubkey_path();
+                        if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
+                            info!("Public key:\n{}", contents.trim());
+                        }
+                        info!("Register at: https://atlas.ripe.net/apply/swprobe/");
+                        info!("Retrying registration until probe is approved...");
+                        printed_key = true;
+                    }
+                    probe_status.lock().await.last_connection_error = Some(
+                        "Probe key not yet approved by RIPE Atlas — register the public key above"
+                            .to_string(),
+                    );
+                    debug!("Registration server requested wait: {}s", timeout_secs);
+                    Some(Duration::from_secs(timeout_secs as u64))
+                }
+                Ok(InitResponse::Ok) => {
                     if !printed_key {
                         let pubkey_path = starla_common::probe_pubkey_path();
                         if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
@@ -803,14 +822,17 @@ async fn main() -> Result<()> {
                             .to_string(),
                     );
                     debug!("Waiting for registration approval...");
+                    None
                 }
                 Ok(InitResponse::ControllerReady { .. }) => {
                     debug!("Unexpected ControllerReady from registration server");
+                    None
                 }
                 Err(e) => {
                     debug!("Registration INIT failed: {}", e);
+                    None
                 }
-            }
+            };
 
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
@@ -820,8 +842,10 @@ async fn main() -> Result<()> {
                     result_cancel_token.cancel();
                     return Ok(());
                 }
-                _ = tokio::time::sleep(reg_delay) => {
-                    reg_delay = std::cmp::min(reg_delay * 2, max_reg_delay);
+                _ = tokio::time::sleep(server_wait.unwrap_or(reg_delay)) => {
+                    if server_wait.is_none() {
+                        reg_delay = std::cmp::min(reg_delay * 2, max_reg_delay);
+                    }
                 }
             }
         };

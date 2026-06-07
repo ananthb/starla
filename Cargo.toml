@@ -15,7 +15,7 @@ members = [
 exclude = ["fuzz"]
 
 [workspace.package]
-version = "0.6.5"
+version = "0.6.6"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 authors = ["Starla Contributors"]
@@ -24,13 +24,13 @@ repository = "https://github.com/ananthb/starla"
 [workspace.dependencies]
 # Intra-workspace crates. Versions are required for `cargo publish` to
 # rewrite path deps; bump these alongside [workspace.package].version.
-starla-common       = { path = "crates/starla-common",       version = "0.6.5" }
-starla-network      = { path = "crates/starla-network",      version = "0.6.5" }
-starla-measurements = { path = "crates/starla-measurements", version = "0.6.5" }
-starla-scheduler    = { path = "crates/starla-scheduler",    version = "0.6.5" }
-starla-controller   = { path = "crates/starla-controller",   version = "0.6.5" }
-starla-results      = { path = "crates/starla-results",      version = "0.6.5" }
-starla-metrics      = { path = "crates/starla-metrics",      version = "0.6.5" }
+starla-common       = { path = "crates/starla-common",       version = "0.6.6" }
+starla-network      = { path = "crates/starla-network",      version = "0.6.6" }
+starla-measurements = { path = "crates/starla-measurements", version = "0.6.6" }
+starla-scheduler    = { path = "crates/starla-scheduler",    version = "0.6.6" }
+starla-controller   = { path = "crates/starla-controller",   version = "0.6.6" }
+starla-results      = { path = "crates/starla-results",      version = "0.6.6" }
+starla-metrics      = { path = "crates/starla-metrics",      version = "0.6.6" }
 
 # Async runtime
 tokio = { version = "1.52", features = ["full"] }

@@ -49,8 +49,8 @@
       <li><a href="#telnet">2 · Telnet</a></li>
       <li><a href="#measure">3 · Measurements</a></li>
       <li><a href="#upload">4 · Upload</a></li>
-      <li><a href="#quirks">5 · Quirks</a></li>
-      <li><a href="#lessons">6 · Lessons</a></li>
+      <li><a href="#quirks">5 · RESULT quirks</a></li>
+      <li><a href="#lessons">6 · Quirks</a></li>
     </ul>
   </aside>
 
@@ -383,7 +383,10 @@ SESSION_ID fa0b28e5...</code></div></pre>
     </section>
 
     <section id="lessons">
-      <h2 class="section"><span class="num">6</span>Known issues &amp; lessons</h2>
+      <h2 class="section"><span class="num">6</span>Quirks</h2>
+
+      <h3>v0.6.5 release withdrawn</h3>
+      <p>The <code>v0.6.5</code> GitHub release was tagged on a commit where <code>Cargo.toml</code> still said <code>0.6.4</code>, so the packaged binaries internally reported <code>0.6.4</code> even though the release was labelled <code>0.6.5</code>. The release has been deleted; use <code>v0.6.6</code> or later. The git tag is preserved for history. The release workflow now fails fast if tag and workspace version don't match (see <a href="https://github.com/ananthb/starla/pull/66">#66</a>).</p>
 
       <h3>Tagged vs untagged enums</h3>
       <p>The <code>MeasurementData</code> enum must use <code>#[serde(tag, content)]</code> (tagged), not <code>#[serde(untagged)]</code>. With untagged, <code>FullLine("body")</code> deserializes back as <code>Generic(String("body"))</code>, losing the variant discriminator. This caused TLS / NTP / traceroute results to silently produce invalid RESULT lines.</p>
