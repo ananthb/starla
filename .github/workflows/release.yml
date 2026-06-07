@@ -310,10 +310,13 @@ jobs:
           )
           VER="${VERSION#v}"
 
+          # crates.io 403s anonymous requests without a User-Agent.
+          UA="starla-release-check (https://github.com/ananthb/starla)"
+
           version_published() {
             local name=$1
             local code
-            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            code=$(curl -sS -A "$UA" -o /dev/null -w '%{http_code}' \
               "https://crates.io/api/v1/crates/${name}/${VER}")
             [[ "$code" == "200" ]]
           }
@@ -321,7 +324,7 @@ jobs:
           crate_exists() {
             local name=$1
             local code
-            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            code=$(curl -sS -A "$UA" -o /dev/null -w '%{http_code}' \
               "https://crates.io/api/v1/crates/${name}")
             [[ "$code" == "200" ]]
           }
