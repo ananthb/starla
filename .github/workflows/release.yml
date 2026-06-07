@@ -96,16 +96,6 @@ jobs:
           mv pkg/starla/*.deb pkg/starla/*.rpm dist/
           mv gui-pkg/*.deb gui-pkg/*.rpm dist/
 
-      - name: Sign artifacts
-        run: |
-          cd dist
-          for f in *; do
-            cosign sign-blob --yes \
-              --output-signature "${f}.sig" \
-              --output-certificate "${f}.pem" \
-              "$f"
-          done
-
       - uses: actions/upload-artifact@v7
         with:
           name: linux-artifacts-${{ matrix.arch }}
@@ -251,24 +241,36 @@ jobs:
       - uses: actions/checkout@v6
       - uses: sigstore/cosign-installer@v3
 
+      # The oci-* artifacts exist only so linux-image can push them
+      # to ghcr.io; they are not part of the GitHub release. The
+      # multi-arch image is the canonical artifact at
+      # ghcr.io/ananthb/starla:<tag>.
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
+          pattern: linux-artifacts-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: macos-artifacts
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: windows-artifacts
           merge-multiple: true
 
-      # Sign macOS and Windows artifacts
-      - name: Sign non-Linux artifacts
+      # Sign only SHA256SUMS. Users cosign-verify-blob the checksum
+      # file, then sha256sum -c against it for individual artifacts.
+      - name: Generate checksums and sign
+        working-directory: artifacts
+        # Write the checksum file via a tempfile so re-runs (where
+        # artifacts/SHA256SUMS may already exist) don't self-reference
+        # the freshly-truncated file via the `*` glob.
         run: |
-          cd artifacts
-          for f in starla-macos-*.dmg starla-windows-*.msi; do
-            [ -f "$f" ] || continue
-            cosign sign-blob --yes \
-              --output-signature "${f}.sig" \
-              --output-certificate "${f}.pem" \
-              "$f"
-          done
-          # Regenerate checksums for all artifacts
-          sha256sum $(ls -1 | grep -v '\.sig$\|\.pem$\|SHA256SUMS') > SHA256SUMS
+          sha256sum * > ../SHA256SUMS
+          mv ../SHA256SUMS SHA256SUMS
           cosign sign-blob --yes \
             --output-signature SHA256SUMS.sig \
             --output-certificate SHA256SUMS.pem \
