@@ -57,17 +57,19 @@ jobs:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
       - name: Extract nix-built binaries
+        # Output dir is `release-bins/` — the repo already has a
+        # `binaries/` source tree, so `mkdir -p binaries` is a no-op
+        # and the cp would collide with the tracked `binaries/starla-tray/`.
         run: |
           nix build .#packages.${{ matrix.nix-system }}.release -o result
-          mkdir -p staging binaries
-          # Selective extract via --strip-components fails on runner's GNU tar.
+          mkdir -p staging release-bins
           tar -xzf "$(readlink result)" -C staging
-          cp staging/starla/starla staging/starla/starla-tray binaries/
+          cp staging/starla/starla staging/starla/starla-tray release-bins/
 
       - uses: actions/upload-artifact@v7
         with:
           name: linux-binaries-${{ matrix.arch }}
-          path: binaries/
+          path: release-bins/
           if-no-files-found: error
 
       - name: Build AppImage
