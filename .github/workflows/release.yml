@@ -59,13 +59,10 @@ jobs:
       - name: Extract nix-built binaries
         run: |
           nix build .#packages.${{ matrix.nix-system }}.release -o result
-          mkdir -p binaries
-          # The nix release derivation produces starla-${arch}.tar.gz
-          # with a `starla/` directory containing both binaries plus
-          # service/config/desktop files. Pull just the binaries out
-          # for goreleaser to consume; the rest live in-repo.
-          tar -xzf "$(readlink result)" --strip-components=1 -C binaries \
-            starla/starla starla/starla-tray
+          mkdir -p staging binaries
+          # Selective extract via --strip-components fails on runner's GNU tar.
+          tar -xzf "$(readlink result)" -C staging
+          cp staging/starla/starla staging/starla/starla-tray binaries/
 
       - uses: actions/upload-artifact@v7
         with:
