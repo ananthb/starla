@@ -43,6 +43,11 @@ probe_key.pub
 result
 result-*
 
+# Goreleaser staging dirs (CI publish job)
+/prebuilt/
+/extras/
+/dist/
+
 # Environment
 .env
 .env.local
