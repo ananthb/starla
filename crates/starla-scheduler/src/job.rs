@@ -43,6 +43,19 @@ pub enum MeasurementSpec {
     Ntp(NtpJobSpec),
 }
 
+impl MeasurementSpec {
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            MeasurementSpec::Ping(_) => "ping",
+            MeasurementSpec::Traceroute(_) => "traceroute",
+            MeasurementSpec::Dns(_) => "dns",
+            MeasurementSpec::Http(_) => "http",
+            MeasurementSpec::Tls(_) => "tls",
+            MeasurementSpec::Ntp(_) => "ntp",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PingJobSpec {
     pub target: String,

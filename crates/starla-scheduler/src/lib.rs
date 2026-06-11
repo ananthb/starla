@@ -52,6 +52,29 @@ pub struct Scheduler {
     cancel_token: CancellationToken,
 }
 
+/// Read-only handle to the scheduler's task set. Exposed so the probe can
+/// report active measurement counts to the tray without leaking the
+/// internal task map type.
+#[derive(Clone)]
+pub struct SchedulerStatus {
+    tasks: Arc<Mutex<HashMap<u64, ScheduledTask>>>,
+}
+
+impl SchedulerStatus {
+    /// Count active recurring measurements grouped by type ("ping", "dns",
+    /// ...).
+    pub async fn measurement_counts(&self) -> HashMap<String, u64> {
+        let tasks = self.tasks.lock().await;
+        let mut counts: HashMap<String, u64> = HashMap::new();
+        for task in tasks.values() {
+            *counts
+                .entry(task.job.spec.type_name().to_string())
+                .or_insert(0) += 1;
+        }
+        counts
+    }
+}
+
 impl Scheduler {
     /// Create a new scheduler
     pub fn new(probe_id: ProbeId, metrics: starla_metrics::MetricsRegistry) -> Self {
@@ -80,6 +103,15 @@ impl Scheduler {
     /// Get a command sender for scheduling measurements
     pub fn command_sender(&self) -> mpsc::Sender<SchedulerCommand> {
         self.cmd_tx.clone()
+    }
+
+    /// Cheap clone of the tasks map for read-only status snapshots.
+    /// Hands out a SchedulerStatus rather than the raw map so ScheduledTask
+    /// can stay private to this crate.
+    pub fn status_handle(&self) -> SchedulerStatus {
+        SchedulerStatus {
+            tasks: self.tasks.clone(),
+        }
     }
 
     /// Schedule a measurement job

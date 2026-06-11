@@ -304,6 +304,7 @@ async fn main() -> Result<()> {
 
     let scheduler_tx = scheduler.command_sender();
     let scheduler_cancel = scheduler.cancel_token();
+    let scheduler_status = scheduler.status_handle();
 
     let result_cancel_token = CancellationToken::new();
 
@@ -606,6 +607,23 @@ async fn main() -> Result<()> {
                 let mut s = status.lock().await;
                 if s.pause != current {
                     s.pause = current;
+                }
+            }
+        });
+
+        // Refresh the active measurement counts so the tray menu doesn't
+        // show "Measurements: 0" forever. Counts come from the scheduler's
+        // recurring-task map (one-shots and host telemetry aren't included).
+        let status = probe_status.clone();
+        let sched_status = scheduler_status.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(5));
+            loop {
+                tick.tick().await;
+                let counts = sched_status.measurement_counts().await;
+                let mut s = status.lock().await;
+                if s.measurements != counts {
+                    s.measurements = counts;
                 }
             }
         });
