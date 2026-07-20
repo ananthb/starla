@@ -232,7 +232,7 @@ jobs:
       # Goreleaser still wants `go` in $PATH even with gobinary=true
       # — it shells out to `go list -m` during gomod detection, then
       # gracefully skips when it sees there's no go.mod.
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
 
