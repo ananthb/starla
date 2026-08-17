@@ -26,6 +26,12 @@ jobs:
             exit 1
           fi
           echo "Tag $GITHUB_REF_NAME matches Cargo.toml workspace version $ws_ver"
+          addon_ver=$(awk -F\" '/^version:/ {print $2; exit}' starla/config.yaml)
+          if [[ "$tag_ver" != "$addon_ver" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME (=$tag_ver) does not match Home Assistant add-on version $addon_ver in starla/config.yaml"
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME matches Home Assistant add-on version $addon_ver"
 
   linux:
     needs: check-version
