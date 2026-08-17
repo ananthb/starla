@@ -1,0 +1,19 @@
+---
+configuration:
+  log_level:
+    name: Log level
+    description: Verbosity of probe log output.
+  rxtxrpt:
+    name: Interface traffic reports
+    description: >-
+      Report network interface traffic statistics (rx/tx bytes, packets,
+      errors) to RIPE Atlas.
+  metrics:
+    name: Prometheus metrics
+    description: Enable the Prometheus metrics exporter.
+  metrics_listen_addr:
+    name: Metrics listen address
+    description: >-
+      Address the metrics exporter binds to. The add-on uses host
+      networking, so this binds directly on the host. Use 0.0.0.0:9695 to
+      scrape from other machines.

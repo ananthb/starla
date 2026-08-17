@@ -47,6 +47,7 @@
     <ul class="toc">
       <li><a href="#docker">Docker / Podman</a></li>
       <li><a href="#k8s">Stateless / k8s</a></li>
+      <li><a href="#ha">Home Assistant</a></li>
       <li><a href="#deb">Debian / Ubuntu</a></li>
       <li><a href="#rpm">Fedora / RHEL</a></li>
       <li><a href="#nixos">NixOS</a></li>
@@ -64,7 +65,7 @@
     <p class="eyebrow">02 · install &amp; run</p>
     <h1 class="display">Install &amp; run.</h1>
     <p class="lede">
-      Eight ways to bring starla online. Pick the one that suits your machine — they all
+      Nine ways to bring starla online. Pick the one that suits your machine — they all
       register against the same RIPE&nbsp;Atlas controllers and produce the same results.
     </p>
 
@@ -110,8 +111,21 @@ docker run -d --name starla \
 docker exec starla cat /state/probe_key.pub</code></div></pre>
     </section>
 
+    <section id="ha">
+      <h2 class="section"><span class="num">B</span>Home Assistant</h2>
+      <p>This repository doubles as a Home Assistant add-on repository. The add-on wraps the <code>ghcr.io</code> container image &mdash; nothing is compiled on your device.</p>
+
+      <ol>
+        <li>Open <strong>Settings &rarr; Add-ons &rarr; Add-on Store &rarr; &vellip; &rarr; Repositories</strong> and add <code>https://github.com/ananthb/starla</code>.</li>
+        <li>Install and start the <strong>Starla</strong> add-on.</li>
+        <li>Copy the probe public key from the add-on log and register it at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.</li>
+      </ol>
+
+      <p>The add-on runs with host networking and <code>CAP_NET_RAW</code>, keeps the probe key across updates and restarts, and exposes log level, interface traffic reports, and Prometheus metrics as configuration options.</p>
+    </section>
+
     <section id="deb">
-      <h2 class="section"><span class="num">B</span>Debian · Ubuntu</h2>
+      <h2 class="section"><span class="num">C</span>Debian · Ubuntu</h2>
       <p>The <code>.deb</code> package configures the apt repository for future updates automatically.</p>
 
       <pre><div class="pre-head"><span class="lang">shell</span><span>apt</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_amd64.deb
@@ -125,7 +139,7 @@ sudo systemctl enable --now starla</code></div></pre>
     </section>
 
     <section id="rpm">
-      <h2 class="section"><span class="num">C</span>Fedora · RHEL</h2>
+      <h2 class="section"><span class="num">D</span>Fedora · RHEL</h2>
       <p>The <code>.rpm</code> package configures the dnf repository for future updates automatically.</p>
 
       <pre><div class="pre-head"><span class="lang">shell</span><span>dnf</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla.x86_64.rpm
@@ -138,7 +152,7 @@ sudo systemctl enable --now starla</code></div></pre>
     </section>
 
     <section id="nixos">
-      <h2 class="section"><span class="num">D</span>NixOS</h2>
+      <h2 class="section"><span class="num">E</span>NixOS</h2>
       <p>Add the starla flake to your NixOS configuration:</p>
 
       <pre><div class="pre-head"><span class="lang">nix</span><span>flake.nix</span></div><div class="pre-body"><code>{
@@ -207,7 +221,7 @@ sudo cat /var/lib/starla/probe_key.pub</code></div></pre>
     </section>
 
     <section id="tar">
-      <h2 class="section"><span class="num">E</span>Release tarball</h2>
+      <h2 class="section"><span class="num">F</span>Release tarball</h2>
       <p>Each tarball contains the binary, a systemd service file, and an example config.</p>
 
       <pre><div class="pre-head"><span class="lang">shell</span><span>fetch</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz
@@ -243,7 +257,7 @@ cat ~/.local/state/starla/probe_key.pub</code></div></pre>
     </section>
 
     <section id="mac">
-      <h2 class="section"><span class="num">F</span>macOS</h2>
+      <h2 class="section"><span class="num">G</span>macOS</h2>
 
       <h3>Homebrew</h3>
       <pre><div class="pre-head"><span class="lang">shell</span><span>brew</span></div><div class="pre-body"><code>brew install ananthb/starla/starla
@@ -290,7 +304,7 @@ starla.darwinModules.default
     </section>
 
     <section id="win">
-      <h2 class="section"><span class="num">G</span>Windows</h2>
+      <h2 class="section"><span class="num">H</span>Windows</h2>
       <p>Download the <code>.msi</code> installer from <a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>. It installs the binary to <code>Program Files\Starla</code> and adds it to <code>PATH</code>.</p>
 
       <pre><div class="pre-head"><span class="lang">shell</span><span>after install</span></div><div class="pre-body"><code><span class="c"># open a new terminal, then:</span>
@@ -300,7 +314,7 @@ starla</code></div></pre>
     </section>
 
     <section id="after">
-      <h2 class="section"><span class="num">H</span>After install</h2>
+      <h2 class="section"><span class="num">I</span>After install</h2>
 
       <ol>
         <li>Start starla. On first run it generates an SSH key and logs the public key.</li>
@@ -311,7 +325,7 @@ starla</code></div></pre>
     </section>
 
     <section id="config">
-      <h2 class="section"><span class="num">I</span>Config file</h2>
+      <h2 class="section"><span class="num">J</span>Config file</h2>
       <p>
         See <a href="https://github.com/ananthb/starla/blob/main/config.toml.example">config.toml.example</a>
         for all options. The config file is optional &mdash; every setting has a sensible default.
@@ -337,6 +351,7 @@ starla</code></div></pre>
       <div class="rail-label">At a glance</div>
       <dl>
         <dt>Container</dt><dd>ghcr.io</dd>
+        <dt>Home Assistant</dt><dd>add-on</dd>
         <dt>Linux</dt><dd>.deb · .rpm · tar</dd>
         <dt>NixOS</dt><dd>flake module</dd>
         <dt>macOS</dt><dd>brew · dmg · nix</dd>

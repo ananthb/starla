@@ -1,0 +1,26 @@
+name: Starla
+version: "0.6.6"
+slug: starla
+description: Unofficial RIPE Atlas software probe
+url: https://github.com/ananthb/starla
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+boot: auto
+# Host networking so measurements (including IPv6) see the real network
+# instead of the Docker bridge.
+host_network: true
+privileged:
+  - NET_RAW
+options:
+  log_level: info
+  rxtxrpt: false
+  metrics: false
+  metrics_listen_addr: 127.0.0.1:9695
+schema:
+  log_level: list(trace|debug|info|warn|error)
+  rxtxrpt: bool
+  metrics: bool
+  metrics_listen_addr: str
