@@ -22,5 +22,18 @@ open = "5"
 arboard = "3"
 png = "0.18"
 
+# Localization. Catalogues in i18n/ are embedded at compile time and
+# translated through Weblate; `fl!` checks message ids while compiling.
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8"
+# Only for FluentValue: `fl!` collects its arguments into one HashMap, so
+# a message mixing text and numeric arguments needs them pre-converted.
+# Keep this in step with the fluent version i18n-embed depends on.
+fluent = "0.17"
+
+[dev-dependencies]
+fluent-syntax = "0.12"
+
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

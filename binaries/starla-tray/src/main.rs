@@ -1,9 +1,13 @@
 //! Starla tray app: system tray icon showing probe status
 
 mod daemon;
+mod i18n;
 
+use crate::i18n::LANGUAGE_LOADER;
 use anyhow::Result;
 use chrono::{DateTime, Local, Utc};
+use fluent::FluentValue;
+use i18n_embed_fl::fl;
 use starla_common::pause::PauseState;
 use starla_common::status::ProbeStatus;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -69,20 +73,35 @@ fn format_uptime(secs: u64) -> String {
     let hours = (secs % 86400) / 3600;
     let mins = (secs % 3600) / 60;
     if days > 0 {
-        format!("{}d {}h {}m", days, hours, mins)
+        fl!(
+            LANGUAGE_LOADER,
+            "uptime-days",
+            days = days,
+            hours = hours,
+            minutes = mins
+        )
     } else if hours > 0 {
-        format!("{}h {}m", hours, mins)
+        fl!(
+            LANGUAGE_LOADER,
+            "uptime-hours",
+            hours = hours,
+            minutes = mins
+        )
     } else {
-        format!("{}m", mins)
+        fl!(LANGUAGE_LOADER, "uptime-minutes", minutes = mins)
     }
 }
 
 fn format_pause(state: &PauseState) -> String {
     match state {
-        PauseState::Indefinite => "Paused indefinitely".to_string(),
+        PauseState::Indefinite => fl!(LANGUAGE_LOADER, "status-paused-indefinitely"),
         PauseState::Until(t) => {
             let local: DateTime<Local> = (*t).into();
-            format!("Paused until {}", local.format("%H:%M"))
+            fl!(
+                LANGUAGE_LOADER,
+                "status-paused-until",
+                time = local.format("%H:%M").to_string()
+            )
         }
     }
 }
@@ -94,34 +113,56 @@ fn status_lines(s: &ProbeStatus) -> (String, Option<String>) {
         return (format_pause(p), None);
     }
     if s.connected {
-        return ("Connected".to_string(), None);
+        return (fl!(LANGUAGE_LOADER, "status-connected"), None);
     }
     if s.probe_id == 0 {
         return (
-            "Not registered".to_string(),
-            Some("Register the public key at atlas.ripe.net/apply/swprobe".to_string()),
+            fl!(LANGUAGE_LOADER, "status-not-registered"),
+            Some(fl!(LANGUAGE_LOADER, "status-register-hint")),
         );
     }
+    // The controller's own error text arrives in English; only the
+    // stand-in for "no error reported" is ours to translate.
     let detail = s
         .last_connection_error
         .clone()
-        .unwrap_or_else(|| "controller unreachable".to_string());
-    ("Disconnected".to_string(), Some(detail))
+        .unwrap_or_else(|| fl!(LANGUAGE_LOADER, "status-controller-unreachable"));
+    (fl!(LANGUAGE_LOADER, "status-disconnected"), Some(detail))
 }
 
 /// Pause duration options shown in the tray submenu, in order.
-fn pause_options() -> Vec<(&'static str, &'static str, Option<chrono::Duration>)> {
+fn pause_options() -> Vec<(&'static str, String, Option<chrono::Duration>)> {
     vec![
         (
             "pause_30m",
-            "30 minutes",
+            fl!(LANGUAGE_LOADER, "pause-30m"),
             Some(chrono::Duration::minutes(30)),
         ),
-        ("pause_1h", "1 hour", Some(chrono::Duration::hours(1))),
-        ("pause_4h", "4 hours", Some(chrono::Duration::hours(4))),
-        ("pause_8h", "8 hours", Some(chrono::Duration::hours(8))),
-        ("pause_24h", "24 hours", Some(chrono::Duration::hours(24))),
-        ("pause_indefinite", "Indefinitely", None),
+        (
+            "pause_1h",
+            fl!(LANGUAGE_LOADER, "pause-1h"),
+            Some(chrono::Duration::hours(1)),
+        ),
+        (
+            "pause_4h",
+            fl!(LANGUAGE_LOADER, "pause-4h"),
+            Some(chrono::Duration::hours(4)),
+        ),
+        (
+            "pause_8h",
+            fl!(LANGUAGE_LOADER, "pause-8h"),
+            Some(chrono::Duration::hours(8)),
+        ),
+        (
+            "pause_24h",
+            fl!(LANGUAGE_LOADER, "pause-24h"),
+            Some(chrono::Duration::hours(24)),
+        ),
+        (
+            "pause_indefinite",
+            fl!(LANGUAGE_LOADER, "pause-indefinite"),
+            None,
+        ),
     ]
 }
 
@@ -160,10 +201,22 @@ impl App {
                 let _ = menu.append(&MenuItem::new(line, false, None));
             }
             if s.probe_id != 0 {
-                let _ = menu.append(&MenuItem::new(format!("Probe {}", s.probe_id), false, None));
+                let _ = menu.append(&MenuItem::new(
+                    fl!(
+                        LANGUAGE_LOADER,
+                        "menu-probe-id",
+                        id = s.probe_id.to_string()
+                    ),
+                    false,
+                    None,
+                ));
             }
             let _ = menu.append(&MenuItem::new(
-                format!("Uptime: {}", format_uptime(s.uptime_secs)),
+                fl!(
+                    LANGUAGE_LOADER,
+                    "menu-uptime",
+                    uptime = format_uptime(s.uptime_secs)
+                ),
                 false,
                 None,
             ));
@@ -171,15 +224,25 @@ impl App {
 
             let total: u64 = s.measurements.values().sum();
             let _ = menu.append(&MenuItem::new(
-                format!("Measurements: {}", total),
+                fl!(LANGUAGE_LOADER, "menu-measurements", count = total),
                 false,
                 None,
             ));
             let mut types: Vec<_> = s.measurements.iter().collect();
             types.sort_by(|a, b| b.1.cmp(a.1));
             for (name, count) in types {
+                // The two-space indent is layout, not text: it stays
+                // outside the catalogue so translators can't lose it.
                 let _ = menu.append(&MenuItem::new(
-                    format!("  {}: {}", name, count),
+                    format!(
+                        "  {}",
+                        fl!(
+                            LANGUAGE_LOADER,
+                            "menu-measurement-type",
+                            name = FluentValue::from(name.as_str()),
+                            count = FluentValue::from(*count)
+                        )
+                    ),
                     false,
                     None,
                 ));
@@ -189,12 +252,12 @@ impl App {
             if s.pause.is_some() {
                 let _ = menu.append(&MenuItem::with_id(
                     self.ids.resume.clone(),
-                    "Resume measurements",
+                    fl!(LANGUAGE_LOADER, "menu-resume"),
                     true,
                     None,
                 ));
             } else {
-                let submenu = Submenu::new("Pause measurements", true);
+                let submenu = Submenu::new(fl!(LANGUAGE_LOADER, "menu-pause"), true);
                 for (id, label, _) in pause_options() {
                     let _ = submenu.append(&MenuItem::with_id(MenuId::new(id), label, true, None));
                 }
@@ -205,13 +268,13 @@ impl App {
                 let _ = menu.append(&PredefinedMenuItem::separator());
                 let _ = menu.append(&MenuItem::with_id(
                     self.ids.restart_daemon.clone(),
-                    "Restart probe",
+                    fl!(LANGUAGE_LOADER, "menu-restart-probe"),
                     true,
                     None,
                 ));
                 let _ = menu.append(&MenuItem::with_id(
                     self.ids.stop_daemon.clone(),
-                    "Stop probe",
+                    fl!(LANGUAGE_LOADER, "menu-stop-probe"),
                     true,
                     None,
                 ));
@@ -219,17 +282,21 @@ impl App {
         } else {
             // Status unreadable — daemon may be down or stuck. Restart
             // recovers the stuck case; Start covers the down case.
-            let _ = menu.append(&MenuItem::new("Probe not responding", false, None));
+            let _ = menu.append(&MenuItem::new(
+                fl!(LANGUAGE_LOADER, "status-not-responding"),
+                false,
+                None,
+            ));
             if daemon::SUPPORTED {
                 let _ = menu.append(&MenuItem::with_id(
                     self.ids.start_daemon.clone(),
-                    "Start probe",
+                    fl!(LANGUAGE_LOADER, "menu-start-probe"),
                     true,
                     None,
                 ));
                 let _ = menu.append(&MenuItem::with_id(
                     self.ids.restart_daemon.clone(),
-                    "Restart probe",
+                    fl!(LANGUAGE_LOADER, "menu-restart-probe"),
                     true,
                     None,
                 ));
@@ -239,20 +306,20 @@ impl App {
         let _ = menu.append(&PredefinedMenuItem::separator());
         let _ = menu.append(&MenuItem::with_id(
             self.ids.copy_key.clone(),
-            "Copy Public Key",
+            fl!(LANGUAGE_LOADER, "menu-copy-key"),
             true,
             None,
         ));
         let _ = menu.append(&MenuItem::with_id(
             self.ids.open_atlas.clone(),
-            "Open RIPE Atlas",
+            fl!(LANGUAGE_LOADER, "menu-open-atlas"),
             true,
             None,
         ));
         let _ = menu.append(&PredefinedMenuItem::separator());
         let _ = menu.append(&MenuItem::with_id(
             self.ids.quit.clone(),
-            "Quit",
+            fl!(LANGUAGE_LOADER, "menu-quit"),
             true,
             None,
         ));
@@ -300,17 +367,30 @@ impl ApplicationHandler for App {
                 self.status_version.fetch_add(1, Ordering::Release);
             } else if event.id == self.ids.start_daemon {
                 if let Err(e) = daemon::start() {
-                    eprintln!("Failed to start probe: {}", e);
+                    eprintln!(
+                        "{}",
+                        fl!(LANGUAGE_LOADER, "error-start-probe", error = e.to_string())
+                    );
                 }
                 self.bump_after_daemon_command();
             } else if event.id == self.ids.restart_daemon {
                 if let Err(e) = daemon::restart() {
-                    eprintln!("Failed to restart probe: {}", e);
+                    eprintln!(
+                        "{}",
+                        fl!(
+                            LANGUAGE_LOADER,
+                            "error-restart-probe",
+                            error = e.to_string()
+                        )
+                    );
                 }
                 self.bump_after_daemon_command();
             } else if event.id == self.ids.stop_daemon {
                 if let Err(e) = daemon::stop() {
-                    eprintln!("Failed to stop probe: {}", e);
+                    eprintln!(
+                        "{}",
+                        fl!(LANGUAGE_LOADER, "error-stop-probe", error = e.to_string())
+                    );
                 }
                 self.bump_after_daemon_command();
             } else if let Some((_, _, dur)) = pause_options()
@@ -372,6 +452,9 @@ fn refresh_status_from_disk(status: &Arc<Mutex<Option<ProbeStatus>>>) {
 }
 
 fn main() -> Result<()> {
+    // Before anything builds a string for the UI.
+    i18n::init();
+
     let event_loop = EventLoop::new()?;
 
     let icon = load_icon();
@@ -405,12 +488,19 @@ fn main() -> Result<()> {
         .map(|s| {
             let (header, _) = status_lines(s);
             if s.probe_id != 0 {
-                format!("Starla {}: {}", s.probe_id, header)
+                fl!(
+                    LANGUAGE_LOADER,
+                    "tooltip-probe",
+                    // Probe IDs are identifiers, not quantities: format
+                    // them as text so no locale inserts a group separator.
+                    id = s.probe_id.to_string(),
+                    status = header
+                )
             } else {
-                format!("Starla: {}", header)
+                fl!(LANGUAGE_LOADER, "tooltip", status = header)
             }
         })
-        .unwrap_or_else(|| "Starla: probe not responding".to_string());
+        .unwrap_or_else(|| fl!(LANGUAGE_LOADER, "tooltip-not-responding"));
 
     let tray_builder = TrayIconBuilder::new()
         .with_tooltip(&tooltip)
