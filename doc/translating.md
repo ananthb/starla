@@ -96,24 +96,38 @@ Components to create, all in project `starla`:
 | `docs-verify` | HTML file | `doc/*/verify.html` | `doc/en/verify.html` |
 | `addon` | YAML file | `starla/translations/*.yaml` | `starla/translations/en.yaml` |
 
-For each: source language English, "Template for new translations" set to
-the monolingual base file, and "Edit base file" left off — English is
-changed in git, not in Weblate. The Markdown and HTML components take the
-format parameter `markdown_merge_duplicates` / `html_merge_duplicates` so
-a repeated line stays one unit.
+Weblate's "add component from version control" flow detects all eight
+layouts on its own — point it at the repository, and each row in the table
+above appears as a choice. What it gets wrong by default:
 
-Only the first component needs repository credentials; the rest can be
-linked to it (`weblate://starla/tray`).
+- **"Edit base file"** arrives checked. Turn it off everywhere: English is
+  changed in git, not in Weblate.
+- **Markdown "Extract code blocks"** arrives checked, which offers
+  translators the `docker run` lines from the README's quick start. Turn it
+  off; unextracted content is copied through verbatim.
+- **"Deduplicate identical strings"** (`markdown_merge_duplicates` /
+  `html_merge_duplicates`) is off by default. Turn it on so a repeated line
+  stays one unit and reordering cannot lose a translation.
 
-Repository settings:
+Only the first component needs repository credentials; the rest are linked
+to it with `weblate://starla/tray` as their repository.
 
+Repository settings, on the `tray` component that owns the checkout:
+
+- **Version control system**: GitHub pull request
 - **Repository branch**: `main`
 - **Push branch**: `weblate` — Weblate opens a pull request rather than
   pushing to `main`, so translations go through CI like anything else.
-- Enable the **Squash Git commits** add-on (one commit per language) and
-  **Update LINGUAS file** is not needed.
+- **Repository URL must be SSH** — `git@github.com:ananthb/starla.git`.
+  With the HTTPS URL, Weblate can read the repository but every push fails
+  with `could not read Username`, and it locks the affected components
+  until the push succeeds. Weblate's own public key (shown under *Manage →
+  SSH keys*) has to be added to the repository as a deploy key with write
+  access.
+- Enable the **Squash Git commits** add-on (one commit per language).
 - Add a GitHub webhook to <https://hosted.weblate.org/hooks/github/> so
-  Weblate notices English string changes immediately.
+  Weblate notices English string changes immediately; without it the
+  repository is only pulled manually.
 
 `.weblate` in the repository root points the
 [`wlc`](https://docs.weblate.org/en/latest/wlc.html) command line client
