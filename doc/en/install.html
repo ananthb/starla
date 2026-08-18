@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Install &amp; Run — starla</title>
-<link rel="icon" type="image/png" href="logo.png">
-<link rel="stylesheet" href="style.css">
+<link rel="icon" type="image/png" href="../logo.png">
+<link rel="stylesheet" href="../style.css">
 <script>
   (function(){
     try {
@@ -20,7 +20,7 @@
 
   <header class="mast">
     <a class="brand" href="index.html">
-      <img src="logo.png" alt="">
+      <img src="../logo.png" alt="">
       <span class="word">starla</span>
     </a>
     <div class="meta">
@@ -39,7 +39,7 @@
       <li><span class="num">03</span><a href="architecture.html">Architecture</a></li>
       <li><span class="num">04</span><a href="protocol.html">Protocol</a></li>
       <li><span class="num">05</span><a href="verify.html">Verify</a></li>
-      <li><span class="num">06</span><a href="api/starla_common/index.html">API docs</a></li>
+      <li><span class="num">06</span><a href="../api/starla_common/index.html">API docs</a></li>
       <li><span class="num">↗</span><a href="https://github.com/ananthb/starla">Source</a></li>
     </ul>
 
@@ -56,6 +56,7 @@
       <li><a href="#win">Windows</a></li>
       <li><a href="#after">After install</a></li>
       <li><a href="#config">Config file</a></li>
+      <li><a href="#language">Language</a></li>
     </ul>
   </aside>
 
@@ -340,6 +341,22 @@ starla</code></div></pre>
       </ol>
 
       <p style="margin-top: 18px">Next: <a href="verify.html">verify your downloads →</a></p>
+    </section>
+
+    <section id="language">
+      <h2 class="section"><span class="num">K</span>Language</h2>
+      <p>
+        The tray app follows your desktop language, falling back to English for
+        anything not translated yet. Override it with <code>STARLA_LANG</code> &mdash;
+        handy for checking a translation without changing system settings:
+      </p>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>language override</span></div><div class="pre-body"><code>STARLA_LANG=es starla-tray</code></div></pre>
+      <p>
+        Probe logs stay in English so they remain greppable and easy to paste into
+        an issue. Translations are made on
+        <a href="https://hosted.weblate.org/engage/starla/">Weblate</a>: adding a
+        language takes no code change and no pull request.
+      </p>
     </section>
 
     <hr class="divider">

@@ -146,6 +146,11 @@
             mdbook
             graphviz
 
+            # Localization: doc/assemble.py builds the translated docs
+            # site, starla/check-translations.py validates the add-on
+            # option catalogues.
+            (python3.withPackages (ps: with ps; [ pyyaml ]))
+
             # Cargo tools
             cargo-audit
             cargo-outdated
@@ -161,6 +166,9 @@
             # Linux-specific
             iproute2
             tcpdump
+
+            # Validates the localized desktop entry
+            desktop-file-utils
           ];
 
           pre-commit-check = git-hooks.lib.${system}.run {

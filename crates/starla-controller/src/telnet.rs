@@ -613,7 +613,7 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
         // conntrack: the controller occasionally schedules a 'conntrack'
         // applet, but it's not in the reference busybox tree we vendored
         // (reference/probe-busybox/), so the RESULT id and field names are
-        // unknown. Stay silent rather than guess — see doc/protocol.html.
+        // unknown. Stay silent rather than guess — see doc/en/protocol.html.
         "conntrack" => {
             trace!("Ignoring conntrack CRONLINE (no reference impl available)");
             TelnetCommand::Ignored(cmd.to_string())

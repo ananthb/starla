@@ -14,6 +14,16 @@
     <string>0.6.4</string>
     <key>CFBundleShortVersionString</key>
     <string>0.6.4</string>
+    <!-- Languages the tray ships catalogues for. Keep in step with
+         binaries/starla-tray/i18n/; the bundle_declares_every_catalogue
+         test in binaries/starla-tray/src/packaging.rs enforces it. -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>es</string>
+    </array>
     <key>CFBundleIconFile</key>
     <string>icon</string>
     <key>CFBundlePackageType</key>

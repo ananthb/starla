@@ -1,0 +1,6 @@
+# Configuration for wlc, the Weblate command line client
+# (https://docs.weblate.org/en/latest/wlc.html). Component setup and the
+# translation workflow are documented in doc/translating.md.
+[weblate]
+url = https://hosted.weblate.org/api/
+translation = starla

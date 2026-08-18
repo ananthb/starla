@@ -35,8 +35,7 @@ jobs:
 
       - name: Assemble site
         run: |
-          mkdir -p site
-          cp doc/*.html doc/*.css doc/*.png doc/*.svg site/
+          python3 doc/assemble.py --source doc --out site
           mv target/doc site/api
 
       # Package repository generation

@@ -43,6 +43,9 @@ probe_key.pub
 result
 result-*
 
+# Assembled documentation site (doc/assemble.py)
+/site/
+
 # Goreleaser staging dirs (CI publish job)
 /prebuilt/
 /extras/

@@ -147,19 +147,14 @@ in
       };
     };
 
-    # Autostart desktop entry for tray (Linux)
+    # Autostart desktop entry for tray (Linux). Reuses the packaged
+    # entry so the launcher shows the same localized name and comment as
+    # the distro packages do; only the binary path differs.
     xdg.configFile."autostart/starla-tray.desktop" = lib.mkIf (cfg.tray.enable && pkgs.stdenv.hostPlatform.isLinux) {
-      text = ''
-        [Desktop Entry]
-        Type=Application
-        Name=Starla Tray
-        Comment=RIPE Atlas probe status
-        Exec=${cfg.trayPackage}/bin/starla-tray
-        Icon=starla
-        Categories=System;Monitor;
-        StartupNotify=false
-        X-GNOME-Autostart-enabled=true
-      '';
+      text = builtins.replaceStrings
+        [ "Exec=starla-tray" ]
+        [ "Exec=${cfg.trayPackage}/bin/starla-tray" ]
+        (builtins.readFile ../packaging/starla-tray.desktop);
     };
 
     # --- macOS: launchd agents ---

@@ -1,0 +1,8 @@
+# Localization config read at compile time by the `fl!` macro
+# (i18n-embed-fl) and at runtime by the loader in `src/i18n.rs`.
+# Translations live in i18n/<language>/starla-tray.ftl and are edited
+# through Weblate — see doc/translating.md.
+fallback_language = "en"
+
+[fluent]
+assets_dir = "i18n"

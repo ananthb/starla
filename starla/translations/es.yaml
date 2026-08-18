@@ -1,0 +1,19 @@
+---
+configuration:
+  log_level:
+    name: Nivel de registro
+    description: Detalle de la salida de registro de la sonda.
+  rxtxrpt:
+    name: Informes de tráfico de la interfaz
+    description: >-
+      Enviar a RIPE Atlas estadísticas de tráfico de las interfaces de red
+      (bytes y paquetes enviados y recibidos, errores).
+  metrics:
+    name: Métricas de Prometheus
+    description: Activar el exportador de métricas de Prometheus.
+  metrics_listen_addr:
+    name: Dirección de escucha de las métricas
+    description: >-
+      Dirección a la que se enlaza el exportador de métricas. El complemento
+      usa la red del anfitrión, así que enlaza directamente en el host. Usa
+      0.0.0.0:9695 para consultarlo desde otras máquinas.
