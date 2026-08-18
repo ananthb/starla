@@ -107,7 +107,7 @@ in
     # --- Linux: systemd user services ---
 
     # Probe daemon as user service
-    systemd.user.services.starla = lib.mkIf pkgs.stdenv.isLinux {
+    systemd.user.services.starla = lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
       Unit = {
         Description = "Starla RIPE Atlas Software Probe";
         After = [ "default.target" ];
@@ -128,7 +128,7 @@ in
     };
 
     # Tray app as user service (desktop only)
-    systemd.user.services.starla-tray = lib.mkIf (cfg.tray.enable && pkgs.stdenv.isLinux) {
+    systemd.user.services.starla-tray = lib.mkIf (cfg.tray.enable && pkgs.stdenv.hostPlatform.isLinux) {
       Unit = {
         Description = "Starla System Tray";
         After = [ "graphical-session-pre.target" ];
@@ -148,7 +148,7 @@ in
     };
 
     # Autostart desktop entry for tray (Linux)
-    xdg.configFile."autostart/starla-tray.desktop" = lib.mkIf (cfg.tray.enable && pkgs.stdenv.isLinux) {
+    xdg.configFile."autostart/starla-tray.desktop" = lib.mkIf (cfg.tray.enable && pkgs.stdenv.hostPlatform.isLinux) {
       text = ''
         [Desktop Entry]
         Type=Application
@@ -164,7 +164,7 @@ in
 
     # --- macOS: launchd agents ---
 
-    launchd.agents.starla = lib.mkIf pkgs.stdenv.isDarwin {
+    launchd.agents.starla = lib.mkIf pkgs.stdenv.hostPlatform.isDarwin {
       enable = true;
       config = {
         Label = "com.ananthb.starla";
@@ -188,7 +188,7 @@ in
       };
     };
 
-    launchd.agents.starla-tray = lib.mkIf (cfg.tray.enable && pkgs.stdenv.isDarwin) {
+    launchd.agents.starla-tray = lib.mkIf (cfg.tray.enable && pkgs.stdenv.hostPlatform.isDarwin) {
       enable = true;
       config = {
         Label = "com.ananthb.starla-tray";
@@ -204,7 +204,7 @@ in
     # Copy .app bundle into ~/Applications on activation (macOS).
     # home.file with recursive=true creates per-file symlinks which macOS
     # does not recognise as a valid bundle. Copy the whole .app instead.
-    home.activation.starla-tray-app = lib.mkIf (cfg.tray.enable && pkgs.stdenv.isDarwin)
+    home.activation.starla-tray-app = lib.mkIf (cfg.tray.enable && pkgs.stdenv.hostPlatform.isDarwin)
       (lib.hm.dag.entryAfter [ "writeBoundary" ] ''
         app_src="${cfg.trayPackage}/Applications/Starla Tray.app"
         app_dst="$HOME/Applications/Starla Tray.app"

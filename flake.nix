@@ -88,7 +88,7 @@
 
           buildInputs = with pkgs; [
             openssl
-          ] ++ lib.optionals stdenv.isLinux [
+          ] ++ lib.optionals stdenv.hostPlatform.isLinux [
             glib
             gtk3
             libayatana-appindicator
@@ -98,7 +98,7 @@
 
           # rscamper's two static archives duplicate ~100 utils.o symbols;
           # tell ld to accept the first copy rather than error.
-          rustFlagsLinux = pkgs.lib.optionalString pkgs.stdenv.isLinux
+          rustFlagsLinux = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux
             "-C link-arg=-Wl,--allow-multiple-definition";
 
           # Fix rscamper 0.2.2's hardcoded i8 uses in the vendored source;
@@ -157,7 +157,7 @@
 
             # Fuzzing
             cargo-fuzz
-          ] ++ lib.optionals stdenv.isLinux [
+          ] ++ lib.optionals stdenv.hostPlatform.isLinux [
             # Linux-specific
             iproute2
             tcpdump
@@ -266,7 +266,7 @@
               cargoBuildFlags = [ "-p" "starla-tray" ];
               doCheck = false;
 
-              postInstall = pkgs.lib.optionalString pkgs.stdenv.isDarwin ''
+              postInstall = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
                 # macOS .app bundle for the tray: gives it a dock icon,
                 # proper app lifecycle, and allows launchd to manage it.
                 mkdir -p "$out/Applications/Starla Tray.app/Contents/MacOS"
@@ -284,7 +284,7 @@
               };
             };
 
-          } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
             release =
               let
                 pkg = self.packages.${system}.default;
@@ -312,7 +312,7 @@
               pname = "starla-tray";
               name = "starla-tray-${if system == "x86_64-linux" then "x86_64" else "aarch64"}.AppImage";
             };
-          } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+          } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
             release =
               let
                 pkg = self.packages.${system}.default;
