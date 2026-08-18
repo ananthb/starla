@@ -144,6 +144,16 @@ body {
 }
 .mast .meta .theme-toggle:hover { color: var(--ink); border-color: var(--rule-strong); }
 .mast .meta .theme-toggle .glyph { width: 10px; display: inline-block; text-align: center; }
+/* language switcher — injected per page by doc/assemble.py */
+.mast .meta .langs { display: inline-flex; gap: 8px; }
+.mast .meta .langs a {
+  color: var(--ink-mute);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color .15s, border-color .15s;
+}
+.mast .meta .langs a:hover { color: var(--ink); border-color: var(--rule-strong); }
+.mast .meta .langs a[aria-current] { color: var(--ink); border-color: var(--rule-strong); }
 .mast .meta .live::before {
   content: "●";
   color: oklch(0.7 0.16 145);
