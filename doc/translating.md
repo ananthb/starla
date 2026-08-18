@@ -83,22 +83,16 @@ is free for libre-licensed projects; Starla qualifies under AGPL-3.0.
 Apply at <https://hosted.weblate.org/create/billing/> and pick the Libre
 plan.
 
-Components to create, all in project `starla`:
+Weblate's "add component from version control" flow detects every
+translatable layout in the repository on its own: point it at
+<https://github.com/ananthb/starla.git> and it offers the Fluent
+catalogue, the README, one entry per documentation page, and the add-on
+options — file masks and base files already filled in. Run it once per
+layout, naming the components `tray`, `readme`, `docs-index`,
+`docs-install`, `docs-architecture`, `docs-protocol`, `docs-verify` and
+`addon`; the file table above says which files each one covers.
 
-| Component | File format | File mask | Monolingual base |
-| --------- | ----------- | --------- | ---------------- |
-| `tray` | Fluent | `binaries/starla-tray/i18n/*/starla-tray.ftl` | `binaries/starla-tray/i18n/en/starla-tray.ftl` |
-| `readme` | Markdown file | `README.*.md` | `README.md` |
-| `docs-index` | HTML file | `doc/*/index.html` | `doc/en/index.html` |
-| `docs-install` | HTML file | `doc/*/install.html` | `doc/en/install.html` |
-| `docs-architecture` | HTML file | `doc/*/architecture.html` | `doc/en/architecture.html` |
-| `docs-protocol` | HTML file | `doc/*/protocol.html` | `doc/en/protocol.html` |
-| `docs-verify` | HTML file | `doc/*/verify.html` | `doc/en/verify.html` |
-| `addon` | YAML file | `starla/translations/*.yaml` | `starla/translations/en.yaml` |
-
-Weblate's "add component from version control" flow detects all eight
-layouts on its own — point it at the repository, and each row in the table
-above appears as a choice. What it gets wrong by default:
+What discovery gets wrong by default:
 
 - **"Edit base file"** arrives checked. Turn it off everywhere: English is
   changed in git, not in Weblate.
