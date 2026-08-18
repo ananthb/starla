@@ -2,6 +2,7 @@
 
 mod daemon;
 mod i18n;
+mod packaging;
 
 use crate::i18n::LANGUAGE_LOADER;
 use anyhow::Result;
@@ -452,6 +453,14 @@ fn refresh_status_from_disk(status: &Arc<Mutex<Option<ProbeStatus>>>) {
 }
 
 fn main() -> Result<()> {
+    // Packaging helper: renders packaging/starla-tray.desktop from the
+    // translation catalogues. Handled before the event loop exists
+    // because it never opens a window.
+    if std::env::args().any(|arg| arg == "--print-desktop-entry") {
+        print!("{}", packaging::desktop_entry());
+        return Ok(());
+    }
+
     // Before anything builds a string for the UI.
     i18n::init();
 
