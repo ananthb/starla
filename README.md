@@ -2,6 +2,12 @@
   <img src="assets/logo.png" width="128" height="128" alt="Starla logo">
 </p>
 
+<p align="center">
+  <a href="README.md">English</a> ·
+  <a href="README.es.md">Español</a> ·
+  <a href="https://hosted.weblate.org/engage/starla/">+ your language</a>
+</p>
+
 # Starla
 
 An alternative unofficial [RIPE Atlas](https://atlas.ripe.net) software probe written in Rust.
@@ -9,6 +15,7 @@ An alternative unofficial [RIPE Atlas](https://atlas.ripe.net) software probe wr
 [![License](https://img.shields.io/github/license/ananthb/starla)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/ananthb/starla)](https://github.com/ananthb/starla/releases)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://ananthb.github.io/starla/)
+[![Translation status](https://hosted.weblate.org/widget/starla/svg-badge.svg)](https://hosted.weblate.org/engage/starla/)
 
 ## Features
 
@@ -76,6 +83,14 @@ configuration, and signature verification.
 - [Installation & Configuration](https://ananthb.github.io/starla/install.html)
 - [Architecture](https://ananthb.github.io/starla/architecture.html)
 - [API Reference](https://ananthb.github.io/starla/api/starla_common/)
+
+## Translating
+
+Starla speaks whatever languages people contribute: the tray app, this
+README, and the documentation site are all translated on
+[Weblate](https://hosted.weblate.org/engage/starla/). Adding a language
+takes no Rust and no pull request — see
+[doc/translating.md](doc/translating.md).
 
 ## License
 
