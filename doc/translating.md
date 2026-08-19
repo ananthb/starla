@@ -112,12 +112,20 @@ Repository settings, on the `tray` component that owns the checkout:
 - **Repository branch**: `main`
 - **Push branch**: `weblate` — Weblate opens a pull request rather than
   pushing to `main`, so translations go through CI like anything else.
-- **Repository URL must be SSH** — `git@github.com:ananthb/starla.git`.
-  With the HTTPS URL, Weblate can read the repository but every push fails
-  with `could not read Username`, and it locks the affected components
-  until the push succeeds. Weblate's own public key (shown under *Manage →
-  SSH keys*) has to be added to the repository as a deploy key with write
-  access.
+- **Push access comes from the GitHub App, not from a key.** Until it is
+  connected, Weblate can read the repository but every push fails with
+  `could not read Username`, and it locks the affected components until
+  the push succeeds. Connect it under *workspace → Operations →
+  Code-hosting connections → Connect GitHub account*, granting the
+  `hosted-weblate` app access to this repository; it then pushes and
+  opens pull requests with installation tokens.
+
+  The alert Weblate raises suggests switching to
+  `git@github.com:ananthb/starla.git` and adding its SSH key as a deploy
+  key instead. That cannot work here: Hosted Weblate serves one key for
+  the whole instance, GitHub requires deploy keys to be globally unique,
+  and the key is already registered against someone else's repository —
+  `gh repo deploy-key add` fails with `key is already in use`.
 - Enable the **Squash Git commits** add-on (one commit per language).
 - Add a GitHub webhook to <https://hosted.weblate.org/hooks/github/> so
   Weblate notices English string changes immediately; without it the
