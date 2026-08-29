@@ -83,37 +83,53 @@ is free for libre-licensed projects; Starla qualifies under AGPL-3.0.
 Apply at <https://hosted.weblate.org/create/billing/> and pick the Libre
 plan.
 
-Components to create, all in project `starla`:
+Weblate's "add component from version control" flow detects every
+translatable layout in the repository on its own: point it at
+<https://github.com/ananthb/starla.git> and it offers the Fluent
+catalogue, the README, one entry per documentation page, and the add-on
+options — file masks and base files already filled in. Run it once per
+layout, naming the components `tray`, `readme`, `docs-index`,
+`docs-install`, `docs-architecture`, `docs-protocol`, `docs-verify` and
+`addon`; the file table above says which files each one covers.
 
-| Component | File format | File mask | Monolingual base |
-| --------- | ----------- | --------- | ---------------- |
-| `tray` | Fluent | `binaries/starla-tray/i18n/*/starla-tray.ftl` | `binaries/starla-tray/i18n/en/starla-tray.ftl` |
-| `readme` | Markdown file | `README.*.md` | `README.md` |
-| `docs-index` | HTML file | `doc/*/index.html` | `doc/en/index.html` |
-| `docs-install` | HTML file | `doc/*/install.html` | `doc/en/install.html` |
-| `docs-architecture` | HTML file | `doc/*/architecture.html` | `doc/en/architecture.html` |
-| `docs-protocol` | HTML file | `doc/*/protocol.html` | `doc/en/protocol.html` |
-| `docs-verify` | HTML file | `doc/*/verify.html` | `doc/en/verify.html` |
-| `addon` | YAML file | `starla/translations/*.yaml` | `starla/translations/en.yaml` |
+What discovery gets wrong by default:
 
-For each: source language English, "Template for new translations" set to
-the monolingual base file, and "Edit base file" left off — English is
-changed in git, not in Weblate. The Markdown and HTML components take the
-format parameter `markdown_merge_duplicates` / `html_merge_duplicates` so
-a repeated line stays one unit.
+- **"Edit base file"** arrives checked. Turn it off everywhere: English is
+  changed in git, not in Weblate.
+- **Markdown "Extract code blocks"** arrives checked, which offers
+  translators the `docker run` lines from the README's quick start. Turn it
+  off; unextracted content is copied through verbatim.
+- **"Deduplicate identical strings"** (`markdown_merge_duplicates` /
+  `html_merge_duplicates`) is off by default. Turn it on so a repeated line
+  stays one unit and reordering cannot lose a translation.
 
-Only the first component needs repository credentials; the rest can be
-linked to it (`weblate://starla/tray`).
+Only the first component needs repository credentials; the rest are linked
+to it with `weblate://starla/tray` as their repository.
 
-Repository settings:
+Repository settings, on the `tray` component that owns the checkout:
 
+- **Version control system**: GitHub pull request
 - **Repository branch**: `main`
 - **Push branch**: `weblate` — Weblate opens a pull request rather than
   pushing to `main`, so translations go through CI like anything else.
-- Enable the **Squash Git commits** add-on (one commit per language) and
-  **Update LINGUAS file** is not needed.
+- **Push access comes from the GitHub App, not from a key.** Until it is
+  connected, Weblate can read the repository but every push fails with
+  `could not read Username`, and it locks the affected components until
+  the push succeeds. Connect it under *workspace → Operations →
+  Code-hosting connections → Connect GitHub account*, granting the
+  `hosted-weblate` app access to this repository; it then pushes and
+  opens pull requests with installation tokens.
+
+  The alert Weblate raises suggests switching to
+  `git@github.com:ananthb/starla.git` and adding its SSH key as a deploy
+  key instead. That cannot work here: Hosted Weblate serves one key for
+  the whole instance, GitHub requires deploy keys to be globally unique,
+  and the key is already registered against someone else's repository —
+  `gh repo deploy-key add` fails with `key is already in use`.
+- Enable the **Squash Git commits** add-on (one commit per language).
 - Add a GitHub webhook to <https://hosted.weblate.org/hooks/github/> so
-  Weblate notices English string changes immediately.
+  Weblate notices English string changes immediately; without it the
+  repository is only pulled manually.
 
 `.weblate` in the repository root points the
 [`wlc`](https://docs.weblate.org/en/latest/wlc.html) command line client
