@@ -30,6 +30,7 @@ jobs:
           # is appended after that flag so the later -A wins; the short form
           # is joined to its value because impure-env splits on spaces.
           extra-conf: |
+            extra-experimental-features = configurable-impure-env
             impure-env = NIX_CURL_FLAGS=-ANixpkgs
 
       - uses: cachix/cachix-action@v17
