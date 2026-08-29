@@ -13,12 +13,20 @@ use starla_common::pause::PauseState;
 use starla_common::status::ProbeStatus;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tray_icon::menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 
 const TRAY_ICON_PNG: &[u8] = include_bytes!("../tray.png");
+
+/// How often the event loop wakes to drain menu events and re-render the
+/// menu. The tray owns no windows, so no OS event ever arrives to wake it
+/// on its own; without a deadline the default `ControlFlow::Wait` blocks
+/// forever and the menu stays frozen at whatever launch-time status it was
+/// built from.
+const TICK: Duration = Duration::from_millis(250);
 
 /// Decode the embedded PNG into the `Icon` shape tray-icon expects.
 /// macOS reads only the alpha mask when the icon is marked as a template
@@ -53,7 +61,6 @@ fn read_status() -> Option<ProbeStatus> {
     {
         use std::io::Read;
         use std::os::unix::net::UnixStream;
-        use std::time::Duration;
 
         let socket_path = starla_common::status_socket_path();
         let mut stream = UnixStream::connect(&socket_path).ok()?;
@@ -340,6 +347,12 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Re-arm the deadline every pass. This is what keeps the loop
+        // running at all: the tray has no windows, so nothing else ever
+        // wakes it, and both the menu-event drain below and the rebuild
+        // at the end of this function only happen while it does.
+        event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + TICK));
+
         if let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id == self.ids.quit {
                 event_loop.exit();
