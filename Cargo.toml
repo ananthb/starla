@@ -24,13 +24,13 @@ repository = "https://github.com/ananthb/starla"
 [workspace.dependencies]
 # Intra-workspace crates. Versions are required for `cargo publish` to
 # rewrite path deps; bump these alongside [workspace.package].version.
-starla-common       = { path = "crates/starla-common",       version = "0.6.6" }
-starla-network      = { path = "crates/starla-network",      version = "0.6.6" }
-starla-measurements = { path = "crates/starla-measurements", version = "0.6.6" }
-starla-scheduler    = { path = "crates/starla-scheduler",    version = "0.6.6" }
-starla-controller   = { path = "crates/starla-controller",   version = "0.6.6" }
-starla-results      = { path = "crates/starla-results",      version = "0.6.6" }
-starla-metrics      = { path = "crates/starla-metrics",      version = "0.6.6" }
+starla-common       = { path = "crates/starla-common",       version = "0.7.1" }
+starla-network      = { path = "crates/starla-network",      version = "0.7.1" }
+starla-measurements = { path = "crates/starla-measurements", version = "0.7.1" }
+starla-scheduler    = { path = "crates/starla-scheduler",    version = "0.7.1" }
+starla-controller   = { path = "crates/starla-controller",   version = "0.7.1" }
+starla-results      = { path = "crates/starla-results",      version = "0.7.1" }
+starla-metrics      = { path = "crates/starla-metrics",      version = "0.7.1" }
 
 # Async runtime
 tokio = { version = "1.52", features = ["full"] }
