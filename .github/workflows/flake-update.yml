@@ -17,6 +17,13 @@ jobs:
       - uses: actions/checkout@v6
 
       - uses: DeterminateSystems/nix-installer-action@v22
+        with:
+          # crates.io now 403s any User-Agent starting with "curl/", and
+          # nixpkgs' fetchurl sends "curl/<ver> Nixpkgs/<ver>". NIX_CURL_FLAGS
+          # is appended after that flag so the later -A wins; the short form
+          # is joined to its value because impure-env splits on spaces.
+          extra-conf: |
+            impure-env = NIX_CURL_FLAGS=-ANixpkgs
 
       - uses: cachix/cachix-action@v17
         with:
