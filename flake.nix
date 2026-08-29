@@ -309,6 +309,24 @@
                 chmod +w starla/starla starla/starla-tray
                 patchelf --remove-rpath starla/starla
                 patchelf --remove-rpath starla/starla-tray
+
+                # Fail the build if either RPATH survived. A /nix/store RUNPATH
+                # sends the loader somewhere that does not exist on a user's
+                # machine and the binary dies before main, with a message that
+                # says nothing about why. The macOS side already refuses to ship
+                # a bundle whose load commands still point into the store; this
+                # is the same guarantee for the Linux artifacts, which the deb
+                # and rpm packages are built from as well.
+                # patchelf --print-rpath rather than readelf, so the check
+                # needs nothing that is not already in nativeBuildInputs.
+                for bin in starla/starla starla/starla-tray; do
+                  rpath=$(patchelf --print-rpath "$bin")
+                  if [ -n "$rpath" ]; then
+                    echo "ERROR: $bin still has an RPATH after patchelf: $rpath" >&2
+                    exit 1
+                  fi
+                done
+
                 cp ${./config.toml.example} starla/config.toml.example
                 cp ${./starla.service} starla/starla.service
                 cp ${./packaging/starla-tray.desktop} starla/starla-tray.desktop
