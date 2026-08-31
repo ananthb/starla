@@ -83,19 +83,33 @@ is free for libre-licensed projects; Starla qualifies under AGPL-3.0.
 Apply at <https://hosted.weblate.org/create/billing/> and pick the Libre
 plan.
 
-Weblate's "add component from version control" flow detects every
-translatable layout in the repository on its own: point it at
-<https://github.com/ananthb/starla.git> and it offers the Fluent
-catalogue, the README, one entry per documentation page, and the add-on
-options — file masks and base files already filled in. Run it once per
-layout, naming the components `tray`, `readme`, `docs-index`,
-`docs-install`, `docs-architecture`, `docs-protocol`, `docs-verify` and
-`addon`; the file table above says which files each one covers.
+Components must be created through the GitHub App connection, not by
+typing a repository URL. Connect the app first, under *workspace →
+Operations → Code-hosting connections → Connect GitHub account*, granting
+`hosted-weblate` access to this repository. Then create every component
+from *Create component → From connected account → Import*: that flow is
+the only one that offers the `GitHub (via Weblate GitHub app)` version
+control system, and it is the binding that lets Weblate push. A component
+created from a hand-typed URL uses plain `GitHub pull request` instead,
+reads the repository fine, and fails every push with `could not read
+Username`, locking itself and everything linked to it; the version
+control system cannot be changed afterwards, so such a component has to
+be recreated.
+
+The import pre-fills the repository and branch, then discovery detects
+every translatable layout on its own: the Fluent catalogue, the README,
+one entry per documentation page, and the add-on options — file masks and
+base files already filled in. Run it once per layout, naming the
+components `tray`, `readme`, `docs-index`, `docs-install`,
+`docs-architecture`, `docs-protocol`, `docs-verify` and `addon`; the file
+table above says which files each one covers.
 
 What discovery gets wrong by default:
 
 - **"Edit base file"** arrives checked. Turn it off everywhere: English is
   changed in git, not in Weblate.
+- **"Manage strings"** arrives checked and is invalid for every format
+  used here; Weblate only complains when the component is next saved.
 - **Markdown "Extract code blocks"** arrives checked, which offers
   translators the `docker run` lines from the README's quick start. Turn it
   off; unextracted content is copied through verbatim.
@@ -103,33 +117,38 @@ What discovery gets wrong by default:
   `html_merge_duplicates`) is off by default. Turn it on so a repeated line
   stays one unit and reordering cannot lose a translation.
 
-Only the first component needs repository credentials; the rest are linked
-to it with `weblate://starla/tray` as their repository.
+Only the first component needs the repository; the rest are linked to it
+with `weblate://starla/tray` as their repository. Deleting the component
+that owns the checkout deletes every component linked to it, so repoint
+the links first if it ever has to be replaced.
 
-Repository settings, on the `tray` component that owns the checkout:
+The HTML components need `safe-html` in **Translation flags**, so a
+translator cannot introduce markup the source does not have.
 
-- **Version control system**: GitHub pull request
-- **Repository branch**: `main`
-- **Push branch**: `weblate` — Weblate opens a pull request rather than
-  pushing to `main`, so translations go through CI like anything else.
-- **Push access comes from the GitHub App, not from a key.** Until it is
-  connected, Weblate can read the repository but every push fails with
-  `could not read Username`, and it locks the affected components until
-  the push succeeds. Connect it under *workspace → Operations →
-  Code-hosting connections → Connect GitHub account*, granting the
-  `hosted-weblate` app access to this repository; it then pushes and
-  opens pull requests with installation tokens.
+Push settings live on the `tray` component that owns the checkout, and
+the app backend fills most of them in: branch `main`, an empty push URL,
+and a pull request opened from a fork rather than a push to `main`, so
+translations go through CI like anything else.
 
-  The alert Weblate raises suggests switching to
-  `git@github.com:ananthb/starla.git` and adding its SSH key as a deploy
-  key instead. That cannot work here: Hosted Weblate serves one key for
-  the whole instance, GitHub requires deploy keys to be globally unique,
-  and the key is already registered against someone else's repository —
-  `gh repo deploy-key add` fails with `key is already in use`.
+Weblate's own alert suggests switching to
+`git@github.com:ananthb/starla.git` and adding its SSH key as a deploy key
+instead. That cannot work here: Hosted Weblate serves one key for the
+whole instance, GitHub requires deploy keys to be globally unique, and the
+key is already registered against someone else's repository —
+`gh repo deploy-key add` fails with `key is already in use`.
+
+Two more things, once the components exist:
+
 - Enable the **Squash Git commits** add-on (one commit per language).
 - Add a GitHub webhook to <https://hosted.weblate.org/hooks/github/> so
   Weblate notices English string changes immediately; without it the
-  repository is only pulled manually.
+  repository is only pulled manually:
+
+  ```bash
+  gh api repos/ananthb/starla/hooks -X POST -f name=web \
+    -f 'events[]=push' -f 'config[content_type]=json' \
+    -f 'config[url]=https://hosted.weblate.org/hooks/github/'
+  ```
 
 `.weblate` in the repository root points the
 [`wlc`](https://docs.weblate.org/en/latest/wlc.html) command line client
