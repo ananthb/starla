@@ -411,6 +411,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2356,7 +2362,7 @@ version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-util",
@@ -3053,7 +3059,7 @@ version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1db0d8f1fc9e62caebd0319e11eaec5822b0186c171568f0480b46a0137f9108"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "evmap",
  "http-body-util",
  "hyper",
@@ -3146,7 +3152,7 @@ dependencies = [
 
 [[package]]
 name = "mock-controller"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4423,7 +4429,7 @@ dependencies = [
  "bytes",
  "getrandom 0.4.2",
  "lru-slab",
- "rand 0.10.1",
+ "rand 0.10.2",
  "rand_pcg",
  "ring",
  "rustc-hash",
@@ -4671,7 +4677,7 @@ version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-core",
  "h2",
@@ -5578,7 +5584,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "starla"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5598,7 +5604,7 @@ dependencies = [
 
 [[package]]
 name = "starla-common"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5615,11 +5621,11 @@ dependencies = [
 
 [[package]]
 name = "starla-controller"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64",
+ "base64 0.23.1",
  "futures",
  "hostname",
  "rand 0.10.2",
@@ -5637,11 +5643,11 @@ dependencies = [
 
 [[package]]
 name = "starla-measurements"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "hex",
@@ -5670,7 +5676,7 @@ dependencies = [
 
 [[package]]
 name = "starla-metrics"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -5686,7 +5692,7 @@ dependencies = [
 
 [[package]]
 name = "starla-network"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "caps",
@@ -5702,7 +5708,7 @@ dependencies = [
 
 [[package]]
 name = "starla-results"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5721,7 +5727,7 @@ dependencies = [
 
 [[package]]
 name = "starla-scheduler"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5739,7 +5745,7 @@ dependencies = [
 
 [[package]]
 name = "starla-tray"
-version = "0.6.6"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "arboard",
