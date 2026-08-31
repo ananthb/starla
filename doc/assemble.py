@@ -46,7 +46,11 @@ SITE_URL = "https://ananthb.github.io/starla"
 
 SWITCHER_ANCHOR = '<div class="meta">'
 HEAD_END = "</head>"
-HTML_LANG = re.compile(r'<html lang="[^"]*">')
+# Weblate writes its own attributes onto the opening tag — `dir="rtl"`
+# for a right-to-left language — so match the tag and rewrite only the
+# `lang` inside it, leaving whatever else it carries alone.
+HTML_TAG = re.compile(r"<html\b[^>]*>")
+LANG_ATTR = re.compile(r'\blang="[^"]*"')
 
 
 def language_name(language: str) -> str:
@@ -113,9 +117,15 @@ def render(
     `content_language` is the language of the prose, which differs when a
     translation does not exist yet and English stands in for it.
     """
-    text, count = HTML_LANG.subn(f'<html lang="{content_language}">', source, count=1)
+    def localize(match: re.Match[str]) -> str:
+        tag, count = LANG_ATTR.subn(f'lang="{content_language}"', match.group(0), count=1)
+        if count != 1:
+            raise SystemExit(f"{language}/{page}: no lang= on the <html> tag")
+        return tag
+
+    text, count = HTML_TAG.subn(localize, source, count=1)
     if count != 1:
-        raise SystemExit(f"{language}/{page}: no <html lang=...> to localize")
+        raise SystemExit(f"{language}/{page}: no <html> tag to localize")
 
     if SWITCHER_ANCHOR not in text:
         raise SystemExit(f"{language}/{page}: no {SWITCHER_ANCHOR} to hang the switcher on")
