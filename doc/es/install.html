@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="es" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install &amp; Run — starla</title>
+<link rel="icon" type="image/png" href="../logo.png">
+<link rel="stylesheet" href="../style.css">
+<script>
+  (function(){
+    try {
+      var t = localStorage.getItem('starla-theme');
+      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+    } catch(e) {}
+  })();
+</script>
+</head>
+<body>
+<div class="shell">
+
+  <header class="mast">
+    <a class="brand" href="index.html">
+      <img src="../logo.png" alt="">
+      <span class="word">starla</span>
+    </a>
+    <div class="meta">
+      <span id="mastVersion">v0.3.1</span> <span>AGPL-3.0</span> <span>rust 2024</span>
+      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme"><span class="glyph" aria-hidden="true">◐</span><span class="theme-label">auto</span></button>
+    </div>
+  </header>
+
+  <aside class="rail-l">
+    <div class="rail-label">Pages</div>
+    <ul class="toc">
+      <li><span class="num">01</span><a href="index.html">Overview</a></li>
+      <li><span class="num">02</span><a class="current" href="install.html">Install &amp; run</a></li>
+      <li><span class="num">03</span><a href="architecture.html">Architecture</a></li>
+      <li><span class="num">04</span><a href="protocol.html">Protocol</a></li>
+      <li><span class="num">05</span><a href="verify.html">Verify</a></li>
+      <li><span class="num">06</span><a href="../api/starla_common/index.html">API docs</a></li>
+      <li><span class="num">↗</span><a href="https://github.com/ananthb/starla">Source</a></li>
+    </ul>
+
+    <div class="rail-label" style="margin-top:32px">On this page</div>
+    <ul class="toc">
+      <li><a href="#docker">Docker / Podman</a></li>
+      <li><a href="#k8s">Stateless / k8s</a></li>
+      <li><a href="#ha">Home Assistant</a></li>
+      <li><a href="#deb">Debian / Ubuntu</a></li>
+      <li><a href="#rpm">Fedora / RHEL</a></li>
+      <li><a href="#nixos">NixOS</a></li>
+      <li><a href="#tar">Tarball</a></li>
+      <li><a href="#mac">macOS</a></li>
+      <li><a href="#win">Windows</a></li>
+      <li><a href="#after">After install</a></li>
+      <li><a href="#config">Config file</a></li>
+      <li><a href="#language">Language</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+
+    <p class="crumb"><a href="index.html">← starla</a> <span>·</span> 02</p>
+    <p class="eyebrow">02 · install &amp; run</p>
+    <h1 class="display">Install &amp; run.</h1>
+    <p class="lede">
+      Nine ways to bring starla online. Pick the one that suits your machine — they all register against the same RIPE Atlas controllers and produce the same results.
+    </p>
+
+    <section id="docker">
+      <h2 class="section"><span class="num">A</span>Docker &amp; Podman</h2>
+      <p>The container image is published to <code>ghcr.io/ananthb/starla</code> for both <code>amd64</code> and <code>arm64</code>.</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>persistent state</span></div><div class="pre-body"><code>docker run -d --name starla \ -v starla-state:/state \ --cap-add NET_RAW \ ghcr.io/ananthb/starla:latest</code></div></pre>
+
+      <p><code>CAP_NET_RAW</code> is required for ping and traceroute. Without it, only DNS, HTTP, TLS, and NTP measurements will run.</p>
+      <p>Inside a container, starla automatically writes state to <code>/state</code> and reads config from <code>/config</code>. No extra flags needed.</p>
+
+      <h3>With a config file</h3>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>mount config</span></div><div class="pre-body"><code><span class="c"># grab the example, edit, and mount it</span> curl -LO https://github.com/ananthb/starla/releases/latest/download/config.toml.example cp config.toml.example config.toml docker run -d --name starla \ -v starla-state:/state \ -v $(pwd)/config.toml:/config/config.toml:ro \ --cap-add NET_RAW \ ghcr.io/ananthb/starla:latest</code></div></pre>
+
+      <h3 id="k8s">Stateless / Kubernetes</h3>
+      <p>For environments without persistent storage, pass the SSH private key via the <code>STARLA_SSH_KEY</code> environment variable. No volume mounts needed.</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>key-from-env</span></div><div class="pre-body"><code><span class="c"># generate a key locally</span> ssh-keygen -t ed25519 -f starla-key -N <span class="s">""</span> <span class="c"># run with key in env (no persistent state)</span> docker run -d --name starla \ -e STARLA_SSH_KEY=<span class="s">"$(cat starla-key)"</span> \ --cap-add NET_RAW \ ghcr.io/ananthb/starla:latest</code></div></pre>
+
+      <p>Register the public key (<code>starla-key.pub</code>) at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>. The key can be stored as a Kubernetes Secret and mounted as an env var.</p>
+
+      <h3>Inspect</h3>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>logs &amp; pubkey</span></div><div class="pre-body"><code>docker logs -f starla docker exec starla cat /state/probe_key.pub</code></div></pre>
+    </section>
+
+    <section id="ha">
+      <h2 class="section"><span class="num">B</span>Home Assistant</h2>
+      <p>This repository doubles as a Home Assistant add-on repository. The add-on wraps the <code>ghcr.io</code> container image — nothing is compiled on your device.</p>
+
+      <ol>
+        <li>Open <strong>Settings → Add-ons → Add-on Store → ⋮ → Repositories</strong> and add <code>https://github.com/ananthb/starla</code>.</li>
+        <li>Install and start the <strong>Starla</strong> add-on.</li>
+        <li>Copy the probe public key from the add-on log and register it at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.</li>
+      </ol>
+
+      <p>The add-on runs with host networking and <code>CAP_NET_RAW</code>, keeps the probe key across updates and restarts, and exposes log level, interface traffic reports, and Prometheus metrics as configuration options.</p>
+    </section>
+
+    <section id="deb">
+      <h2 class="section"><span class="num">C</span>Debian · Ubuntu</h2>
+      <p>The <code>.deb</code> package configures the apt repository for future updates automatically.</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>apt</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_amd64.deb sudo dpkg -i starla_*.deb sudo apt update <span class="c"># arm64: download starla_arm64.deb instead</span> sudo systemctl enable --now starla</code></div></pre>
+
+      <p>Future updates arrive via <code>sudo apt upgrade starla</code>.</p>
+    </section>
+
+    <section id="rpm">
+      <h2 class="section"><span class="num">D</span>Fedora · RHEL</h2>
+      <p>The <code>.rpm</code> package configures the dnf repository for future updates automatically.</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>dnf</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla.x86_64.rpm sudo dnf install ./starla*.rpm <span class="c"># aarch64: download starla.aarch64.rpm instead</span> sudo systemctl enable --now starla</code></div></pre>
+
+      <p>Future updates arrive via <code>sudo dnf upgrade starla</code>.</p>
+    </section>
+
+    <section id="nixos">
+      <h2 class="section"><span class="num">E</span>NixOS</h2>
+      <p>Add the starla flake to your NixOS configuration:</p>
+
+      <pre><div class="pre-head"><span class="lang">nix</span><span>flake.nix</span></div><div class="pre-body"><code>{ inputs.starla.url = <span class="s">"github:ananthb/starla"</span>; outputs = { self, nixpkgs, starla, ... }: { nixosConfigurations.myhost = nixpkgs.lib.nixosSystem { modules = [ starla.nixosModules.default { services.starla.enable = <span class="k">true</span>; } ]; }; }; }</code></div></pre>
+
+      <p>That's the whole setup. The module handles the systemd service with <code>DynamicUser=true</code>, <code>CAP_NET_RAW</code>, filesystem hardening, and state/config/runtime directories.</p>
+
+      <h3>Configuration options</h3>
+
+      <table>
+        <thead><tr><th>Option</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>sshKeyFile</code></td><td><code>null</code></td><td>Path to SSH private key file (for agenix / sops-nix)</td></tr>
+          <tr><td><code>logLevel</code></td><td><code>"info"</code></td><td>trace · debug · info · warn · error</td></tr>
+          <tr><td><code>reportInterfaceStats</code></td><td><code>false</code></td><td>Send network interface traffic statistics</td></tr>
+          <tr><td><code>controller.registrationServers</code></td><td>reg03, reg04</td><td>RIPE Atlas registration servers</td></tr>
+          <tr><td><code>controller.sshTimeout</code></td><td><code>30</code></td><td>SSH connection timeout (s)</td></tr>
+          <tr><td><code>controller.keepaliveInterval</code></td><td><code>60</code></td><td>SSH keepalive interval (s)</td></tr>
+          <tr><td><code>storage.maxQueueSize</code></td><td><code>10000</code></td><td>Max results in upload queue</td></tr>
+          <tr><td><code>storage.retentionDays</code></td><td><code>30</code></td><td>Result retention period</td></tr>
+          <tr><td><code>metrics.enable</code></td><td><code>true</code></td><td>Prometheus metrics export</td></tr>
+          <tr><td><code>metrics.listenAddr</code></td><td><code>"127.0.0.1:9695"</code></td><td>Metrics listen address</td></tr>
+          <tr><td><code>logging.format</code></td><td><code>"json"</code></td><td>json · text</td></tr>
+          <tr><td><code>logging.output</code></td><td><code>"stdout"</code></td><td>stdout · file · syslog</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Example with options</h3>
+      <pre><div class="pre-head"><span class="lang">nix</span><span>configuration.nix</span></div><div class="pre-body"><code>services.starla = { enable = <span class="k">true</span>; logLevel = <span class="s">"debug"</span>; metrics.listenAddr = <span class="s">"0.0.0.0:9695"</span>; storage.retentionDays = <span class="n">7</span>; };</code></div></pre>
+
+      <h3>Secret-managed SSH key</h3>
+      <p>For agenix, sops-nix, or similar, point <code>sshKeyFile</code> at the decrypted key. The key is loaded via systemd's <code>LoadCredential</code>.</p>
+
+      <pre><div class="pre-head"><span class="lang">nix</span><span>agenix · sops-nix</span></div><div class="pre-body"><code><span class="c"># with agenix</span> age.secrets.starla-key.file = ./secrets/starla-key.age; services.starla = { enable = <span class="k">true</span>; sshKeyFile = config.age.secrets.starla-key.path; }; <span class="c"># with sops-nix</span> sops.secrets.starla-key = { }; services.starla = { enable = <span class="k">true</span>; sshKeyFile = config.sops.secrets.starla-key.path; };</code></div></pre>
+
+      <h3>Probe key location</h3>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>state path</span></div><div class="pre-body"><code><span class="c"># /var/lib/starla/ is managed by systemd</span> sudo cat /var/lib/starla/probe_key.pub</code></div></pre>
+    </section>
+
+    <section id="tar">
+      <h2 class="section"><span class="num">F</span>Release tarball</h2>
+      <p>Each tarball contains the binary, a systemd service file, and an example config.</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>fetch</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz tar xzf starla-amd64.tar.gz <span class="c"># for arm64:</span> <span class="c"># curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-arm64.tar.gz</span></code></div></pre>
+
+      <h3>Install as a systemd service</h3>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>systemd</span></div><div class="pre-body"><code>cd starla sudo install -m 755 starla /usr/bin/starla sudo mkdir -p /etc/starla sudo install -m 644 config.toml.example /etc/starla/config.toml sudo install -m 644 starla.service /usr/lib/systemd/system/ sudo systemctl daemon-reload sudo systemctl enable --now starla</code></div></pre>
+
+      <h3>Run directly</h3>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>caps · root</span></div><div class="pre-body"><code><span class="c"># needs CAP_NET_RAW for ping/trace</span> sudo setcap cap_net_raw=eip ./starla/starla ./starla/starla <span class="c"># or run as root</span> sudo ./starla/starla</code></div></pre>
+
+      <h3>Probe key location</h3>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>state path</span></div><div class="pre-body"><code><span class="c"># root: /var/lib/starla/probe_key.pub</span> <span class="c"># user: ~/.local/state/starla/probe_key.pub</span> cat ~/.local/state/starla/probe_key.pub</code></div></pre>
+    </section>
+
+    <section id="mac">
+      <h2 class="section"><span class="num">G</span>macOS</h2>
+
+      <h3>Homebrew</h3>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>brew</span></div><div class="pre-body"><code>brew install ananthb/starla/starla brew services start starla <span class="c"># optional GUI tray applet</span> brew install --cask ananthb/starla/starla-tray</code></div></pre>
+
+      <h3>DMG download</h3>
+      <p>
+        Download the <code>.dmg</code> from <a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>. Drag <strong>Starla Tray.app</strong> to Applications, then double-click <strong>Install CLI.command</strong> to symlink the <code>starla</code> binary into <code>/usr/local/bin</code>.
+      </p>
+
+      <p>The DMG also includes an example config and a launchd plist for running the probe as a background service.</p>
+
+      <p class="note-inline">Ping &amp; traceroute work without root on macOS (ICMP DGRAM sockets).</p>
+
+      <h3>nix-darwin</h3>
+      <pre><div class="pre-head"><span class="lang">nix</span><span>darwin module</span></div><div class="pre-body"><code><span class="c"># flake.nix</span> inputs.starla.url = <span class="s">"github:ananthb/starla"</span>; <span class="c"># in your darwin modules:</span> starla.darwinModules.default { services.starla.enable = <span class="k">true</span>; }</code></div></pre>
+
+      <h3>Home Manager (macOS &amp; Linux)</h3>
+      <p>The Home Manager module runs starla as a user-level service with declarative config. On macOS it uses launchd agents and copies the tray app to <code>~/Applications</code>; on Linux it uses systemd user services.</p>
+
+      <pre><div class="pre-head"><span class="lang">nix</span><span>home-manager</span></div><div class="pre-body"><code>inputs.starla.url = <span class="s">"github:ananthb/starla"</span>; { imports = [ starla.homeManagerModules.default ]; services.starla = { enable = <span class="k">true</span>; logLevel = <span class="s">"info"</span>; tray.enable = <span class="k">true</span>; <span class="c"># install + auto-start the tray app</span> }; }</code></div></pre>
+
+      <p>The module generates <code>~/.config/starla/config.toml</code> from your declarative options. On macOS, enabling the tray copies <strong>Starla Tray.app</strong> to <code>~/Applications</code> and creates launchd agents for both the probe and the tray. On Linux it creates systemd user services and a desktop autostart entry.</p>
+    </section>
+
+    <section id="win">
+      <h2 class="section"><span class="num">H</span>Windows</h2>
+      <p>Download the <code>.msi</code> installer from <a href="https://github.com/ananthb/starla/releases">GitHub Releases</a>. It installs the binary to <code>Program Files\Starla</code> and adds it to <code>PATH</code>.</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>after install</span></div><div class="pre-body"><code><span class="c"># open a new terminal, then:</span> starla</code></div></pre>
+
+      <p>All measurement types work on Windows. Ping and traceroute use the Windows ICMP Helper API and do not require administrator privileges. UDP and TCP traceroute variants are not yet supported (ICMP traceroute works).</p>
+    </section>
+
+    <section id="after">
+      <h2 class="section"><span class="num">I</span>After install</h2>
+
+      <ol>
+        <li>Start starla. On first run it generates an SSH key and logs the public key.</li>
+        <li>Copy the public key from the log output (also saved to <code>probe_key.pub</code> in the state directory).</li>
+        <li>Register at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.</li>
+        <li>starla retries automatically; once approved it connects and begins running measurements.</li>
+      </ol>
+    </section>
+
+    <section id="config">
+      <h2 class="section"><span class="num">J</span>Config file</h2>
+      <p>
+        See <a href="https://github.com/ananthb/starla/blob/main/config.toml.example">config.toml.example</a> for all options. The config file is optional — every setting has a sensible default.
+      </p>
+
+      <h3>Search order</h3>
+      <ol>
+        <li><code>--config</code> CLI flag</li>
+        <li><code>$CONFIGURATION_DIRECTORY/config.toml</code> (systemd)</li>
+        <li><code>$XDG_CONFIG_HOME/starla/config.toml</code></li>
+        <li><code>/etc/starla/config.toml</code> (root) or <code>~/.config/starla/config.toml</code> (user)</li>
+      </ol>
+
+      <p style="margin-top: 18px">Next: <a href="verify.html">verify your downloads →</a></p>
+    </section>
+
+    <section id="language">
+      <h2 class="section"><span class="num">K</span>Language</h2>
+      <p>
+        The tray app follows your desktop language, falling back to English for anything not translated yet. Override it with <code>STARLA_LANG</code> — handy for checking a translation without changing system settings:
+      </p>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>language override</span></div><div class="pre-body"><code>STARLA_LANG=es starla-tray</code></div></pre>
+      <p>
+        Probe logs stay in English so they remain greppable and easy to paste into an issue. Translations are made on <a href="https://hosted.weblate.org/engage/starla/">Weblate</a>: adding a language takes no code change and no pull request.
+      </p>
+    </section>
+
+    <hr class="divider">
+
+  </main>
+
+  <aside class="rail-r">
+    <div class="rail-block">
+      <div class="rail-label">At a glance</div>
+      <dl>
+        <dt>Container</dt><dd>ghcr.io</dd>
+        <dt>Home Assistant</dt><dd>add-on</dd>
+        <dt>Linux</dt><dd>.deb · .rpm · tar</dd>
+        <dt>NixOS</dt><dd>flake module</dd>
+        <dt>macOS</dt><dd>brew · dmg · nix</dd>
+        <dt>Windows</dt><dd>.msi</dd>
+      </dl>
+    </div>
+
+    <div class="rail-block">
+      <div class="rail-label">After install</div>
+      <ul class="toc">
+        <li><a href="https://atlas.ripe.net/apply/swprobe/">Apply ↗</a></li>
+        <li><a href="verify.html">Verify downloads</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+      </ul>
+    </div>
+
+    <div class="rail-block">
+      <div class="rail-label">Troubleshoot</div>
+      <p style="font-family: var(--mono); font-size: 11px; color: var(--ink-mute); line-height: 1.5;">
+        Ping &amp; trace require <code>CAP_NET_RAW</code> on Linux. macOS uses unprivileged ICMP. Windows uses the ICMP Helper API.
+      </p>
+    </div>
+  </aside>
+
+  <footer>
+    <span>starla · 02 · install</span> <span><a href="https://github.com/ananthb/starla">github.com/ananthb/starla</a></span> <span>AGPL-3.0-or-later</span>
+  </footer>
+
+</div>
+
+<script>
+  (function(){
+    var btn = document.getElementById('themeToggle');
+    if (!btn) return;
+    var glyph = btn.querySelector('.glyph');
+    var label = btn.querySelector('.theme-label');
+    var states = ['auto','light','dark'];
+    var glyphs = { auto: '◐', light: '☀', dark: '☾' };
+    function current() {
+      var t = document.documentElement.getAttribute('data-theme');
+      return (t === 'light' || t === 'dark') ? t : 'auto';
+    }
+    function render(state) {
+      glyph.textContent = glyphs[state];
+      label.textContent = state;
+    }
+    render(current());
+    btn.addEventListener('click', function(){
+      var i = states.indexOf(current());
+      var next = states[(i + 1) % states.length];
+      if (next === 'auto') {
+        document.documentElement.removeAttribute('data-theme');
+        try { localStorage.removeItem('starla-theme'); } catch(e){}
+      } else {
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('starla-theme', next); } catch(e){}
+      }
+      render(next);
+    });
+  })();
+</script>
+
+<script>
+  (function(){
+    var mast = document.getElementById('mastVersion');
+    if (!mast) return;
+    fetch('https://api.github.com/repos/ananthb/starla/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github+json' }
+    })
+      .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(rel){ if (rel.tag_name) mast.textContent = rel.tag_name; })
+      .catch(function(){});
+  })();
+</script>
+</body>
+</html>

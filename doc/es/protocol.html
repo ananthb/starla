@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="es" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Referencia del protocolo — starla</title>
+<link rel="icon" type="image/png" href="../logo.png">
+<link rel="stylesheet" href="../style.css">
+<script>
+  (function(){
+    try {
+      var t = localStorage.getItem('starla-theme');
+      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+    } catch(e) {}
+  })();
+</script>
+</head>
+<body>
+<div class="shell">
+
+  <header class="mast">
+    <a class="brand" href="index.html">
+      <img src="../logo.png" alt="">
+      <span class="word">starla</span>
+    </a>
+    <div class="meta">
+      <span id="mastVersion">v0.3.1</span> <span>AGPL-3.0</span> <span>rust 2024</span>
+      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme"><span class="glyph" aria-hidden="true">◐</span><span class="theme-label">auto</span></button>
+    </div>
+  </header>
+
+  <aside class="rail-l">
+    <div class="rail-label">Pages</div>
+    <ul class="toc">
+      <li><span class="num">01</span><a href="index.html">Overview</a></li>
+      <li><span class="num">02</span><a href="install.html">Install &amp; run</a></li>
+      <li><span class="num">03</span><a href="architecture.html">Architecture</a></li>
+      <li><span class="num">04</span><a class="current" href="protocol.html">Protocol</a></li>
+      <li><span class="num">05</span><a href="verify.html">Verify</a></li>
+      <li><span class="num">06</span><a href="../api/starla_common/index.html">API docs</a></li>
+      <li><span class="num">↗</span><a href="https://github.com/ananthb/starla">Source</a></li>
+    </ul>
+
+    <div class="rail-label" style="margin-top:32px">On this page</div>
+    <ul class="toc">
+      <li><a href="#lifecycle">1 · Lifecycle</a></li>
+      <li><a href="#telnet">2 · Telnet</a></li>
+      <li><a href="#measure">3 · Measurements</a></li>
+      <li><a href="#upload">4 · Upload</a></li>
+      <li><a href="#quirks">5 · RESULT quirks</a></li>
+      <li><a href="#lessons">6 · Quirks</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+
+    <p class="crumb"><a href="index.html">← starla</a> <span>·</span> 04</p>
+    <p class="eyebrow">04 · protocol</p>
+    <h1 class="display">Referencia del protocolo.</h1>
+    <p class="lede">
+      How probes and controllers actually talk: lifecycle, command formats, result lines, upload envelopes, and the rigid little quirks the controller demands.
+    </p>
+
+    <p>This document describes the RIPE Atlas probe-controller communication protocol as implemented by starla. It was reverse-engineered from the official C probe (<code>busybox</code>) and verified against live RIPE Atlas controllers.</p>
+
+    <section id="lifecycle">
+      <h2 class="section"><span class="num">1</span>Connection lifecycle</h2>
+
+      <h3>Registration</h3>
+      <p>On startup, the probe SSHes to a registration server (e.g. <code>reg03.atlas.ripe.net:443</code>) and runs <code>INIT</code> with probe identification on stdin:</p>
+
+      <pre><div class="pre-head"><span class="lang">stdin</span><span>P_TO_R_INIT</span></div><div class="pre-body"><code>P_TO_R_INIT TOKEN_SPECS fluffy 1000 5120 debian/13/x86_64/starla/0.4.0 REASON_FOR_REGISTRATION NEW</code></div></pre>
+
+      <p>The server responds with a controller assignment:</p>
+
+      <pre><div class="pre-head"><span class="lang">stdout</span><span>response</span></div><div class="pre-body"><code>OK CONTROLLER ctr-dub-sw01.atlas.prod.ripe.net 443 ssh-rsa AAAA... REREGISTER 3000 PROBE_ID 1015186</code></div></pre>
+
+      <p>If the probe is not yet registered, the server responds with plain <code>OK</code> (no <code>CONTROLLER</code> line). The probe retries with backoff until approved at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.</p>
+
+      <h3>Controller INIT</h3>
+      <p>After receiving the controller assignment, the probe connects to the controller via SSH and sends another <code>INIT</code> (no stdin data this time):</p>
+
+      <pre><div class="pre-head"><span class="lang">stdout</span><span>session</span></div><div class="pre-body"><code>OK SESSION_ID fa0b28e5f26291ad4a41ceecffc73457cbb4180291f53abdcda5667357440a9f REMOTE_PORT 2023</code></div></pre>
+
+      <p>The <code>SESSION_ID</code> is used for telnet authentication and the result-upload footer. <code>REMOTE_PORT</code> is the port the controller listens on for the reverse tunnel.</p>
+
+      <h3>KEEP session</h3>
+      <p>The probe opens a long-lived SSH connection and runs <code>KEEP</code>. This channel blocks indefinitely and serves as a health monitor; if it closes, the connection is lost and the probe reconnects.</p>
+
+      <p>On this same SSH connection:</p>
+      <ul>
+        <li><strong>Reverse tunnel</strong> (<code>tcpip_forward</code>): controller connects to <code>REMOTE_PORT</code> to send measurement commands via telnet.</li>
+        <li><strong>Direct-tcpip channels</strong>: probe opens channels to <code>127.0.0.1:8080</code> on the controller for result uploads.</li>
+      </ul>
+    </section>
+
+    <section id="telnet">
+      <h2 class="section"><span class="num">2</span>Telnet command protocol</h2>
+
+      <h3>Authentication</h3>
+      <p>When the controller connects via the reverse tunnel, the probe sends:</p>
+
+      <pre><div class="pre-head"><span class="lang">telnet</span><span>banner + login</span></div><div class="pre-body"><code>IAC DO ECHO IAC DO NAWS IAC WILL ECHO IAC WILL SGA Atlas probe, see http://atlas.ripe.net/ Probe 1015186 (hostname) login: </code></div></pre>
+
+      <p>The controller sends <code>C_TO_P_TEST_V1</code> as the login, then the <code>SESSION_ID</code> as the password. On success: <code>OK\r\n\r\n</code>. On failure: <code>BAD_PASSWORD\r\n\r\n</code> and disconnect.</p>
+
+      <h3>CRONLINE — recurring</h3>
+      <pre><div class="pre-head"><span class="lang">grammar</span><span>cronline</span></div><div class="pre-body"><code>CRONLINE &lt;interval&gt; &lt;offset&gt; &lt;end_time&gt; &lt;spread_type&gt; &lt;spread&gt; &lt;command&gt; [args...]</code></div></pre>
+
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>interval</td><td>u64</td><td>Seconds between executions (0 = one-shot)</td></tr>
+          <tr><td>offset</td><td>u64</td><td>Initial delay offset (ignored by starla)</td></tr>
+          <tr><td>end_time</td><td>i64</td><td>Unix timestamp to stop (0 = never)</td></tr>
+          <tr><td>spread_type</td><td>string</td><td>Usually <code>UNIFORM</code></td></tr>
+          <tr><td>spread</td><td>u32</td><td>Random spread in seconds</td></tr>
+          <tr><td>command</td><td>string</td><td>Measurement tool name</td></tr>
+        </tbody>
+      </table>
+
+      <pre><div class="pre-head"><span class="lang">example</span><span>cronline ping</span></div><div class="pre-body"><code>CRONLINE 240 269 1777902395 UNIFORM 3 evping -4 -c 3 -A "1001" -O /home/atlas/data/new/7 193.0.14.129</code></div></pre>
+
+      <h3>ONEOFF — one-shot</h3>
+      <pre><div class="pre-head"><span class="lang">grammar</span><span>oneoff</span></div><div class="pre-body"><code>ONEOFF &lt;path&gt; &lt;command&gt; [args...]</code></div></pre>
+
+      <p>User-triggered via the RIPE Atlas API. The path is ignored (it's where the C probe writes results). Internally converted to a CRONLINE with <code>interval=0</code>.</p>
+
+      <h3>JSON</h3>
+      <pre><div class="pre-head"><span class="lang">json</span><span>direct command</span></div><div class="pre-body"><code>{"type":"ping","msm_id":1001,"target":"8.8.8.8","af":4,"packets":3}</code></div></pre>
+
+      <h3>Host-telemetry commands</h3>
+      <p>The controller also schedules small applets that report the probe's runtime environment rather than running measurements. starla emits matching <code>RESULT</code> JSON so the RIPE backend sees the same shape an embedded probe would.</p>
+      <table>
+        <thead><tr><th>Command</th><th>id</th><th>What it reports</th></tr></thead>
+        <tbody>
+          <tr><td><code>buddyinfo</code></td><td>9001</td><td><code>/proc/buddyinfo</code> block counts, derived <code>freemem</code> KB, and <code>uptime</code>. The official applet self-reboots on low memory if <code>LOWMEM_REBOOT</code> is set; starla never reboots — the host's memory manager owns that decision.</td></tr>
+          <tr><td><code>rptaddrs</code></td><td>9104 (from <code>-A</code>)</td><td><code>inet-addresses</code>, <code>inet-routes</code>, <code>inet6-addresses</code>, <code>inet6-routes</code>, and <code>dns</code> resolvers, derived from <code>/proc/net/{route,if_inet6,ipv6_route}</code> and <code>/etc/resolv.conf</code>. Cached: re-emits only when state changes or after 1 hour, matching the C applet.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Ignored commands</h3>
+      <p>Four CRONLINE commands are accepted but produce no output. Each is parsed deliberately (not as <code>Unknown</code>) so the absence of a reply is intentional:</p>
+      <table>
+        <thead><tr><th>Command</th><th>What the embedded probe does with it</th><th>Why starla ignores it</th></tr></thead>
+        <tbody>
+          <tr><td><code>CRONTAB</code></td><td>Names which on-disk cron directory the following CRONLINEs belong to.</td><td>starla doesn't persist schedules to a filesystem cron layout; jobs live in memory keyed by <code>msm_id</code>.</td></tr>
+          <tr><td><code>httppost</code></td><td>POSTs queued result files to the RIPE backend over the SSH tunnel.</td><td>starla uploads natively from <code>starla-results::uploader</code>; this CRONLINE is a redundant trigger.</td></tr>
+          <tr><td><code>condmv</code> / <code>dfrm</code></td><td>Rotates result files between <code>data/new/ → data/out/ → data/storage/</code> and clears stale spool when disk is low.</td><td>starla queues results in a bounded in-memory queue; no on-disk spool to manage.</td></tr>
+          <tr><td><code>conntrack</code></td><td>Reports kernel <code>nf_conntrack</code> table fullness (self-watchdog for the probe's tiny kernel).</td><td>The applet isn't present in our vendored reference busybox tree at <code>reference/probe-busybox/</code>, so the canonical <code>RESULT</code> format is unknown. Held rather than guessed; revisit if a reference impl surfaces.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="measure">
+      <h2 class="section"><span class="num">3</span>Measurement commands</h2>
+
+      <h3>Ping — <code>evping</code></h3>
+      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evping [-4|-6] [-c count] [-s size] [-A msm_id] [-O output] [-I interval] &lt;target&gt;</code></div></pre>
+
+      <table>
+        <thead><tr><th>Flag</th><th>Description</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><code>-4/-6</code></td><td>Address family</td><td>4</td></tr>
+          <tr><td><code>-c</code></td><td>Packet count</td><td>3</td></tr>
+          <tr><td><code>-s</code></td><td>Packet size (bytes)</td><td>64</td></tr>
+          <tr><td><code>-A</code></td><td>Measurement ID</td><td>required</td></tr>
+        </tbody>
+      </table>
+
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · PreFormatted array</span></div><div class="pre-body"><code>RESULT { "id":"1001", "fw":5120, "mver": "2.6.4", "lts":10, "time":1700000000, "dst_name":"193.0.14.129", "af":4, "dst_addr":"193.0.14.129", "src_addr":"10.0.0.1", "proto":"ICMP", "ttl":56, "size":64, "result": [ { "rtt":10.500000 }, { "rtt":11.200000 }, { "rtt":10.800000 } ] }</code></div></pre>
+
+      <p>Timeouts: <code>{ "x":"*" }</code>. RTT has 6 decimals. <code>ttl</code> is omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
+
+      <h3>Traceroute — <code>evtraceroute</code></h3>
+      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evtraceroute [-4|-6] [-I|-U|-T] [-f first_hop] [-m max_hops] [-p paris_id] [-S size] [-A msm_id] [-O output] &lt;target&gt;</code></div></pre>
+
+      <table>
+        <thead><tr><th>Flag</th><th>Description</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><code>-I/-U/-T</code></td><td>ICMP / UDP / TCP</td><td>UDP</td></tr>
+          <tr><td><code>-f</code></td><td>First hop</td><td>1</td></tr>
+          <tr><td><code>-m</code></td><td>Max hops</td><td>32</td></tr>
+          <tr><td><code>-p</code></td><td>Paris traceroute ID</td><td>0</td></tr>
+          <tr><td><code>-S</code></td><td>Packet size</td><td>40</td></tr>
+        </tbody>
+      </table>
+
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"5001", "fw":5120, "mver": "2.6.4", "lts":0, "time":1700000000, "endtime":1700000030, "dst_name":"192.112.36.4", "dst_addr":"192.112.36.4", "src_addr":"10.0.0.1", "proto":"UDP", "af": 4, "size":40, "paris_id":5, "result": [ { "hop":1, "result": [ { "from":"10.0.0.1", "ttl":255, "size":76, "rtt":3.723 } ] }, { "hop":2, "result": [ { "x":"*" }, { "x":"*" }, { "x":"*" } ] }, { "hop":13, "result": [ { "from":"192.112.36.4", "ttl":54, "rtt":31.981, "size":88 } ] } ] }</code></div></pre>
+
+      <p>RTT 3 decimals. 3 probes per hop. Requires <code>CAP_NET_RAW</code>.</p>
+
+      <h3>DNS — <code>evtdig</code></h3>
+      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evtdig [-4|-6] [-t qtype] [-c qclass] [-T] [-r] [-d] [-e bufsize] [-R] [-h] [-b] [-i] [--soa] [--resolv] [--type N] [--class N] [--query NAME] [-A msm_id] [-O output] [@server] [query]</code></div></pre>
+
+      <table>
+        <thead><tr><th>Flag</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>-T</code></td><td>Use TCP (default UDP)</td></tr>
+          <tr><td><code>-h</code></td><td>Query <code>hostname.bind CH TXT</code></td></tr>
+          <tr><td><code>-b</code></td><td>Query <code>version.bind CH TXT</code></td></tr>
+          <tr><td><code>-i</code></td><td>Query <code>id.server CH TXT</code></td></tr>
+          <tr><td><code>--soa</code></td><td>Query SOA for <code>.</code></td></tr>
+          <tr><td><code>-r/-d/+dnssec</code></td><td>Enable DNSSEC (DO bit)</td></tr>
+          <tr><td><code>-R</code></td><td>Disable recursion desired</td></tr>
+          <tr><td><code>-e</code></td><td>EDNS buffer size</td></tr>
+          <tr><td><code>--type N</code></td><td>Numeric type (1=A, 28=AAAA, 16=TXT…)</td></tr>
+          <tr><td><code>--class N</code></td><td>Numeric class (1=IN, 3=CH)</td></tr>
+          <tr><td><code>--query NAME</code></td><td>Query name</td></tr>
+          <tr><td><code>@server</code></td><td>Target DNS server IP</td></tr>
+        </tbody>
+      </table>
+
+      <h4>Template variables in query names</h4>
+      <table>
+        <thead><tr><th>Variable</th><th>Expansion</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>$r</code></td><td>8-char random alphanumeric</td><td>Prevent DNS caching</td></tr>
+          <tr><td><code>$p</code></td><td>Probe ID (decimal)</td><td>Per-probe uniqueness</td></tr>
+          <tr><td><code>$t</code></td><td>Unix timestamp (decimal)</td><td>Per-query uniqueness</td></tr>
+        </tbody>
+      </table>
+
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · PreFormatted object · abuf</span></div><div class="pre-body"><code>RESULT { "id":"10310", "fw":5120, "mver": "2.6.4", "lts":51, "time":1775314719, "af":4, "dst_addr":"170.247.170.2", "dst_port":"53", "src_addr":"204.168.188.81", "proto":"UDP", "result": { "rt":29.846,"size":50, "abuf":"qr2AAAABAAEAAAAACGhvc3RuYW1lBGJpbmQAABAAA8AMABAAAwAAAAAABwZiNC1mcmE=", "ID":43709, "ANCOUNT":1, "QDCOUNT":1, "NSCOUNT":0, "ARCOUNT":0, "answers":[ {"TYPE":"TXT", "NAME":"hostname.bind.", "RDATA":[ "b4-fra" ]} ] } }</code></div></pre>
+
+      <p>On timeout: <code>"result": { "error":{"timeout":5000} }</code></p>
+
+      <div class="callout">
+        <div class="label">⚠ abuf</div>
+        <p><code>abuf</code> is the base64-encoded raw DNS wire response. The RIPE Atlas API parses it server-side. Without it, results are accepted but incomplete.</p>
+      </div>
+
+      <h3>HTTP — <code>evhttpget</code></h3>
+      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evhttpget [-4|-6] [-A msm_id] [-O output] [-M max_body] &lt;url&gt;</code></div></pre>
+
+      <pre><div class="pre-head"><span class="lang">json</span><span>result</span></div><div class="pre-body"><code>RESULT { "id":"12023", "fw":5120, "mver": "2.6.4", "lts":19, "time":1775317966, "dst_name":"example.com", "af":4, "dst_addr":"93.184.216.34", "proto":"TCP", "result": [ { "method":"GET", "af": 6, "dst_addr":"2600:140f:3::17df:2fba", "src_addr":"10.0.0.1", "rt":106.612889, "res":200, "ver":"1.1", "hsize":296, "bsize":0 } ] }</code></div></pre>
+
+      <h3>TLS — <code>evsslgetcert</code></h3>
+      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evsslgetcert [-4|-6] [-p port] [-h hostname] [-A msm_id] [-O output] &lt;target&gt;</code></div></pre>
+
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"14002", "fw":5120, "mver": "2.6.4", "lts":0, "time":1775325499, "dst_name":"atlas.ripe.net", "dst_port":"443", "ttr":0.390310, "method":"TLS", "ver":"1.3", "dst_addr":"193.0.11.37", "af": 4, "src_addr":"10.0.0.1", "ttc":0.191244, "rt":0.390310, "server_cipher":"0x1302", "cert":[ "-----BEGIN CERTIFICATE-----\nMIIG...\n-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----\nMIIF...\n-----END CERTIFICATE-----" ] }</code></div></pre>
+
+      <p>Times (<code>ttr</code>, <code>ttc</code>, <code>rt</code>) in seconds. <code>ver</code> is <code>"1.2"</code> or <code>"1.3"</code> (not <code>"Tls12"</code>). <code>server_cipher</code> is hex (<code>"0xc030"</code>). Certificates are full PEM with escaped newlines.</p>
+
+      <h3>NTP — <code>evntp</code></h3>
+      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evntp [-4|-6] [-c count] [-A msm_id] [-O output] &lt;target&gt;</code></div></pre>
+
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · 3 samples</span></div><div class="pre-body"><code>RESULT { "id":"99998", "fw":5120, "mver": "2.6.4", "lts":12, "time":1775323252, "dst_addr":"213.239.234.28", "src_addr":"204.168.188.81", "proto":"UDP", "af": 4, "li":"no", "version":4, "mode":"server", "stratum":2, "poll":8, "precision":5.96046e-08, "root-delay":0.00956726, "root-dispersion":0.0142212, "ref-id":"7cd8a40e", "ref-ts":3984311600.292619705, "result": [ { "origin-ts":3984312052.977718830, "receive-ts":3984312052.989268303, "transmit-ts":3984312052.989336491, "final-ts":3984312053.002320766, "rtt":0.024534, "offset":0.011981 }, ... ] }</code></div></pre>
+
+      <table>
+        <thead><tr><th>Field</th><th>Format</th></tr></thead>
+        <tbody>
+          <tr><td><code>li</code></td><td><code>"no"</code> · <code>"61"</code> · <code>"59"</code> · <code>"unknown"</code></td></tr>
+          <tr><td><code>poll</code></td><td>Raw exponent (NOT 2^n)</td></tr>
+          <tr><td><code>precision</code></td><td>Scientific notation (2^n seconds)</td></tr>
+          <tr><td><code>ref-id</code></td><td>ASCII for stratum ≤ 1, hex for stratum ≥ 2</td></tr>
+          <tr><td>Timestamps</td><td>NTP epoch (seconds since 1900-01-01) · 9 decimal places</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="upload">
+      <h2 class="section"><span class="num">4</span>Result upload protocol</h2>
+      <p>Results are uploaded via HTTP POST through SSH direct-tcpip channels to <code>127.0.0.1:8080</code> on the controller side.</p>
+
+      <pre><div class="pre-head"><span class="lang">http</span><span>POST · over SSH channel</span></div><div class="pre-body"><code>POST /?PROBE_ID=1015186&amp;SESSION_ID=fa0b28e5... HTTP/1.1 Host: 127.0.0.1 Content-Type: application/x-www-form-urlencoded User-Agent: httppost for atlas.ripe.net Connection: close Content-Length: 1234 P_TO_C_REPORT RESULT { "id":"9018", "fw":5120, ... disk stats ... } RESULT { "id": "7001", "fw":5120, ... uptime ... } RESULT { "id": "9002", "fw":5120, ... interface stats ... } RESULT 9901 ongoing 1775483034 starla RESULT { "id":"1001", "fw":5120, ... measurement result ... } RESULT { "id":"1002", "fw":5120, ... measurement result ... } SESSION_ID fa0b28e5...</code></div></pre>
+
+      <p>The controller responds <code>200 OK</code> with body <code>OK\n</code> on success. <code>429</code> means rate limiting; honor the <code>Retry-After</code> header. The official <code>httppost</code> uploads once per 60 seconds.</p>
+
+      <div class="callout">
+        <div class="label">⚠ Mandatory system status</div>
+        <p>The controller <strong>requires</strong> system status results (9018, 7001, 9002, 9901) alongside measurement results. Without them, the controller rate-limits with persistent 429 responses that survive reconnections.</p>
+      </div>
+
+      <h3>System status results</h3>
+      <p>Included in every upload batch, before measurement results:</p>
+
+      <table>
+        <thead><tr><th>ID</th><th>Description</th><th>Format</th></tr></thead>
+        <tbody>
+          <tr><td><code>9018</code></td><td>Disk stats</td><td><code>bsize</code>, <code>blocks</code>, <code>bfree</code>, <code>free</code> from <code>statvfs("/")</code></td></tr>
+          <tr><td><code>7001</code></td><td>Probe uptime</td><td><code>uptime</code> seconds since start, <code>lts</code></td></tr>
+          <tr><td><code>9002</code></td><td>Network interfaces</td><td>Per-iface <code>bytes_recv</code>, <code>pkt_recv</code>, <code>bytes_sent</code>, <code>pkt_sent</code> from <code>/proc/net/dev</code></td></tr>
+          <tr><td><code>9901</code></td><td>Ongoing status</td><td>Plain: <code>RESULT 9901 ongoing &lt;ts&gt; starla</code></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="quirks">
+      <h2 class="section"><span class="num">5</span>RESULT line quirks</h2>
+
+      <div class="callout">
+        <div class="label">⚠ Match exactly</div>
+        <p>The controller may do rigid string parsing. These quirks <strong>must</strong> be matched.</p>
+      </div>
+
+      <ul>
+        <li><strong>mver spacing</strong> — <code>"mver": "2.6.4"</code> has a space after the colon. All other fields use <code>"key":value</code> (no space). Matches the C probe's <code>fprintf</code> format string.</li>
+        <li><strong>Field order</strong> — id, fw, mver, lts, time, [bundle], [dst_name], af, [dst_addr], [dst_port], [src_addr], proto, [ttl], [size], [endtime], [paris_id], result.</li>
+        <li><strong>Array spacing</strong> — <code>[ { "rtt":10.5 }, { "rtt":11.2 } ]</code> with spaces inside brackets and braces.</li>
+        <li><strong>prb_id</strong> — NOT in the RESULT line; controller reads it from the URL query.</li>
+        <li><strong>fw</strong> — must be <code>5120</code> (or a real deployed version). Arbitrary values may be rejected.</li>
+        <li><strong>FullLine bypass</strong> — TLS, NTP, traceroute use the FullLine variant; the complete body sits between <code>RESULT { </code> and <code> }</code>, bypassing the standard envelope formatter.</li>
+      </ul>
+    </section>
+
+    <section id="lessons">
+      <h2 class="section"><span class="num">6</span>Quirks</h2>
+
+      <h3>v0.6.5 release withdrawn</h3>
+      <p>The <code>v0.6.5</code> GitHub release was tagged on a commit where <code>Cargo.toml</code> still said <code>0.6.4</code>, so the packaged binaries internally reported <code>0.6.4</code> even though the release was labelled <code>0.6.5</code>. The release has been deleted; use <code>v0.6.6</code> or later. The git tag is preserved for history. The release workflow now fails fast if tag and workspace version don't match (see <a href="https://github.com/ananthb/starla/pull/66">#66</a>).</p>
+
+      <h3>Tagged vs untagged enums</h3>
+      <p>The <code>MeasurementData</code> enum must use <code>#[serde(tag, content)]</code> (tagged), not <code>#[serde(untagged)]</code>. With untagged, <code>FullLine("body")</code> deserializes back as <code>Generic(String("body"))</code>, losing the variant discriminator. This caused TLS / NTP / traceroute results to silently produce invalid RESULT lines.</p>
+
+      <h3>HTTP af:0</h3>
+      <p>The HTTP measurement computed the address family correctly but hardcoded <code>af: 0</code> in the result struct. The controller silently drops results with <code>af:0</code> while returning <code>OK</code>.</p>
+
+      <h3>DNS timeouts must be results, not errors</h3>
+      <p>When a DNS query times out (e.g. ISP blocks outbound UDP 53), the official probe reports <code>{"error":{"timeout":5000}}</code> as a valid measurement result. Treating timeouts as execution errors loses them.</p>
+
+      <h3>Upload rate: 60 seconds, not 10</h3>
+      <p>The official <code>httppost</code> runs once per 60 seconds. Uploading more often triggers 429 rate limiting from the controller. The penalty is per-probe (tied to SSH key / probe ID) and persists across reconnections.</p>
+
+      <h3>System status results are mandatory</h3>
+      <p>The controller expects system health data (disk stats, uptime, network interface counters, ongoing status) in every upload batch. Sending only measurement RESULT lines causes persistent 429 rate limiting that survives reconnections and lasts hours.</p>
+
+      <h3>DNS template variables</h3>
+      <p>Query names may contain <code>$r</code>, <code>$p</code>, and <code>$t</code> templates. Failing to expand <code>$p</code> causes <code>hickory-dns</code> to reject the label as malformed (measurement 30001 uses these).</p>
+    </section>
+
+    <hr class="divider">
+
+  </main>
+
+  <aside class="rail-r">
+    <div class="rail-block">
+      <div class="rail-label">Wire facts</div>
+      <dl>
+        <dt>Reg port</dt><dd>:443</dd>
+        <dt>Ctrl port</dt><dd>:443</dd>
+        <dt>Auth</dt><dd>SSH key</dd>
+        <dt>Login</dt><dd>C_TO_P_TEST_V1</dd>
+        <dt>Upload</dt><dd>127.0.0.1:8080</dd>
+        <dt>Cadence</dt><dd>60s</dd>
+        <dt>fw</dt><dd>5120</dd>
+        <dt>mver</dt><dd>2.6.4</dd>
+      </dl>
+    </div>
+    <div class="rail-block">
+      <div class="rail-label">See also</div>
+      <ul class="toc">
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="../api/starla_common/index.html">API Docs</a></li>
+      </ul>
+    </div>
+  </aside>
+
+  <footer>
+    <span>starla · 04 · protocol</span> <span><a href="https://github.com/ananthb/starla">github.com/ananthb/starla</a></span> <span>AGPL-3.0-or-later</span>
+  </footer>
+
+</div>
+
+<script>
+  (function(){
+    var btn = document.getElementById('themeToggle');
+    if (!btn) return;
+    var glyph = btn.querySelector('.glyph');
+    var label = btn.querySelector('.theme-label');
+    var states = ['auto','light','dark'];
+    var glyphs = { auto: '◐', light: '☀', dark: '☾' };
+    function current() {
+      var t = document.documentElement.getAttribute('data-theme');
+      return (t === 'light' || t === 'dark') ? t : 'auto';
+    }
+    function render(state) {
+      glyph.textContent = glyphs[state];
+      label.textContent = state;
+    }
+    render(current());
+    btn.addEventListener('click', function(){
+      var i = states.indexOf(current());
+      var next = states[(i + 1) % states.length];
+      if (next === 'auto') {
+        document.documentElement.removeAttribute('data-theme');
+        try { localStorage.removeItem('starla-theme'); } catch(e){}
+      } else {
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('starla-theme', next); } catch(e){}
+      }
+      render(next);
+    });
+  })();
+</script>
+
+<script>
+  (function(){
+    var mast = document.getElementById('mastVersion');
+    if (!mast) return;
+    fetch('https://api.github.com/repos/ananthb/starla/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github+json' }
+    })
+      .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(rel){ if (rel.tag_name) mast.textContent = rel.tag_name; })
+      .catch(function(){});
+  })();
+</script>
+</body>
+</html>
