@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="es" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verificar descargas — starla</title>
+<link rel="icon" type="image/png" href="../logo.png">
+<link rel="stylesheet" href="../style.css">
+<script>
+  (function(){
+    try {
+      var t = localStorage.getItem('starla-theme');
+      if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+    } catch(e) {}
+  })();
+</script>
+</head>
+<body>
+<div class="shell">
+
+  <header class="mast">
+    <a class="brand" href="index.html">
+      <img src="../logo.png" alt="">
+      <span class="word">starla</span>
+    </a>
+    <div class="meta">
+      <span id="mastVersion">v0.3.1</span> <span>AGPL-3.0</span> <span>rust 2024</span>
+      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme"><span class="glyph" aria-hidden="true">◐</span><span class="theme-label">auto</span></button>
+    </div>
+  </header>
+
+  <aside class="rail-l">
+    <div class="rail-label">Pages</div>
+    <ul class="toc">
+      <li><span class="num">01</span><a href="index.html">Overview</a></li>
+      <li><span class="num">02</span><a href="install.html">Install &amp; run</a></li>
+      <li><span class="num">03</span><a href="architecture.html">Architecture</a></li>
+      <li><span class="num">04</span><a href="protocol.html">Protocol</a></li>
+      <li><span class="num">05</span><a class="current" href="verify.html">Verify</a></li>
+      <li><span class="num">06</span><a href="../api/starla_common/index.html">API docs</a></li>
+      <li><span class="num">↗</span><a href="https://github.com/ananthb/starla">Source</a></li>
+    </ul>
+
+    <div class="rail-label" style="margin-top:32px">On this page</div>
+    <ul class="toc">
+      <li><a href="#install-cosign">Install cosign</a></li>
+      <li><a href="#blob">Verify a blob</a></li>
+      <li><a href="#image">Verify an image</a></li>
+      <li><a href="#sums">Verify checksums</a></li>
+      <li><a href="#flags">What the flags mean</a></li>
+      <li><a href="#gpg">GPG key</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+
+    <p class="crumb"><a href="index.html">← starla</a> <span>·</span> 05</p>
+    <p class="eyebrow">05 · verify</p>
+    <h1 class="display">Verifique las descargas.</h1>
+    <p class="lede">
+      Every starla release artifact is signed twice — keyless via Sigstore for tarballs and images, and with GPG for apt and rpm repository metadata. Here's how to check both.
+    </p>
+
+    <h3>Two signing methods</h3>
+    <ul>
+      <li><strong><a href="https://docs.sigstore.dev/cosign/overview/">Cosign</a></strong> (keyless, via Sigstore) signs individual files and container images. No keys to manage; signatures are tied to the GitHub Actions workflow identity and recorded in a public transparency log.</li>
+      <li><strong>GPG</strong> (<code>Starla Releases &lt;starla@calculon.tech&gt;</code>) signs apt and rpm repository metadata. Required because apt and dnf don't support cosign.</li>
+    </ul>
+
+    <section id="install-cosign">
+      <h2 class="section"><span class="num">01</span>Install cosign</h2>
+      <p>See <a href="https://docs.sigstore.dev/system_config/installation/">sigstore.dev/installation</a>, or with Nix:</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>nix shell</span></div><div class="pre-body"><code>nix shell nixpkgs#cosign</code></div></pre>
+    </section>
+
+    <section id="blob">
+      <h2 class="section"><span class="num">02</span>Verify a tarball or package</h2>
+      <p>Each artifact on the <a href="https://github.com/ananthb/starla/releases">release page</a> has a matching <code>.sig</code> (signature) and <code>.pem</code> (certificate) file.</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>cosign verify-blob</span></div><div class="pre-body"><code><span class="c"># download the artifact and its signature files</span> curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz.sig curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-amd64.tar.gz.pem <span class="c"># verify</span> cosign verify-blob \ --signature starla-amd64.tar.gz.sig \ --certificate starla-amd64.tar.gz.pem \ --certificate-identity-regexp <span class="s">'https://github.com/ananthb/starla/'</span> \ --certificate-oidc-issuer <span class="s">'https://token.actions.githubusercontent.com'</span> \ starla-amd64.tar.gz</code></div></pre>
+
+      <p>The same command works for <code>.deb</code>, <code>.rpm</code>, and the arm64 tarball.</p>
+    </section>
+
+    <section id="image">
+      <h2 class="section"><span class="num">03</span>Verify a container image</h2>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>cosign verify</span></div><div class="pre-body"><code>cosign verify \ --certificate-identity-regexp <span class="s">'https://github.com/ananthb/starla/'</span> \ --certificate-oidc-issuer <span class="s">'https://token.actions.githubusercontent.com'</span> \ ghcr.io/ananthb/starla:latest</code></div></pre>
+
+      <p>This checks that the image was built and pushed by the starla GitHub Actions release workflow, and that the signature is recorded in Sigstore's <a href="https://docs.sigstore.dev/logging/overview/">Rekor</a> transparency log.</p>
+    </section>
+
+    <section id="sums">
+      <h2 class="section"><span class="num">04</span>Verify checksums</h2>
+      <p>The <code>SHA256SUMS</code> file covers every release artifact, and is itself signed:</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>SHA256SUMS</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/SHA256SUMS curl -LO https://github.com/ananthb/starla/releases/latest/download/SHA256SUMS.sig curl -LO https://github.com/ananthb/starla/releases/latest/download/SHA256SUMS.pem <span class="c"># verify the checksums file is authentic</span> cosign verify-blob \ --signature SHA256SUMS.sig \ --certificate SHA256SUMS.pem \ --certificate-identity-regexp <span class="s">'https://github.com/ananthb/starla/'</span> \ --certificate-oidc-issuer <span class="s">'https://token.actions.githubusercontent.com'</span> \ SHA256SUMS <span class="c"># then verify individual files against the checksums</span> sha256sum -c SHA256SUMS</code></div></pre>
+    </section>
+
+    <section id="flags">
+      <h2 class="section"><span class="num">05</span>What the flags mean</h2>
+      <ul>
+        <li><code>--certificate-identity-regexp</code> — ensures the certificate was issued to a workflow in the <code>ananthb/starla</code> repository.</li>
+        <li><code>--certificate-oidc-issuer</code> — ensures the certificate came from GitHub Actions (not some other OIDC provider).</li>
+      </ul>
+      <p class="spec">Together: this artifact was built by the starla CI pipeline on GitHub, not by an arbitrary third party.</p>
+    </section>
+
+    <section id="gpg">
+      <h2 class="section"><span class="num">06</span>GPG key for apt &amp; rpm repos</h2>
+      <p>The apt and rpm package repositories are signed with a dedicated GPG key. If you installed starla via <code>.deb</code> or <code>.rpm</code>, the key was included in the package automatically.</p>
+
+      <pre><div class="pre-head"><span class="lang">shell</span><span>fingerprint</span></div><div class="pre-body"><code><span class="c"># fingerprint</span> 26EA A5BE 15BF 6722 76EB 0B2F EBBC F639 82F4 CCD1 <span class="c"># download manually</span> curl -fsSL https://ananthb.github.io/starla/deb/KEY.gpg | gpg --show-keys</code></div></pre>
+    </section>
+
+    <hr class="divider">
+
+  </main>
+
+  <aside class="rail-r">
+    <div class="rail-block">
+      <div class="rail-label">Signing</div>
+      <dl>
+        <dt>Blobs</dt><dd>cosign · keyless</dd>
+        <dt>Images</dt><dd>cosign · keyless</dd>
+        <dt>apt/rpm</dt><dd>GPG</dd>
+        <dt>Log</dt><dd>Rekor</dd>
+      </dl>
+    </div>
+
+    <div class="rail-block">
+      <div class="rail-label">Identity</div>
+      <p style="font-family: var(--mono); font-size: 11px; color: var(--ink-2); line-height: 1.5;">
+        Built by GitHub Actions in <code>ananthb/starla</code>. OIDC issuer: <code>token.actions.githubusercontent.com</code>.
+      </p>
+    </div>
+
+    <div class="rail-block">
+      <div class="rail-label">See also</div>
+      <ul class="toc">
+        <li><a href="install.html">Install &amp; run</a></li>
+        <li><a href="https://github.com/ananthb/starla/releases">Releases ↗</a></li>
+      </ul>
+    </div>
+  </aside>
+
+  <footer>
+    <span>starla · 05 · verify</span> <span><a href="https://github.com/ananthb/starla">github.com/ananthb/starla</a></span> <span>AGPL-3.0-or-later</span>
+  </footer>
+
+</div>
+
+<script>
+  (function(){
+    var btn = document.getElementById('themeToggle');
+    if (!btn) return;
+    var glyph = btn.querySelector('.glyph');
+    var label = btn.querySelector('.theme-label');
+    var states = ['auto','light','dark'];
+    var glyphs = { auto: '◐', light: '☀', dark: '☾' };
+    function current() {
+      var t = document.documentElement.getAttribute('data-theme');
+      return (t === 'light' || t === 'dark') ? t : 'auto';
+    }
+    function render(state) {
+      glyph.textContent = glyphs[state];
+      label.textContent = state;
+    }
+    render(current());
+    btn.addEventListener('click', function(){
+      var i = states.indexOf(current());
+      var next = states[(i + 1) % states.length];
+      if (next === 'auto') {
+        document.documentElement.removeAttribute('data-theme');
+        try { localStorage.removeItem('starla-theme'); } catch(e){}
+      } else {
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('starla-theme', next); } catch(e){}
+      }
+      render(next);
+    });
+  })();
+</script>
+
+<script>
+  (function(){
+    var mast = document.getElementById('mastVersion');
+    if (!mast) return;
+    fetch('https://api.github.com/repos/ananthb/starla/releases/latest', {
+      headers: { 'Accept': 'application/vnd.github+json' }
+    })
+      .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(rel){ if (rel.tag_name) mast.textContent = rel.tag_name; })
+      .catch(function(){});
+  })();
+</script>
+</body>
+</html>
