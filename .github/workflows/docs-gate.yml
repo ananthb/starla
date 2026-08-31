@@ -1,0 +1,28 @@
+name: Docs gate
+
+# The macOS and Windows workflows skip documentation-only pull requests,
+# but the `build` job they share is a required status check. Nothing ever
+# reports it on a documentation change, so the pull request sits blocked
+# forever waiting for a job that will never run — including the ones
+# Weblate opens, which only ever touch doc/ and README files. Report the
+# check here for exactly the paths those workflows ignore.
+on:
+  pull_request:
+    paths:
+      - 'doc/**'
+      - '**/*.md'
+      - 'README.md'
+      - '.github/dependabot.yml'
+
+# The job builds nothing and checks out nothing.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Documentation-only change; the platform builds are unaffected."
