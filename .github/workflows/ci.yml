@@ -33,3 +33,26 @@ jobs:
           name: ananthb
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: nix flake check
+
+      - name: Add-on pins a published starla image
+        # starla/Dockerfile layers on ghcr.io/ananthb/starla:v$STARLA_VERSION.
+        # The Supervisor builds that from the default branch, so a pin naming
+        # an unpublished release breaks add-on installs on the HA box with an
+        # opaque "failed to resolve source metadata" instead of failing here.
+        run: |
+          ver=$(awk '$1 == "STARLA_VERSION:" {gsub(/"/, "", $2); print $2; exit}' starla/build.yaml)
+          if [[ -z "$ver" ]]; then
+            echo "::error file=starla/build.yaml::STARLA_VERSION is not set"
+            exit 1
+          fi
+          token=$(curl -fsSL "https://ghcr.io/token?scope=repository:ananthb/starla:pull&service=ghcr.io" | jq -r .token)
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json' \
+            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/ananthb/starla/manifests/v${ver}")
+          if [[ "$code" != "200" ]]; then
+            echo "::error file=starla/build.yaml::ghcr.io/ananthb/starla:v${ver} is not published (HTTP ${code}); release it before pinning it"
+            exit 1
+          fi
+          echo "Add-on pins ghcr.io/ananthb/starla:v${ver}, which is published"

@@ -1,10 +1,14 @@
-# BUILD_VERSION is the add-on version from config.yaml (passed by the
-# Supervisor builder); release images are tagged v<version>, so the
-# add-on version and image tag stay in sync automatically.
+# STARLA_VERSION pins the upstream starla image this add-on layers on top
+# of. It is deliberately NOT the add-on version: the Supervisor builds this
+# Dockerfile from whatever is on the default branch, so deriving the tag
+# from BUILD_VERSION meant every version bump that landed before its release
+# pointed the add-on at an image that did not exist yet, and installs failed
+# with "failed to resolve source metadata". Bump this only once the release
+# it names has actually pushed its image; ci.yml enforces that it exists.
 ARG BUILD_FROM
-ARG BUILD_VERSION
+ARG STARLA_VERSION
 
-FROM ghcr.io/ananthb/starla:v${BUILD_VERSION} AS starla
+FROM ghcr.io/ananthb/starla:v${STARLA_VERSION} AS starla
 
 FROM ${BUILD_FROM}
 
