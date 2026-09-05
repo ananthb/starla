@@ -3152,7 +3152,7 @@ dependencies = [
 
 [[package]]
 name = "mock-controller"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5584,7 +5584,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "starla"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5604,7 +5604,7 @@ dependencies = [
 
 [[package]]
 name = "starla-common"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5621,7 +5621,7 @@ dependencies = [
 
 [[package]]
 name = "starla-controller"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5643,7 +5643,7 @@ dependencies = [
 
 [[package]]
 name = "starla-measurements"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5676,7 +5676,7 @@ dependencies = [
 
 [[package]]
 name = "starla-metrics"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -5692,7 +5692,7 @@ dependencies = [
 
 [[package]]
 name = "starla-network"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "caps",
@@ -5708,7 +5708,7 @@ dependencies = [
 
 [[package]]
 name = "starla-results"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5727,7 +5727,7 @@ dependencies = [
 
 [[package]]
 name = "starla-scheduler"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5745,7 +5745,7 @@ dependencies = [
 
 [[package]]
 name = "starla-tray"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "arboard",
