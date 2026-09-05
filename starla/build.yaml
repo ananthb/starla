@@ -5,4 +5,4 @@ args:
   # Upstream starla release this add-on ships. Must name a tag that exists
   # at ghcr.io/ananthb/starla; the add-on version in config.yaml moves
   # independently. See the comment in Dockerfile.
-  STARLA_VERSION: "0.7.1"
+  STARLA_VERSION: "0.7.2"
