@@ -6,3 +6,13 @@ fallback_language = "en"
 
 [fluent]
 assets_dir = "i18n"
+# Pin the domain, which names the catalogue file as
+# assets_dir/<language>/<domain>.ftl. Both i18n-embed macros otherwise
+# derive it from find_crate, which returns the package name with `-`
+# replaced by `_` — but only when it can parse [package], and it bails on
+# `version.workspace = true`. In the workspace it therefore falls back to
+# CARGO_PKG_NAME ("starla-tray") and finds the catalogue, while in the
+# tarball `cargo package` writes an inherited `version = "..."` that it
+# can parse, so it asks for "starla_tray.ftl" and `cargo publish` fails
+# to verify. Setting it explicitly makes both builds agree.
+domain = "starla-tray"
