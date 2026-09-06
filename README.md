@@ -23,7 +23,7 @@ An alternative unofficial [RIPE Atlas](https://atlas.ripe.net) software probe wr
 - **Pure Rust SSH**: no OpenSSH dependency, uses `russh`
 - **No local ports**: all communication flows through the SSH tunnel
 - **Minimal container image**: just the binary + CA certs, multi-arch (amd64/arm64)
-- **Home Assistant add-on**: this repo doubles as an add-on repository
+- **Home Assistant add-on**: packaged in [ananthb/hass-addons](https://github.com/ananthb/hass-addons)
 - **NixOS module**: declarative configuration with systemd hardening
 - **Home Manager module**: user-level service with launchd (macOS) or systemd (Linux)
 - **macOS app bundle**: Starla Tray.app with DMG installer and Install CLI script
@@ -66,11 +66,12 @@ tar xzf starla-amd64.tar.gz && sudo ./starla/starla
 
 ### Home Assistant
 
-[![Add repository to your Home Assistant instance](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fananthb%2Fstarla)
+[![Add repository to your Home Assistant instance](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fananthb%2Fhass-addons)
 
-Add `https://github.com/ananthb/starla` as an add-on repository
+Add `https://github.com/ananthb/hass-addons` as an add-on repository
 (**Settings → Add-ons → Add-on Store → ⋮ → Repositories**), then install
-the **Starla** add-on. See the [add-on docs](starla/DOCS.md).
+the **Starla** add-on. See the
+[add-on docs](https://github.com/ananthb/hass-addons/blob/main/starla/DOCS.md).
 
 After starting, register your probe at [atlas.ripe.net/apply/swprobe](https://atlas.ripe.net/apply/swprobe/)
 using the public key from `probe_key.pub` in the state directory.

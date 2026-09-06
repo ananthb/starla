@@ -3,7 +3,8 @@ name: i18n
 # Translations arrive from Weblate rather than from a contributor running
 # the test suite, so everything that a bad catalogue can break is checked
 # here: Fluent syntax and placeholder parity, the generated desktop entry,
-# the add-on's option labels, and the multi-language docs build.
+# and the multi-language docs build. The Home Assistant add-on's option
+# labels moved to ananthb/hass-addons and are checked by its own CI.
 on:
   push:
     branches: [main]
@@ -11,8 +12,6 @@ on:
     paths:
       - 'binaries/starla-tray/**'
       - 'doc/**'
-      - 'starla/translations/**'
-      - 'starla/config.yaml'
       - 'packaging/starla-tray.desktop'
       - 'packaging/Info.plist'
       - '.weblate'
@@ -51,9 +50,6 @@ jobs:
       # and the languages declared in packaging/Info.plist.
       - name: Check translation catalogues
         run: nix develop -c cargo test -p starla-tray
-
-      - name: Check add-on option translations
-        run: nix develop -c python3 starla/check-translations.py starla
 
       - name: Build the documentation site in every language
         run: nix develop -c python3 doc/assemble.py --source doc --out site
