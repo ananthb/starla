@@ -52,11 +52,9 @@ listen_addr = "127.0.0.1:9695"
 # Log format: json or text
 format = "json"
 
-# Log output: stdout, file, or syslog
+# Not yet wired up: file output and rotation are driven by the --log-dir
+# flag, and these three keys are read but ignored. Tracked separately from
+# `format` and `[probe] log_level`, which do take effect.
 output = "stdout"
-
-# Maximum log file size in MB (when output=file)
 max_file_size_mb = 10
-
-# Maximum number of rotated log files
 max_files = 5
