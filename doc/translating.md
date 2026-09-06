@@ -1,9 +1,8 @@
 # Translating Starla
 
 Everything a user reads is translatable: the tray app's menu, the README,
-this documentation site, and the Home Assistant add-on's configuration
-options. Translation happens on Weblate — no Rust, no git, no pull
-request.
+and this documentation site. Translation happens on Weblate — no Rust, no
+git, no pull request.
 
 **<https://hosted.weblate.org/engage/starla/>**
 
@@ -36,7 +35,6 @@ Pick your language and start typing. A few things worth knowing:
 | Tray app | `binaries/starla-tray/i18n/en/starla-tray.ftl` | `binaries/starla-tray/i18n/<lang>/starla-tray.ftl` |
 | README | `README.md` | `README.<lang>.md` |
 | Documentation site | `doc/en/*.html` | `doc/<lang>/*.html` |
-| Home Assistant add-on options | `starla/translations/en.yaml` | `starla/translations/<lang>.yaml` |
 
 Two things are deliberately *not* translated:
 
@@ -44,9 +42,10 @@ Two things are deliberately *not* translated:
   keeping them in one language keeps them useful.
 - **The `starla` CLI.** Flags and their help are part of the interface
   scripts depend on.
-- **The add-on's `DOCS.md`.** Home Assistant serves a single documentation
-  page per add-on and has no mechanism for a localized one; only the
-  option labels in `translations/` reach the Supervisor UI.
+
+The Home Assistant add-on is translated too, but not here: it lives in
+[ananthb/hass-addons](https://github.com/ananthb/hass-addons) and carries
+its own option catalogues and its own Weblate component.
 
 Some user-visible text is generated rather than translated directly:
 
@@ -98,11 +97,11 @@ be recreated.
 
 The import pre-fills the repository and branch, then discovery detects
 every translatable layout on its own: the Fluent catalogue, the README,
-one entry per documentation page, and the add-on options — file masks and
-base files already filled in. Run it once per layout, naming the
+one entry per documentation page — file masks and base files already
+filled in. Run it once per layout, naming the
 components `tray`, `readme`, `docs-index`, `docs-install`,
-`docs-architecture`, `docs-protocol`, `docs-verify` and `addon`; the file
-table above says which files each one covers.
+`docs-architecture`, `docs-protocol` and `docs-verify`; the file table
+above says which files each one covers.
 
 What discovery gets wrong by default:
 

@@ -147,9 +147,10 @@
             graphviz
 
             # Localization: doc/assemble.py builds the translated docs
-            # site, starla/check-translations.py validates the add-on
-            # option catalogues.
-            (python3.withPackages (ps: with ps; [ pyyaml ]))
+            # site. Plain python3 -- assemble.py imports nothing outside
+            # the standard library, and the add-on's YAML catalogues that
+            # needed pyyaml now live in ananthb/hass-addons.
+            python3
 
             # Cargo tools
             cargo-audit
