@@ -1,11 +1,16 @@
 name: Docs gate
 
-# The macOS and Windows workflows skip documentation-only pull requests,
-# but the `build` job they share is a required status check. Nothing ever
-# reports it on a documentation change, so the pull request sits blocked
-# forever waiting for a job that will never run — including the ones
-# Weblate opens, which only ever touch doc/ and README files. Report the
-# check here for exactly the paths those workflows ignore.
+# The ruleset on main requires two status checks, `build` and `check`, and
+# every workflow that reports either one skips documentation-only pull
+# requests. Nothing reports them on a documentation change, so the pull
+# request sits blocked forever waiting for jobs that will never run —
+# including the ones Weblate opens, which only ever touch doc/ and README
+# files. Report both here for exactly the paths those workflows ignore.
+#
+# `build` comes from the macOS and Windows workflows, `check` from ci.yml.
+# The paths below must stay the mirror image of ci.yml's `paths-ignore`:
+# if the two lists drift, a pull request either blocks forever again or
+# gets a green `check` it never earned.
 on:
   pull_request:
     paths:
@@ -14,7 +19,7 @@ on:
       - 'README.md'
       - '.github/dependabot.yml'
 
-# The job builds nothing and checks out nothing.
+# The jobs build nothing and check out nothing.
 permissions: {}
 
 concurrency:
@@ -26,3 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "Documentation-only change; the platform builds are unaffected."
+
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Documentation-only change; the nix flake check is unaffected."
