@@ -26,7 +26,7 @@ status](https://hosted.weblate.org/widget/starla/svg-badge.svg)](https://hosted.
 - **Sin puertos locales**: toda la comunicación fluye a través del túnel SSH
 - **Imagen de contenedor mínima**: solo el binario + certificados CA,
   multiarquitectura (amd64/arm64)
-- **Complemento para Home Assistant**: publicado en
+- **Home Assistant add-on**: packaged in
   [ananthb/hass-addons](https://github.com/ananthb/hass-addons)
 - **Módulo para NixOS**: configuración declarativa con hardening de systemd
 - **Módulo para Home Manager**: servicio a nivel de usuario con launchd (macOS)
@@ -77,11 +77,10 @@ tar xzf starla-amd64.tar.gz && sudo ./starla/starla
 [![Add repository to your Home Assistant
 instance](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fananthb%2Fhass-addons)
 
-Añade `https://github.com/ananthb/hass-addons` como repositorio de
-complementos (**Ajustes → Complementos → Tienda de complementos → ⋮ →
-Repositorios**) y después instala el complemento **Starla**. Consulta la
-[documentación del
-complemento](https://github.com/ananthb/hass-addons/blob/main/starla/DOCS.md).
+Add `https://github.com/ananthb/hass-addons` as an add-on repository (**Settings
+→ Add-ons → Add-on Store → ⋮ → Repositories**), then install the **Starla**
+add-on. See the [add-on
+docs](https://github.com/ananthb/hass-addons/blob/main/starla/DOCS.md).
 
 Una vez iniciado, registra tu sonda en
 [atlas.ripe.net/apply/swprobe](https://atlas.ripe.net/apply/swprobe/) utilizando
