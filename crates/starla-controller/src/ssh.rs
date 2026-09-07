@@ -260,8 +260,14 @@ impl KnownHosts {
                 Ok(false)
             }
         } else {
-            // TOFU: first time seeing this host, save the key
-            info!(
+            // TOFU: first time seeing this host, save the key.
+            //
+            // Debug, not info: this fires once per registration server on
+            // first run -- six lines with the default server list -- which
+            // is exactly when the log is also carrying the key the user
+            // has to go and register. A first sighting is routine; the
+            // mismatch above is the security event, and that stays loud.
+            debug!(
                 "New host key for {} ({}), saving to known_hosts (TOFU)",
                 host_port, key_type
             );
@@ -530,6 +536,8 @@ impl SshConnection {
             (server, 443)
         }
 
+        let mut last_error: Option<anyhow::Error> = None;
+
         for server in servers {
             let (host, port) = parse_server(server);
 
@@ -539,12 +547,26 @@ impl SshConnection {
                     return Ok(conn);
                 }
                 Err(e) => {
-                    warn!("Failed to connect to {}: {}", server, e);
+                    // Debug, not warn: the default server list is six
+                    // entries (hostname, IPv4 and IPv6 for each of two
+                    // registration servers), so a single unreachable
+                    // network warned six lines per retry, forever, and
+                    // buried the one thing the user needs to read -- the
+                    // key to register. The caller sees the summary below
+                    // and decides how loudly to say it.
+                    debug!("Failed to connect to {}: {}", server, e);
+                    last_error = Some(e);
                 }
             }
         }
 
-        anyhow::bail!("Failed to connect to any server")
+        match last_error {
+            Some(e) => Err(e.context(format!(
+                "failed to connect to any of {} registration servers",
+                servers.len()
+            ))),
+            None => anyhow::bail!("no registration servers configured"),
+        }
     }
 
     /// Execute the INIT command and parse response
@@ -1082,6 +1104,23 @@ pub fn generate_key() -> anyhow::Result<PrivateKey> {
     Ok(key)
 }
 
+/// The probe's public key in OpenSSH `authorized_keys` form.
+///
+/// This is the exact string RIPE Atlas wants pasted into the registration
+/// form, and the one written to `probe_key.pub`. Derived from the private
+/// key rather than read back from that file, so it is also available when
+/// the key arrived through `STARLA_SSH_KEY` or a systemd credential --
+/// neither of which writes a `.pub` file, which is why those two key
+/// sources previously left the user with no way to see the key at all.
+pub fn public_key_openssh(key: &PrivateKey) -> String {
+    let public_key = key.public_key();
+    format!(
+        "{} {} starla",
+        public_key.algorithm().as_str(),
+        public_key.public_key_base64()
+    )
+}
+
 /// Save SSH key pair to files
 pub async fn save_key(key: &PrivateKey, path: &Path) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
@@ -1089,14 +1128,8 @@ pub async fn save_key(key: &PrivateKey, path: &Path) -> anyhow::Result<()> {
     }
 
     // Save public key in OpenSSH format: "<algo> <base64> starla"
-    let public_key = key.public_key();
     let pub_path = path.with_extension("pub");
-    let pub_algo = public_key.algorithm();
-    let pub_key_str = format!(
-        "{} {} starla",
-        pub_algo.as_str(),
-        public_key.public_key_base64()
-    );
+    let pub_key_str = public_key_openssh(key);
     tokio::fs::write(&pub_path, pub_key_str.as_bytes()).await?;
     debug!("Public key: {}", pub_key_str);
 
@@ -1118,6 +1151,34 @@ pub async fn save_key(key: &PrivateKey, path: &Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn public_key_openssh_matches_the_pub_file() {
+        // The banner shows this string and probe_key.pub holds it; if the
+        // two ever drift, a user registers one key and the probe presents
+        // another, which fails as an opaque auth error at RIPE.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe_key");
+        let key = generate_key().unwrap();
+
+        save_key(&key, &path).await.unwrap();
+
+        let written = std::fs::read_to_string(path.with_extension("pub")).unwrap();
+        assert_eq!(written, public_key_openssh(&key));
+    }
+
+    #[test]
+    fn public_key_openssh_is_authorized_keys_shaped() {
+        let key = generate_key().unwrap();
+        let rendered = public_key_openssh(&key);
+        let mut parts = rendered.split(' ');
+
+        assert_eq!(parts.next(), Some("ssh-ed25519"));
+        assert!(!parts.next().unwrap().is_empty(), "base64 body");
+        assert_eq!(parts.next(), Some("starla"));
+        assert_eq!(parts.next(), None);
+        assert!(!rendered.contains('\n'), "must stay on one line");
+    }
+
     use super::*;
 
     #[test]

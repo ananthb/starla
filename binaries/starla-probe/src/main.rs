@@ -26,7 +26,7 @@ use starla_scheduler::{
 };
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -131,8 +131,11 @@ struct Args {
     log_dir: Option<PathBuf>,
 
     /// Log level (trace, debug, info, warn, error)
-    #[arg(short = 'l', long, default_value = "info")]
-    log_level: String,
+    ///
+    /// Overrides `[probe] log_level` in the config file. RUST_LOG still
+    /// wins over both.
+    #[arg(short = 'l', long)]
+    log_level: Option<String>,
 
     /// Configuration file path
     ///
@@ -162,6 +165,64 @@ struct Args {
     runtime_dir: Option<PathBuf>,
 }
 
+/// Render the probe's public key as a block that survives a busy log.
+///
+/// The key is needed exactly once, by hand, in a browser -- and the lines
+/// on either side of it are connection retries. Blank lines above and
+/// below plus a rule on each side make it selectable in a terminal and
+/// findable when scrolling back through journalctl.
+fn registration_banner(public_key: &str) -> String {
+    const RULE: &str = "\
+────────────────────────────────────────────────────────────────────────────";
+
+    format!(
+        "\n\n{RULE}\n\
+         REGISTER THIS PROBE\n\
+         \n\
+         {public_key}\n\
+         \n\
+         Paste the key above into https://atlas.ripe.net/apply/swprobe/\n\
+         {RULE}\n"
+    )
+}
+
+/// Shows the registration banner, rarely enough to stay readable.
+///
+/// Registration is a human step that can take hours, so the key has to
+/// still be reachable for someone who attaches to the log late. Printing
+/// it on every retry would bury it in exactly the way that made it hard
+/// to find; printing it once would lose it. So: once immediately, then at
+/// most every half hour for as long as the probe is unregistered.
+struct RegistrationNotice {
+    public_key: String,
+    last_shown: Option<Instant>,
+}
+
+impl RegistrationNotice {
+    const REPEAT: Duration = Duration::from_secs(30 * 60);
+
+    fn new(public_key: String) -> Self {
+        Self {
+            public_key,
+            last_shown: None,
+        }
+    }
+
+    /// Returns whether the banner was actually printed this time.
+    fn show(&mut self) -> bool {
+        let now = Instant::now();
+        if self
+            .last_shown
+            .is_some_and(|shown| now.duration_since(shown) < Self::REPEAT)
+        {
+            return false;
+        }
+        info!("{}", registration_banner(&self.public_key));
+        self.last_shown = Some(now);
+        true
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -180,11 +241,37 @@ async fn main() -> Result<()> {
         .install_default()
         .expect("Failed to install rustls crypto provider");
 
-    // Initialize logging
+    // Config is read before logging is initialised, because it decides how
+    // logging is initialised. It used to be read after, which left
+    // `[probe] log_level` and `[logging] format` silently inert -- the
+    // format came from a compile-time feature, so a config asking for
+    // text still got JSON, and every multi-line message reached the user
+    // as escaped \n inside a JSON string. Parse errors go to stderr here;
+    // there is no logger yet to carry them.
+    let config_path = args.config.unwrap_or_else(starla_common::config_file);
+    let config_found = config_path.exists();
+    let config = if config_found {
+        match starla_common::ProbeConfig::from_file(&config_path) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("starla: {}: {}", config_path.display(), e);
+                return Err(e.into());
+            }
+        }
+    } else {
+        starla_common::ProbeConfig::default()
+    };
+
+    // Initialize logging. CLI flags override the config; RUST_LOG, which
+    // init_logging reads, overrides both.
     let log_config = LogConfig {
         log_dir: args.log_dir,
-        level: args.log_level,
-        json_format: cfg!(feature = "structured-logging"),
+        level: args
+            .log_level
+            .unwrap_or_else(|| config.probe.log_level.clone()),
+        // JSON needs both: the feature compiled in, and a config that has
+        // not asked for text.
+        json_format: cfg!(feature = "structured-logging") && config.logging.format != "text",
     };
 
     init_logging(log_config)?;
@@ -195,23 +282,16 @@ async fn main() -> Result<()> {
         starla_common::FIRMWARE_VERSION
     );
 
-    // Resolve config file path
-    let config_path = args.config.unwrap_or_else(starla_common::config_file);
     debug!("Config file: {}", config_path.display());
-
-    let state_dir = starla_common::state_dir();
-    debug!("State directory: {}", state_dir.display());
-
-    // Load configuration
-    let config = if config_path.exists() {
-        starla_common::ProbeConfig::from_file(&config_path)?
-    } else {
+    if !config_found {
         debug!(
             "Configuration file not found at {}, using defaults",
             config_path.display()
         );
-        starla_common::ProbeConfig::default()
-    };
+    }
+
+    let state_dir = starla_common::state_dir();
+    debug!("State directory: {}", state_dir.display());
 
     debug!("Config: state_dir={}", state_dir.display());
 
@@ -632,6 +712,10 @@ async fn main() -> Result<()> {
     // Controller connection
     debug!("Connecting to controller...");
 
+    // Set when no key existed and one was generated -- the single moment
+    // where the user has to go and register something right now.
+    let mut generated_key = false;
+
     // Load SSH key from: env var > systemd credential > file > generate new
     let key = if let Ok(pem) = std::env::var("STARLA_SSH_KEY") {
         match starla_controller::load_key_from_string(&pem) {
@@ -685,15 +769,15 @@ async fn main() -> Result<()> {
             if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
                 warn!("Failed to save SSH key: {}", e);
             }
+            // The fingerprint is the wrong thing to show here. It is not
+            // what the registration form takes, and printing it beside the
+            // real key left two different renderings of the same thing in
+            // one log. It stays at debug, where it is still useful for
+            // matching a key against a known probe.
             if let Ok(fp) = starla_controller::key_fingerprint(&new_key) {
-                info!("Generated new probe key: {}", fp);
+                debug!("Generated new probe key: {}", fp);
             }
-            let pubkey_path = starla_common::probe_pubkey_path();
-            match std::fs::read_to_string(&pubkey_path) {
-                Ok(contents) => info!("Public key:\n{}", contents.trim()),
-                Err(_) => info!("Public key file: {}", pubkey_path.display()),
-            }
-            info!("Register your probe at: https://atlas.ripe.net/apply/swprobe/");
+            generated_key = true;
             new_key
         }
     };
@@ -704,11 +788,18 @@ async fn main() -> Result<()> {
             info!("Probe {} ({})", probe_id.0, fp);
         }
     }
-    {
-        let pubkey_path = starla_common::probe_pubkey_path();
-        if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
-            probe_status.lock().await.public_key = Some(contents.trim().to_string());
-        }
+    // Derived from the key actually in use rather than read back from
+    // probe_key.pub, which does not exist when the key came from
+    // STARLA_SSH_KEY or a systemd credential -- in those cases the tray
+    // and the status socket used to report no public key at all.
+    let public_key = starla_controller::public_key_openssh(&key);
+    probe_status.lock().await.public_key = Some(public_key.clone());
+    let mut notice = RegistrationNotice::new(public_key);
+    // Whether the "why this is quiet" line has been said since the banner
+    // was last shown.
+    let mut explained = false;
+    if generated_key {
+        let _ = notice.show();
     }
 
     // Load known SSH host keys for server verification
@@ -734,7 +825,6 @@ async fn main() -> Result<()> {
     // Registration loop: retries indefinitely with backoff
     let mut reg_delay = Duration::from_secs(5);
     let max_reg_delay = Duration::from_secs(300);
-    let mut printed_key = false;
 
     // Outer loop: re-runs register → controller-connect if the initial
     // controller handshake fails (typically the controller hasn't sync'd
@@ -762,15 +852,27 @@ async fn main() -> Result<()> {
                 // the same anti-pattern in the controller-side KEEP loop.
                 Ok(ssh) => ssh,
                 Err(e) => {
-                    debug!("Failed to connect to registration server: {}", e);
                     probe_status.lock().await.last_connection_error = Some(e.to_string());
-                    if !printed_key {
-                        let pubkey_path = starla_common::probe_pubkey_path();
-                        if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
-                            info!("Public key:\n{}", contents.trim());
-                        }
-                        info!("Retrying registration until probe is connected...");
-                        printed_key = true;
+
+                    // Every attempt at debug, plus one line at info saying
+                    // why the log then goes quiet -- carrying the actual
+                    // error, so a real fault (DNS, refused, timeout) stays
+                    // distinguishable from the "SSH authentication failed"
+                    // that just means the key is not registered yet.
+                    // Refreshed whenever the banner repeats, so a probe
+                    // left broken overnight still shows its current error.
+                    //
+                    // `{:#}` rather than `{}`: anyhow prints only the
+                    // outermost context otherwise, which would say "failed
+                    // to connect to any of 6 registration servers" and drop
+                    // the cause that makes the difference.
+                    debug!("Registration attempt failed: {:#}", e);
+                    if notice.show() || !explained {
+                        info!(
+                            "Retrying until the key above is registered; last error: {:#}",
+                            e
+                        );
+                        explained = true;
                     }
                     tokio::select! {
                         _ = tokio::signal::ctrl_c() => {
@@ -809,14 +911,9 @@ async fn main() -> Result<()> {
                     break info;
                 }
                 Ok(InitResponse::Wait { timeout_secs }) => {
-                    if !printed_key {
-                        let pubkey_path = starla_common::probe_pubkey_path();
-                        if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
-                            info!("Public key:\n{}", contents.trim());
-                        }
-                        info!("Register at: https://atlas.ripe.net/apply/swprobe/");
-                        info!("Retrying registration until probe is approved...");
-                        printed_key = true;
+                    if notice.show() || !explained {
+                        info!("The registration server has not approved this key yet; retrying.");
+                        explained = true;
                     }
                     probe_status.lock().await.last_connection_error = Some(
                         "Probe key not yet approved by RIPE Atlas — register the public key above"
@@ -826,14 +923,9 @@ async fn main() -> Result<()> {
                     Some(Duration::from_secs(timeout_secs as u64))
                 }
                 Ok(InitResponse::Ok) => {
-                    if !printed_key {
-                        let pubkey_path = starla_common::probe_pubkey_path();
-                        if let Ok(contents) = std::fs::read_to_string(&pubkey_path) {
-                            info!("Public key:\n{}", contents.trim());
-                        }
-                        info!("Register at: https://atlas.ripe.net/apply/swprobe/");
-                        info!("Retrying registration until probe is approved...");
-                        printed_key = true;
+                    if notice.show() || !explained {
+                        info!("The registration server has not approved this key yet; retrying.");
+                        explained = true;
                     }
                     probe_status.lock().await.last_connection_error = Some(
                         "Probe key not yet approved by RIPE Atlas — register the public key above"
@@ -1196,4 +1288,49 @@ async fn main() -> Result<()> {
     info!("Shutting down probe");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KEY: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK6E8nQkaW3MYkgv8GDbIF1VK2MRVfPfT+tEIIpjg6j3 starla";
+
+    #[test]
+    fn banner_puts_the_key_on_a_line_of_its_own() {
+        let banner = registration_banner(KEY);
+        assert!(
+            banner.lines().any(|line| line == KEY),
+            "the key must be selectable as one whole line, got:\n{banner}"
+        );
+    }
+
+    #[test]
+    fn banner_is_padded_and_ruled() {
+        let banner = registration_banner(KEY);
+        assert!(banner.starts_with("\n\n"), "needs blank space above it");
+        assert!(banner.ends_with("\n"), "needs to end on its own line");
+
+        let rules: Vec<_> = banner
+            .lines()
+            .filter(|line| line.starts_with('─'))
+            .collect();
+        assert_eq!(rules.len(), 2, "one rule above the key and one below");
+    }
+
+    #[test]
+    fn banner_carries_the_registration_url() {
+        assert!(registration_banner(KEY).contains("https://atlas.ripe.net/apply/swprobe/"));
+    }
+
+    #[test]
+    fn notice_shows_once_then_holds_off() {
+        let mut notice = RegistrationNotice::new(KEY.to_string());
+        assert!(notice.show(), "first call prints");
+        assert!(
+            !notice.show(),
+            "a retry moments later must not reprint and scroll the key away"
+        );
+    }
 }
