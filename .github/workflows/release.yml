@@ -297,6 +297,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Lets crates-io-auth-action mint a short-lived OIDC token at
+      # publish time, scoped to this repo + workflow. No long-lived
+      # secret to rotate, and nothing to expire.
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -315,9 +319,12 @@ jobs:
           name: ananthb
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
       - name: Publish workspace crates
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
