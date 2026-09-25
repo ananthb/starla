@@ -354,14 +354,6 @@ jobs:
             [[ "$code" == "200" ]]
           }
 
-          crate_exists() {
-            local name=$1
-            local code
-            code=$(curl -sS -A "$UA" -o /dev/null -w '%{http_code}' \
-              "https://crates.io/api/v1/crates/${name}")
-            [[ "$code" == "200" ]]
-          }
-
           # Filter out crates whose current version is already on crates.io.
           pending=()
           for crate in "${CRATES[@]}"; do
@@ -377,21 +369,7 @@ jobs:
             exit 0
           fi
 
-          is_new=()
           for crate in "${pending[@]}"; do
-            if crate_exists "$crate"; then
-              is_new+=("false")
-            else
-              is_new+=("true")
-            fi
-          done
-
-          for i in "${!pending[@]}"; do
-            crate="${pending[$i]}"
-            if [[ $i -gt 0 && "${is_new[$i]}" == "true" && "${is_new[$((i-1))]}" == "true" ]]; then
-              echo "Sleeping 605s before next new-crate publish (rate limit)"
-              sleep 605
-            fi
             echo "→ Publishing ${crate}"
             nix develop -c cargo publish -p "$crate"
           done
