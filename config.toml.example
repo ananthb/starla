@@ -24,8 +24,8 @@ status_socket = false
 [controller]
 # Registration servers (host:port)
 registration_servers = [
-    "reg03.atlas.ripe.net:443",
-    "reg04.atlas.ripe.net:443"
+    "reg-05.prod.atlas.ripe.net:443",
+    "reg-06.prod.atlas.ripe.net:443"
 ]
 
 # SSH connection timeout (seconds)

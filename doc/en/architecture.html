@@ -73,7 +73,7 @@
 ========================                          ============
 
  Registration Server                    +---------------------------------+
- (reg03/reg04:443)                      |                                 |
+ (reg-05/reg-06.prod:443)               |                                 |
        |                                |  +----------+    +-----------+  |
        | 1. SSH INIT                    |  | Telnet   |    | Scheduler |  |
        |    (get controller)            |  | Parser   |--->| (tokio)   |  |
@@ -102,7 +102,7 @@
       <h2 class="section"><span class="num">02</span>Connection flow</h2>
 
       <ol>
-        <li><strong>Registration.</strong> starla SSHes to a registration server (e.g. <code>reg03.atlas.ripe.net:443</code>), runs <code>INIT</code> with probe identity on stdin, and receives a controller assignment.</li>
+        <li><strong>Registration.</strong> starla SSHes to a registration server (e.g. <code>reg-05.prod.atlas.ripe.net:443</code>), runs <code>INIT</code> with probe identity on stdin, and receives a controller assignment.</li>
         <li><strong>Controller INIT.</strong> Connects to the assigned controller via SSH, sends another <code>INIT</code> (no stdin), and receives a <code>SESSION_ID</code> + <code>REMOTE_PORT</code>.</li>
         <li><strong>KEEP session.</strong> Opens a long-lived SSH connection running the <code>KEEP</code> command. This connection carries both measurement commands (inbound) and result uploads (outbound).</li>
       </ol>

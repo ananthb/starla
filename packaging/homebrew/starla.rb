@@ -30,7 +30,7 @@ cask "starla" do
       File.write(config_file, <<~TOML)
         [controller]
         keepalive_interval = 60
-        registration_servers = ["reg03.atlas.ripe.net:443", "reg04.atlas.ripe.net:443"]
+        registration_servers = ["reg-05.prod.atlas.ripe.net:443", "reg-06.prod.atlas.ripe.net:443"]
         ssh_timeout = 30
 
         [probe]
@@ -80,7 +80,7 @@ cask "starla" do
     Logs:     ~/Library/Logs/starla.log
 
     Register your probe key at:
-      https://atlas.ripe.net/apply/swprobe/
+      https://atlas.ripe.net/register/swprobe/
     The public key lives at:
       ~/.local/state/starla/probe_key.pub
 

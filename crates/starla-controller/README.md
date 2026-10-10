@@ -26,7 +26,7 @@ let known_hosts = KnownHosts::load(Path::new("data/known_hosts"));
 
 // Connect to registration servers
 let ssh = SshConnection::connect_to_servers(
-    &["reg03.atlas.ripe.net:443", "reg04.atlas.ripe.net:443"],
+    &["reg-05.prod.atlas.ripe.net:443", "reg-06.prod.atlas.ripe.net:443"],
     &key,
     SshConfig::default(),
     known_hosts,

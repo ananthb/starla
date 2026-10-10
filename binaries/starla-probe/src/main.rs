@@ -181,7 +181,7 @@ fn registration_banner(public_key: &str) -> String {
          \n\
          {public_key}\n\
          \n\
-         Paste the key above into https://atlas.ripe.net/apply/swprobe/\n\
+         Paste the key above into https://atlas.ripe.net/register/swprobe/\n\
          {RULE}\n"
     )
 }
@@ -1321,7 +1321,7 @@ mod tests {
 
     #[test]
     fn banner_carries_the_registration_url() {
-        assert!(registration_banner(KEY).contains("https://atlas.ripe.net/apply/swprobe/"));
+        assert!(registration_banner(KEY).contains("https://atlas.ripe.net/register/swprobe/"));
     }
 
     #[test]

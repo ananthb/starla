@@ -51,8 +51,8 @@ in
       registrationServers = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [
-          "reg03.atlas.ripe.net:443"
-          "reg04.atlas.ripe.net:443"
+          "reg-05.prod.atlas.ripe.net:443"
+          "reg-06.prod.atlas.ripe.net:443"
         ];
         description = "RIPE Atlas registration servers.";
       };
