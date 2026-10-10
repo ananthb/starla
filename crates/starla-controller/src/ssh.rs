@@ -1133,20 +1133,74 @@ pub async fn save_key(key: &PrivateKey, path: &Path) -> anyhow::Result<()> {
     tokio::fs::write(&pub_path, pub_key_str.as_bytes()).await?;
     debug!("Public key: {}", pub_key_str);
 
-    // Save private key in OpenSSH format
+    // Save private key in OpenSSH format. It is created 0600 from the first
+    // byte (never written under the umask and chmodded afterwards, which left
+    // a window -- or, after a crash, a key -- readable by others) and renamed
+    // into place, so a reader never sees a half-written key.
     let openssh_pem = key.to_openssh(ssh_key::LineEnding::LF)?;
-    tokio::fs::write(path, openssh_pem.as_bytes()).await?;
-
-    // Set restrictive permissions on private key (Unix only)
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = tokio::fs::metadata(path).await?.permissions();
-        perms.set_mode(0o600);
-        tokio::fs::set_permissions(path, perms).await?;
-    }
+    write_private_file(path, openssh_pem.as_bytes())?;
 
     Ok(())
+}
+
+/// Write `contents` to `path` through a `0600` temp file and a rename.
+fn write_private_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let tmp = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(&tmp)?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(&tmp, path)
+}
+
+/// Load the probe key from `path`, or create it there if there is none.
+///
+/// Returns the key and whether it was just generated. The key IS the probe's
+/// identity at RIPE Atlas: a new one registers as a different probe, with
+/// none of the old one's history or credits. So a key file that exists but
+/// cannot be read or parsed is an error -- it is never replaced -- and so is
+/// a new key that cannot be saved, since an unsaved key would change on
+/// every restart.
+pub async fn load_or_create_key(path: &Path) -> anyhow::Result<(PrivateKey, bool)> {
+    let exists = path.try_exists().map_err(|e| {
+        anyhow::anyhow!(
+            "cannot check for the probe key at {}: {}",
+            path.display(),
+            e
+        )
+    })?;
+    if exists {
+        let key = load_key(path).await.map_err(|e| {
+            anyhow::anyhow!(
+                "the probe key at {} exists but cannot be loaded ({}). Refusing to \
+                 replace it: the key is this probe's identity at RIPE Atlas. Restore \
+                 or fix the file, or move it aside deliberately to start a new probe",
+                path.display(),
+                e
+            )
+        })?;
+        return Ok((key, false));
+    }
+    let key = generate_key()?;
+    save_key(&key, path).await.map_err(|e| {
+        anyhow::anyhow!(
+            "generated a probe key but cannot save it to {} ({}); an unsaved key \
+             would change at every restart",
+            path.display(),
+            e
+        )
+    })?;
+    Ok((key, true))
 }
 
 #[cfg(test)]
@@ -1212,6 +1266,46 @@ mod tests {
         let public = key.public_key();
         // Just verify we can get the public key
         assert_eq!(public.algorithm(), Algorithm::Ed25519);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_private_key_is_written_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe_key");
+        save_key(&generate_key().unwrap(), &path).await.unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert!(
+            !path.with_extension("tmp").exists(),
+            "temp file renamed away"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_key_is_created_and_then_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe_key");
+        let (first, generated) = load_or_create_key(&path).await.unwrap();
+        assert!(generated);
+        let (again, generated) = load_or_create_key(&path).await.unwrap();
+        assert!(!generated);
+        assert_eq!(
+            first.public_key().public_key_base64(),
+            again.public_key().public_key_base64()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_key_is_an_error_and_is_never_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe_key");
+        std::fs::write(&path, "not a key\n").unwrap();
+        let err = load_or_create_key(&path).await.unwrap_err().to_string();
+        assert!(err.contains("Refusing to"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not a key\n");
+        assert!(!path.with_extension("pub").exists());
     }
 
     fn tmp_path(tag: &str) -> PathBuf {

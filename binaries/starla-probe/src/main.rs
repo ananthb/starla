@@ -742,44 +742,36 @@ async fn main() -> Result<()> {
                 }
             }
         } else {
-            // Credentials dir exists but no ssh-key: fall through to file
+            // Credentials dir exists but no ssh-key (e.g. only config.toml is
+            // a credential): the state-dir key, created on first start.
             let key_path = starla_common::probe_key_path();
-            starla_controller::load_key(&key_path).await?
+            let (key, generated) = starla_controller::load_or_create_key(&key_path).await?;
+            generated_key = generated;
+            key
         }
     } else {
         let key_path = starla_common::probe_key_path();
-        if key_path.exists() {
-            match starla_controller::load_key(&key_path).await {
-                Ok(k) => {
-                    debug!("Loaded SSH key from {}", key_path.display());
-                    k
-                }
-                Err(e) => {
-                    warn!("Failed to load SSH key: {}. Generating new key...", e);
-                    let new_key = starla_controller::generate_key()?;
-                    if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
-                        warn!("Failed to save SSH key: {}", e);
-                    }
-                    new_key
-                }
+        let (key, generated) = match starla_controller::load_or_create_key(&key_path).await {
+            Ok(pair) => pair,
+            Err(e) => {
+                error!("{:#}", e);
+                return Err(e);
             }
-        } else {
-            debug!("No SSH key found, generating new key...");
-            let new_key = starla_controller::generate_key()?;
-            if let Err(e) = starla_controller::save_key(&new_key, &key_path).await {
-                warn!("Failed to save SSH key: {}", e);
-            }
+        };
+        if generated {
             // The fingerprint is the wrong thing to show here. It is not
             // what the registration form takes, and printing it beside the
             // real key left two different renderings of the same thing in
             // one log. It stays at debug, where it is still useful for
             // matching a key against a known probe.
-            if let Ok(fp) = starla_controller::key_fingerprint(&new_key) {
+            if let Ok(fp) = starla_controller::key_fingerprint(&key) {
                 debug!("Generated new probe key: {}", fp);
             }
             generated_key = true;
-            new_key
+        } else {
+            debug!("Loaded SSH key from {}", key_path.display());
         }
+        key
     };
 
     // Log probe identity and update status with public key
