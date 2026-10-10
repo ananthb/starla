@@ -9,8 +9,7 @@
 use russh::client::{self, Handle, Msg};
 use russh::keys::ssh_key::{self, Algorithm};
 use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKey, PublicKeyBase64};
-use russh::{kex, Channel, ChannelMsg, Preferred};
-use std::borrow::Cow;
+use russh::{Channel, ChannelMsg, Preferred};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -369,6 +368,25 @@ pub struct TelnetState {
     pub session_id: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
+/// The russh client configuration for every registration-server and
+/// controller connection.
+///
+/// RIPE's registration servers offer diffie-hellman-group1-sha1 and
+/// diffie-hellman-group-exchange-sha256 (plus ext-info-s and
+/// kex-strict-s-v00@openssh.com; read from reg03 and reg-05 on 2026-10-10).
+/// russh's default list includes group exchange, so the 1024-bit group1 is
+/// never needed. Keep the default whole: a custom list also drops the
+/// ext-info-c and kex-strict-c markers, and with them the Terrapin
+/// (CVE-2023-48795) countermeasure.
+fn client_config(config: &SshConfig) -> client::Config {
+    client::Config {
+        inactivity_timeout: Some(config.inactivity_timeout),
+        keepalive_interval: Some(config.keepalive_interval),
+        preferred: Preferred::DEFAULT,
+        ..Default::default()
+    }
+}
+
 /// SSH connection to RIPE Atlas controller
 pub struct SshConnection {
     session: Arc<Mutex<Handle<AtlasClientHandler>>>,
@@ -390,25 +408,7 @@ impl SshConnection {
         known_hosts: KnownHosts,
         telnet_state: Option<TelnetState>,
     ) -> anyhow::Result<Self> {
-        // RIPE Atlas registration servers only support diffie-hellman-group1-sha1
-        // and diffie-hellman-group-exchange-sha256. Since russh doesn't support
-        // group exchange, we must use group1-sha1 (despite it being considered weak).
-        let preferred = Preferred {
-            kex: Cow::Owned(vec![
-                kex::DH_G1_SHA1,
-                kex::DH_G14_SHA1,
-                kex::DH_G14_SHA256,
-                kex::CURVE25519,
-            ]),
-            ..Preferred::DEFAULT
-        };
-
-        let ssh_config = client::Config {
-            inactivity_timeout: Some(config.inactivity_timeout),
-            keepalive_interval: Some(config.keepalive_interval),
-            preferred,
-            ..Default::default()
-        };
+        let ssh_config = client_config(&config);
 
         let (command_tx, probe_id, session_id) = match telnet_state {
             Some(ts) => (Some(ts.command_tx), ts.probe_id, ts.session_id),
@@ -1180,6 +1180,24 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn key_exchange_never_offers_group1_and_keeps_strict_kex() {
+        let cfg = client_config(&SshConfig::default());
+        let kex = &cfg.preferred.kex;
+        assert!(
+            !kex.contains(&russh::kex::DH_G1_SHA1),
+            "1024-bit diffie-hellman-group1-sha1 must not be offered"
+        );
+        assert!(
+            kex.contains(&russh::kex::DH_GEX_SHA256),
+            "RIPE's servers need group exchange"
+        );
+        assert!(
+            kex.contains(&russh::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT),
+            "dropping the strict-kex marker disables the Terrapin countermeasure"
+        );
+    }
 
     #[test]
     fn test_default_config() {
