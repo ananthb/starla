@@ -16,7 +16,6 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 hickory-resolver = { workspace = true }
-hickory-client = { workspace = true }
 hickory-proto = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
