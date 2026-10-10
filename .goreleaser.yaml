@@ -91,7 +91,9 @@ nfpms:
       - dst: /etc/starla
         type: dir
         file_info:
-          mode: 0750
+          # 0755: the service runs as a DynamicUser, which a root-owned
+          # 0750 directory shuts out of its own config.toml.
+          mode: 0755
       # apt repository auto-config
       - src: packaging/starla.gpg
         dst: /usr/share/keyrings/starla.gpg

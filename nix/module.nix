@@ -166,7 +166,7 @@ in
         # Directories: systemd sets CONFIGURATION_DIRECTORY, STATE_DIRECTORY,
         # RUNTIME_DIRECTORY which starla's path resolution picks up automatically
         ConfigurationDirectory = "starla";
-        ConfigurationDirectoryMode = "0750";
+        ConfigurationDirectoryMode = "0755";
         StateDirectory = "starla";
         StateDirectoryMode = "0750";
         RuntimeDirectory = "starla";
@@ -193,7 +193,7 @@ in
         NoNewPrivileges = true;
         SystemCallArchitectures = "native";
         RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" "AF_NETLINK" ];
-        SystemCallFilter = [ "@system-service" "~@privileged" "@network-io" "@raw-io" ];
+        SystemCallFilter = [ "@system-service" "~@privileged" ];
         ExecStart = "${cfg.package}/bin/starla --config %E/starla/config.toml";
       } // lib.optionalAttrs (cfg.sshKeyFile != null) {
         LoadCredential = [ "ssh-key:${cfg.sshKeyFile}" ];

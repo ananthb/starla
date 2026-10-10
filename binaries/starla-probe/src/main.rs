@@ -249,7 +249,20 @@ async fn main() -> Result<()> {
     // as escaped \n inside a JSON string. Parse errors go to stderr here;
     // there is no logger yet to carry them.
     let config_path = args.config.unwrap_or_else(starla_common::config_file);
-    let config_found = config_path.exists();
+    // try_exists, not exists: exists() reports "absent" for a config the
+    // service may not read (EACCES on its directory), and Starla then ran on
+    // its defaults while saying nothing. Unreadable is an error.
+    let config_found = match config_path.try_exists() {
+        Ok(found) => found,
+        Err(e) => {
+            eprintln!(
+                "starla: {}: cannot check for the config file: {}",
+                config_path.display(),
+                e
+            );
+            return Err(e.into());
+        }
+    };
     let config = if config_found {
         match starla_common::ProbeConfig::from_file(&config_path) {
             Ok(config) => config,
