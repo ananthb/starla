@@ -432,6 +432,21 @@ async fn main() -> Result<()> {
     let scheduler_tx_cmd = scheduler_tx.clone();
     let scheduler_cancel_cmd = scheduler_cancel.clone();
     let host_telemetry_cmd = result_handler.host_telemetry();
+    // THE ADDRESS REPORT IS THE PROBE'S OWN JOB, NOT THE CONTROLLER'S. The
+    // reference probe runs `rptaddrs -A 9104` in its main loop, every pass
+    // (`bin/ripe-atlas.in`: `rptaddrs …`, then `sleepkick 180`), and RIPE's
+    // controllers never put it in a crontab. A production controller
+    // (ctr-dub-sw02, 2026-10-12) sent evping, evtraceroute, evtdig,
+    // evsslgetcert, evhttpget, condmv and httppost, and no rptaddrs. Scheduled
+    // only on a CRONLINE, the report never ran, so RIPE never learned the
+    // probe's IPv4 address: address_v4/asn_v4 stayed null, there was no
+    // system-ipv4-capable, and no IPv4 built-ins reached a probe whose IPv4
+    // worked. The reporter's cache keeps this to one line per change, or one
+    // an hour, as the C applet's `-c` file does. A controller CRONLINE for
+    // rptaddrs still replaces this schedule (`HostTelemetry::schedule`).
+    host_telemetry_cmd
+        .schedule_rptaddrs(RPTADDRS_INTERVAL_SECS, RPTADDRS_MSM_ID)
+        .await;
     tokio::spawn(async move {
         // Track scheduled measurements for batched logging
         let mut scheduled_counts: std::collections::HashMap<&'static str, u32> =
@@ -617,7 +632,7 @@ async fn main() -> Result<()> {
                                 .await;
                         }
                         starla_controller::HostTelemetryKind::Rptaddrs => {
-                            let msm_id = spec.msm_id.unwrap_or(9104);
+                            let msm_id = spec.msm_id.unwrap_or(RPTADDRS_MSM_ID);
                             host_telemetry_cmd
                                 .schedule_rptaddrs(spec.interval, msm_id)
                                 .await;
@@ -1307,6 +1322,13 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
+/// The reference probe's main-loop period, which is how often it runs
+/// `rptaddrs` (`bin/ripe-atlas.in`, `sleepkick 180`).
+const RPTADDRS_INTERVAL_SECS: u64 = 180;
+/// The measurement id the reference probe reports addresses under
+/// (`rptaddrs -A 9104`).
+const RPTADDRS_MSM_ID: u32 = 9104;
 
 #[cfg(test)]
 mod tests {

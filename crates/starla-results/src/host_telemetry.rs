@@ -589,6 +589,32 @@ mod tests {
         assert!(second.is_none(), "rptaddrs should suppress unchanged");
     }
 
+    /// The probe schedules rptaddrs itself at startup, because RIPE's
+    /// controllers never do (binaries/starla-probe, `RPTADDRS_*`). That only
+    /// reaches RIPE if the first report is queued at once, not after the
+    /// first 180 s, and carries the IPv4 side: addresses AND routes, which is
+    /// what RIPE judges IPv4 by.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_scheduled_rptaddrs_reports_at_once_with_both_families() {
+        let t = HostTelemetry::new();
+        t.schedule_rptaddrs(180, 9104).await;
+        let mut lines = Vec::new();
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+            lines = t.drain().await;
+            if !lines.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(lines.len(), 1, "one report, queued at once: {lines:?}");
+        let line = &lines[0];
+        assert!(line.contains("\"id\": \"9104\""), "{line}");
+        assert!(line.contains("\"inet-addresses\": ["), "{line}");
+        assert!(line.contains("\"inet-routes\": ["), "{line}");
+    }
+
     #[tokio::test]
     async fn one_shot_schedule_drains() {
         let t = HostTelemetry::new();
