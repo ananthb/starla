@@ -102,6 +102,29 @@ impl ResultQueue {
         }
     }
 
+    /// Put results the controller refused to take (429) back at the front,
+    /// without counting an attempt: nothing was wrong with them, so they wait
+    /// out the refusal and only their age (`cleanup_expired`) can drop them.
+    /// The reference probe leaves refused files in its spool the same way.
+    pub fn requeue_refused(&mut self, mut results: Vec<QueuedResult>) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        for r in &mut results {
+            r.last_attempt_at = Some(now);
+        }
+
+        for r in results.into_iter().rev() {
+            self.items.push_front(r);
+        }
+
+        while self.items.len() > self.max_capacity {
+            self.items.pop_back();
+        }
+    }
+
     /// Remove results older than `max_age_secs`. Returns number of items
     /// removed.
     pub fn cleanup_expired(&mut self, max_age_secs: i64) -> usize {
@@ -222,5 +245,22 @@ mod tests {
         assert_eq!(q.stats().count, 1);
         q.cleanup_failed(5);
         assert_eq!(q.stats().count, 0);
+    }
+
+    #[test]
+    fn a_refused_result_keeps_its_attempts() {
+        let mut q = ResultQueue::new(10);
+        q.enqueue(make_result(1));
+        q.enqueue(make_result(2));
+        for _ in 0..10 {
+            let batch = q.drain_all();
+            q.requeue_refused(batch);
+        }
+        let back = q.drain_all();
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].result.msm_id.0, 1, "order kept");
+        assert!(back
+            .iter()
+            .all(|r| r.attempts == 0 && r.last_attempt_at.is_some()));
     }
 }

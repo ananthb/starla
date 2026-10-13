@@ -215,7 +215,13 @@ impl ResultHandler {
                 warn!("Upload failed: {}", e);
                 self.metrics.record_upload_failure();
                 let mut queue = self.queue.lock().await;
-                queue.requeue_failed(uploadable);
+                if is_rate_limited(&e) {
+                    // 2026-10-12: five 429s in ~5 min dropped every result
+                    // probe 1018212 measured while RIPE refused it.
+                    queue.requeue_refused(uploadable);
+                } else {
+                    queue.requeue_failed(uploadable);
+                }
                 self.metrics.update_queue_depth(queue.stats().count as i64);
                 Err(e)
             }
@@ -274,7 +280,7 @@ impl ResultHandler {
                         Err(e) => {
                             consecutive_failures += 1;
                             let err_msg = e.to_string();
-                            if err_msg.contains("rate limited") {
+                            if is_rate_limited(&e) {
                                 rate_limited += 1;
                                 // Parse "rate limited N" for Retry-After seconds
                                 let retry_after = err_msg
@@ -307,6 +313,11 @@ impl ResultHandler {
 
         Ok(())
     }
+}
+
+/// The uploader's 429 ("rate limited" or "rate limited <Retry-After>").
+fn is_rate_limited(e: &anyhow::Error) -> bool {
+    e.to_string().starts_with("rate limited")
 }
 
 const RATE_LIMIT_FIRST_HOLD: Duration = Duration::from_secs(60);
@@ -456,6 +467,36 @@ mod tests {
             });
             Box::pin(async move { Ok(Box::new(probe) as Box<dyn UploadStream>) })
         }
+    }
+
+    /// 2026-10-12: five 429s dropped every result probe 1018212 measured while
+    /// RIPE refused it. A refusal is not a failed attempt.
+    #[tokio::test]
+    async fn a_refused_upload_drops_nothing() {
+        let (tx, mut seen) = tokio::sync::mpsc::unbounded_channel();
+        let handler = ResultHandler::new(
+            Box::new(RateLimitingController(tx)),
+            UploaderConfig::default(),
+            ResultHandlerConfig::default(),
+            starla_metrics::MetricsRegistry::new().unwrap(),
+        );
+        handler
+            .set_endpoint_path("/?PROBE_ID=1".into())
+            .await
+            .unwrap();
+        handler.submit(make_result(1001)).await;
+
+        let tries = ResultHandlerConfig::default().max_attempts + 3;
+        for _ in 0..tries {
+            let err = handler.upload_pending().await.unwrap_err();
+            assert!(is_rate_limited(&err), "{err}");
+        }
+        assert_eq!(handler.queue_stats().await.count, 1);
+        let mut posts = 0;
+        while seen.try_recv().is_ok() {
+            posts += 1;
+        }
+        assert_eq!(posts, tries, "every try still posted the result");
     }
 
     /// 2026-10-12: RIPE refused every upload from probe 1018212 for hours and
