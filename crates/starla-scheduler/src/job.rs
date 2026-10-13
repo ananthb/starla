@@ -5,7 +5,6 @@
 
 use starla_common::{MeasurementId, ProbeId};
 use starla_measurements::{
-    dns::{DnsConfig, DnsProtocol},
     http::HttpConfig,
     ntp::NtpConfig,
     ping::PingConfig,
@@ -14,6 +13,23 @@ use starla_measurements::{
     Dns, Http, Measurement, Ntp, Ping, Tls, Traceroute,
 };
 use std::net::{IpAddr, ToSocketAddrs};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// evtdig's options, as the measurement takes them: the server and the
+/// query, and everything else its command line says.
+pub use starla_measurements::dns::DnsConfig as DnsJobSpec;
+
+/// The probe id registration gave us, for evtdig's `$p` and `--p_probe_id`;
+/// the reference looks it up each time it expands one (get_probe_id(),
+/// libbb/atlas_probe.c). The scheduler is built before the probe registers,
+/// so the probe id it hands out is 0; the probe records the real one here
+/// before the controller session that sends any CRONLINE.
+static REGISTERED_PROBE_ID: AtomicU32 = AtomicU32::new(0);
+
+/// Record the probe id registration assigned (see REGISTERED_PROBE_ID).
+pub fn set_registered_probe_id(probe_id: u32) {
+    REGISTERED_PROBE_ID.store(probe_id, Ordering::Relaxed);
+}
 
 /// A measurement job that can be scheduled
 #[derive(Debug, Clone)]
@@ -73,18 +89,6 @@ pub struct TracerouteJobSpec {
     pub first_hop: u8,
     pub max_hops: u8,
     pub size: u16,
-}
-
-#[derive(Debug, Clone)]
-pub struct DnsJobSpec {
-    pub target: String,
-    pub af: u8,
-    pub protocol: String,
-    pub query_type: String,
-    pub query_class: String,
-    pub query_argument: String,
-    pub use_dnssec: bool,
-    pub recursion_desired: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -159,28 +163,13 @@ impl MeasurementJob {
                     msm_id,
                 }))
             }
-            MeasurementSpec::Dns(spec) => {
-                let target = resolve_target(&spec.target, spec.af)?;
-                let protocol = match spec.protocol.to_uppercase().as_str() {
-                    "TCP" => DnsProtocol::TCP,
-                    _ => DnsProtocol::UDP,
-                };
-                Ok(Box::new(Dns {
-                    config: DnsConfig {
-                        target,
-                        protocol,
-                        query_name: spec.query_argument.clone(),
-                        query_type: spec.query_type.clone(),
-                        query_class: spec.query_class.clone(),
-                        recursion_desired: spec.recursion_desired,
-                        edns_buf_size: if spec.use_dnssec { Some(4096) } else { None },
-                        dnssec: spec.use_dnssec,
-                        timeout_ms: 5000,
-                    },
-                    probe_id,
-                    msm_id,
-                }))
-            }
+            // The server is looked up (or the resolvers read) when the
+            // query is made, with evtdig's address family
+            MeasurementSpec::Dns(spec) => Ok(Box::new(Dns {
+                config: spec.clone(),
+                probe_id: dns_probe_id(probe_id),
+                msm_id,
+            })),
             MeasurementSpec::Http(spec) => {
                 let mut headers = std::collections::HashMap::new();
                 for h in &spec.headers {
@@ -247,6 +236,15 @@ impl MeasurementJob {
     }
 }
 
+/// The probe id `$p` stands for: the scheduler's, or while that is 0 the one
+/// registration gave us.
+fn dns_probe_id(probe_id: ProbeId) -> ProbeId {
+    match probe_id {
+        ProbeId(0) => ProbeId(REGISTERED_PROBE_ID.load(Ordering::Relaxed)),
+        known => known,
+    }
+}
+
 /// Resolve a hostname or IP string to an IpAddr
 fn resolve_target(target: &str, af: u8) -> anyhow::Result<IpAddr> {
     // First try to parse as IP address directly
@@ -289,5 +287,41 @@ mod tests {
     fn test_resolve_ipv6() {
         let ip = resolve_target("::1", 6).unwrap();
         assert!(ip.is_ipv6());
+    }
+
+    /// `$p` is the registered probe id, not the scheduler's 0: on the twin of
+    /// 2026-10-13 Starla asked for 0.ripe-tld-experiment.<r> where the
+    /// reference asked for 1018212.ripe-tld-experiment.<r> (msm 158899649).
+    #[tokio::test]
+    async fn a_dns_job_asks_with_the_registered_probe_id() {
+        let server = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let job = MeasurementJob {
+            msm_id: 158899649,
+            interval: 0,
+            start_time: 0,
+            end_time: 0,
+            spread: 0,
+            spec: MeasurementSpec::Dns(DnsJobSpec {
+                server: "127.0.0.1".into(),
+                port: server.local_addr().unwrap().port(),
+                qtype: 1,
+                qclass: 1,
+                query: "$p.ripe-tld-experiment.".into(),
+                timeout_ms: 50,
+                disable_check_addr: true,
+                ..Default::default()
+            }),
+        };
+        set_registered_probe_id(1018212);
+        job.to_measurement(ProbeId(0))
+            .unwrap()
+            .execute()
+            .await
+            .unwrap();
+        let mut q = [0u8; 512];
+        let n = server.recv(&mut q).await.unwrap();
+        let wanted = b"\x071018212\x13ripe-tld-experiment\x00";
+        assert_eq!(&q[12..12 + wanted.len()], wanted, "{:?}", &q[..n]);
+        assert_eq!(dns_probe_id(ProbeId(7)), ProbeId(7));
     }
 }

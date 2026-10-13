@@ -587,14 +587,35 @@ async fn main() -> Result<()> {
                     "dns",
                     "dns",
                     MeasurementSpec::Dns(DnsJobSpec {
-                        target: spec.target,
+                        server: spec.target,
                         af: spec.af,
-                        protocol: spec.protocol,
-                        query_type: spec.query_type,
-                        query_class: spec.query_class,
-                        query_argument: spec.query_argument,
-                        use_dnssec: spec.use_dnssec,
-                        recursion_desired: spec.recursion_desired,
+                        tcp: spec.protocol == "TCP",
+                        port: spec.port,
+                        qtype: spec.qtype,
+                        qclass: spec.qclass,
+                        query: spec.query_argument,
+                        resolv: spec.resolv,
+                        rd: spec.rd,
+                        ad: spec.ad,
+                        cd: spec.cd,
+                        dnssec: spec.dnssec,
+                        nsid: spec.nsid,
+                        client_subnet: spec.client_subnet,
+                        cookies: spec.cookies,
+                        edns0: spec.edns0,
+                        edns_version: spec.edns_version,
+                        edns_flags: spec.edns_flags,
+                        edns_option: spec.edns_option,
+                        qbuf: spec.qbuf,
+                        abuf: spec.abuf,
+                        prepend_probe_id: spec.prepend_probe_id,
+                        timeout_ms: spec.timeout_ms,
+                        retry: spec.retry,
+                        bundle: spec.bundle,
+                        ttl: spec.ttl,
+                        // ATLAS_DISABLE_CHECK_ADDR is read from the
+                        // environment; nothing is left over yet
+                        ..Default::default()
                     })
                 ),
                 TelnetCommand::Http(spec) => dispatch_measurement!(
@@ -1221,6 +1242,8 @@ async fn main() -> Result<()> {
                 // Session ID is set on TelnetState before each KEEP connection
 
                 let actual_probe_id = probe_id.0;
+                // evtdig's $p: the scheduler was built before we registered
+                starla_scheduler::job::set_registered_probe_id(actual_probe_id);
 
                 // Set result upload endpoint path (query params for HTTP POST)
                 let endpoint_path =

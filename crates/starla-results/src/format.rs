@@ -277,6 +277,10 @@ impl AtlasResult {
     pub fn to_result_line(&self) -> String {
         use std::fmt::Write;
 
+        if let Some(line) = self.dns_result_line() {
+            return line;
+        }
+
         // FullLine: the measurement provided the complete line body
         if let serde_json::Value::String(ref v) = self.result {
             if let Some(body) = v.strip_prefix("__FULLLINE__") {
@@ -415,6 +419,45 @@ impl ResultBundle {
 
 /// The lts a full-line measurement writes in its own envelope.
 pub const LTS_PLACEHOLDER: &str = "\"lts\":0,";
+
+/// What evtdig's line has in place of each lts: the seconds before the
+/// result's time that query was reported, between two of these
+/// (starla_measurements::dns::LTS_MARK). printReply() writes get_timesync()
+/// when each query ends (eperd/evtdig.c:3723), a `--resolv` run once per
+/// resolver, a second or more apart.
+pub const DNS_LTS_MARK: char = '\u{1}';
+
+impl AtlasResult {
+    /// evtdig's full line with its lts filled in: the lts the result was
+    /// queued with, less each mark's seconds; -1 (no clock check yet) stays.
+    fn dns_result_line(&self) -> Option<String> {
+        use std::fmt::Write;
+        let serde_json::Value::String(ref v) = self.result else {
+            return None;
+        };
+        let body = v.strip_prefix("__FULLLINE__")?;
+        if !body.contains(DNS_LTS_MARK) {
+            return None;
+        }
+        let mut line = String::with_capacity(body.len() + 16);
+        line.push_str("RESULT { ");
+        for (i, part) in body.split(DNS_LTS_MARK).enumerate() {
+            if i % 2 == 0 {
+                line.push_str(part);
+                continue;
+            }
+            let back: i64 = part.parse().unwrap_or(0);
+            let lts = if self.lts < 0 {
+                self.lts
+            } else {
+                (self.lts - back).max(0)
+            };
+            let _ = write!(line, "{lts}");
+        }
+        line.push_str(" }\n");
+        Some(line)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -625,6 +668,34 @@ mod tests {
             .to_result_line();
         assert!(line.contains(", \"lts\":37, "), "{line}");
         assert_eq!(line.matches("\"lts\"").count(), 1, "{line}");
+    }
+
+    /// evtdig's line (msm 30001, a `--resolv` resultset, as the reference
+    /// wrote it in the twin run of 2026-10-13) gets the lts of each query:
+    /// the second resolver was asked a second after the first.
+    #[test]
+    fn a_dns_line_gets_the_lts_of_each_query() {
+        let mut result = make_dns_result();
+        result.data = MeasurementData::FullLine(
+            "\"id\" : \"30001\" , \"fw\":5130, \"mver\": \"2.6.4\", \"time\" : 1791871302 , \"lts\" : \u{1}1\u{1} , \"resultset\" : [ {\"time\" : 1791871302 , \"lts\" : \u{1}1\u{1} , \"subid\" : 1 , \"submax\" : 2 , \"proto\" : \"UDP\" },{\"time\" : 1791871303 , \"lts\" : \u{1}0\u{1} , \"subid\" : 2 , \"submax\" : 2 , \"proto\" : \"UDP\" }]"
+                .to_string(),
+        );
+        let line = AtlasResult::from_measurement(result.clone(), None)
+            .with_lts(20)
+            .to_result_line();
+        assert_eq!(
+            line,
+            "RESULT { \"id\" : \"30001\" , \"fw\":5130, \"mver\": \"2.6.4\", \"time\" : 1791871302 , \"lts\" : 19 , \"resultset\" : [ {\"time\" : 1791871302 , \"lts\" : 19 , \"subid\" : 1 , \"submax\" : 2 , \"proto\" : \"UDP\" },{\"time\" : 1791871303 , \"lts\" : 20 , \"subid\" : 2 , \"submax\" : 2 , \"proto\" : \"UDP\" }] }\n"
+        );
+        let line = AtlasResult::from_measurement(result.clone(), None)
+            .with_lts(-1)
+            .to_result_line();
+        assert_eq!(line.matches("\"lts\" : -1 , ").count(), 3, "{line}");
+        // A clock check between the two queries: never below 0
+        let line = AtlasResult::from_measurement(result, None)
+            .with_lts(0)
+            .to_result_line();
+        assert_eq!(line.matches("\"lts\" : 0 , ").count(), 3, "{line}");
     }
 
     #[test]

@@ -126,20 +126,99 @@ pub struct TracerouteSpec {
     pub schedule: ScheduleSpec,
 }
 
-/// DNS measurement specification
+/// DNS measurement specification: evtdig's command line, with tdig_init()'s
+/// defaults (eperd/evtdig.c:2397)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsSpec {
     pub msm_id: u64,
-    pub target: String, // DNS server
+    /// `-B`: the bundle, reported as `"bundle"`
+    pub bundle: Option<u64>,
+    /// The server, evtdig's one argument; empty with `--resolv`
+    pub target: String,
+    /// 4 (`-4`, and the default) or 6 (`-6`), or 0 for either (`-4 -6`, `-a`,
+    /// and `--resolv`, which asks each resolver whatever its family)
     pub af: u8,
-    pub protocol: String, // UDP, TCP
-    pub query_type: String,
-    pub query_class: String,
+    pub protocol: String, // UDP, TCP (`-t`)
+    /// `--port` (53)
+    pub port: u16,
+    /// The query type and class, numbers: TXT (16) CH (3) unless an option
+    /// says otherwise
+    pub qtype: u16,
+    pub qclass: u16,
+    /// The name as given, ending with a dot, `$p`/`$r`/`$t` unexpanded
     pub query_argument: String,
-    pub use_dnssec: bool,
-    pub recursion_desired: bool,
+    /// `--resolv`: ask the probe's own resolvers (/etc/resolv.conf)
+    pub resolv: bool,
+    /// `-R`: set RD; evtdig never sets it otherwise (`--resolv` aside)
+    pub rd: bool,
+    /// `--ad`, `--cd`
+    pub ad: bool,
+    pub cd: bool,
+    /// `-d`: DO
+    pub dnssec: bool,
+    /// `-n`: NSID
+    pub nsid: bool,
+    /// `-c`, `--client-subnet`
+    pub client_subnet: bool,
+    /// `--cookies`
+    pub cookies: bool,
+    /// `-e`: EDNS0 UDP size (512)
+    pub edns0: u32,
+    /// `--edns-version`, `--edns-flags`, `--edns-option`
+    pub edns_version: u8,
+    pub edns_flags: u16,
+    pub edns_option: u16,
+    /// `--qbuf`: report the query
+    pub qbuf: bool,
+    /// Report the reply: true unless `--noabuf`
+    pub abuf: bool,
+    /// `--p_probe_id`
+    pub prepend_probe_id: bool,
+    /// `--timeout` (ms, 5000)
+    pub timeout_ms: u32,
+    /// `--retry` (0)
+    pub retry: u32,
+    /// `--ttl`: report a UDP reply's TTL (hop limit) as `"ttl"`
+    #[serde(default)]
+    pub ttl: bool,
     pub spread: Option<u32>,
     pub schedule: ScheduleSpec,
+}
+
+impl Default for DnsSpec {
+    fn default() -> Self {
+        Self {
+            msm_id: 0,
+            bundle: None,
+            target: String::new(),
+            af: 4,
+            protocol: "UDP".to_string(),
+            port: 53,
+            qtype: 16,
+            qclass: 3,
+            query_argument: String::new(),
+            resolv: false,
+            rd: false,
+            ad: false,
+            cd: false,
+            dnssec: false,
+            nsid: false,
+            client_subnet: false,
+            cookies: false,
+            edns0: 512,
+            edns_version: 0,
+            edns_flags: 0,
+            edns_option: 0,
+            qbuf: false,
+            abuf: true,
+            prepend_probe_id: false,
+            timeout_ms: 5000,
+            retry: 0,
+            ttl: false,
+            spread: None,
+            schedule: ScheduleSpec::default(),
+        }
+    }
 }
 
 /// HTTP measurement specification
@@ -1315,278 +1394,361 @@ fn parse_evtraceroute(args: &[String], interval: u64, end_time: i64, spread: u32
     })
 }
 
-/// Parse evtdig command arguments
-///
-/// Usage: evtdig [-4|-6] [-p port] [-r] [-d] [-t qtype] [-c qclass] [-A msm_id]
-/// [-O output]        [@server] [query]
-///
-/// Atlas-specific options:
-///   --soa         Query SOA record for "."
-///   --resolv      Use system resolver (no @server needed)
-///   -h            Query HOSTNAME.BIND (hostname identification)
-///   -b            Query BIND version
-///   -i            Query ID.SERVER
-///   -r            Query RRSIG records (DNSSEC)
-///   -t            Use TCP
-///   --type N      Query type (numeric)
-///   --class N     Query class (numeric)
-///   --query NAME  Explicit query name
-///   --a NAME      A record query
-///   --aaaa NAME   AAAA record query
-///   -e SIZE       EDNS buffer size
-fn parse_evtdig(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
-    let mut af: u8 = 4;
-    let mut protocol = "UDP".to_string();
-    let mut query_type = "A".to_string();
-    let mut query_class = "IN".to_string();
-    let mut use_dnssec = false;
-    let mut recursion_desired = true;
-    let mut msm_id: u64 = 0;
-    let mut target = String::new(); // DNS server
-    let mut query_argument = String::new(); // Query name
-    let mut use_resolver = false; // Use system resolver
+/// What one evtdig option sets (tdig_init()'s getopt_long() switch,
+/// eperd/evtdig.c:2490).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DigOpt {
+    /// `--a NAME`, `--aaaa NAME`, … `--soa NAME` (`-s`): this type, class IN
+    Query(u16),
+    Type,
+    Class,
+    QueryName,
+    /// `-h`, `-i`, `-b`, `-r`: this CH TXT name
+    Chaos(&'static str),
+    V4,
+    V6,
+    Both,
+    Atlas,
+    Bundle,
+    ClientSubnet,
+    Cookies,
+    Do,
+    Edns0,
+    EdnsVersion,
+    EdnsFlags,
+    EdnsOption,
+    Ipv6DestOption,
+    Interface,
+    Nsid,
+    Port,
+    OutFile,
+    Rd,
+    Tcp,
+    Timeout,
+    Qbuf,
+    NoAbuf,
+    Tls,
+    Https,
+    SniCertName,
+    HttpsPath,
+    Ttl,
+    Ad,
+    Cd,
+    Retry,
+    Resolv,
+    PrependProbeId,
+    Evdns,
+    WriteResponse,
+    ReadResponse,
+    /// In the option tables but not in the switch: tdig_init() refuses it
+    Refused,
+}
 
-    let mut i = 0;
-    while i < args.len() {
-        let arg = &args[i];
-        match arg.as_str() {
-            "-4" => af = 4,
-            "-6" => af = 6,
-            "-p" => {
-                // Port - skip for now
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "--soa" => {
-                // SOA query for root
-                query_type = "SOA".to_string();
-                if query_argument.is_empty() {
-                    query_argument = ".".to_string();
-                }
-            }
-            "--resolv" => {
-                // Use system resolver
-                use_resolver = true;
-            }
-            "-h" => {
-                // Query HOSTNAME.BIND TXT CH
-                query_type = "TXT".to_string();
-                query_class = "CH".to_string();
-                query_argument = "hostname.bind".to_string();
-            }
-            "-b" => {
-                // Query version.bind TXT CH
-                query_type = "TXT".to_string();
-                query_class = "CH".to_string();
-                query_argument = "version.bind".to_string();
-            }
-            "-i" => {
-                // Query id.server TXT CH
-                query_type = "TXT".to_string();
-                query_class = "CH".to_string();
-                query_argument = "id.server".to_string();
-            }
-            "-r" => {
-                // Query for RRSIG (DNSSEC signing)
-                use_dnssec = true;
-            }
-            "-d" | "-D" | "+dnssec" => {
-                // DNSSEC
-                use_dnssec = true;
-            }
-            "-t" => {
-                // TCP mode (note: this is different from --type)
-                protocol = "TCP".to_string();
-            }
-            "--type" | "-type" => {
-                if i + 1 < args.len() {
-                    // Numeric query type
-                    let type_num: u16 = args[i + 1].parse().unwrap_or(1);
-                    query_type = match type_num {
-                        1 => "A",
-                        2 => "NS",
-                        5 => "CNAME",
-                        6 => "SOA",
-                        12 => "PTR",
-                        15 => "MX",
-                        16 => "TXT",
-                        28 => "AAAA",
-                        33 => "SRV",
-                        43 => "DS",
-                        46 => "RRSIG",
-                        47 => "NSEC",
-                        48 => "DNSKEY",
-                        _ => "A",
-                    }
-                    .to_string();
-                    i += 1;
-                }
-            }
-            "--class" | "-class" => {
-                if i + 1 < args.len() {
-                    let class_num: u16 = args[i + 1].parse().unwrap_or(1);
-                    query_class = match class_num {
-                        1 => "IN",
-                        3 => "CH",
-                        _ => "IN",
-                    }
-                    .to_string();
-                    i += 1;
-                }
-            }
-            "--query" | "-query" => {
-                if i + 1 < args.len() {
-                    query_argument = args[i + 1].clone();
-                    i += 1;
-                }
-            }
-            "--a" | "-a" => {
-                query_type = "A".to_string();
-                if i + 1 < args.len() && !args[i + 1].starts_with('-') {
-                    query_argument = args[i + 1].clone();
-                    i += 1;
-                }
-            }
-            "--aaaa" | "-aaaa" => {
-                query_type = "AAAA".to_string();
-                if i + 1 < args.len() && !args[i + 1].starts_with('-') {
-                    query_argument = args[i + 1].clone();
-                    i += 1;
-                }
-            }
-            "-e" => {
-                // EDNS buffer size - implies EDNS
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "-R" => {
-                // Disable recursion desired
-                recursion_desired = false;
-            }
-            "--retry" => {
-                // Retry count - skip
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "--qbuf" => {
-                // Include query buffer in result - skip
-            }
-            "-T" => {
-                // TCP
-                protocol = "TCP".to_string();
-            }
-            "-A" => {
-                if i + 1 < args.len() {
-                    msm_id = args[i + 1].parse().unwrap_or(0);
-                    i += 1;
-                }
-            }
-            "-O" => {
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            _ if arg.starts_with('@') => {
-                // DNS server
-                target = arg[1..].to_string();
-            }
-            _ if arg.starts_with('+') => {
-                // dig-style options like +dnssec, +tcp, etc.
-                match arg.as_str() {
-                    "+dnssec" | "+do" => use_dnssec = true,
-                    "+tcp" => protocol = "TCP".to_string(),
-                    "+nord" | "+norecurse" => recursion_desired = false,
-                    _ => debug!("evtdig: ignoring option {}", arg),
-                }
-            }
-            _ if arg.starts_with("--") => {
-                // Unknown long option - skip
-                debug!("evtdig: ignoring unknown option {}", arg);
-            }
-            _ if !arg.starts_with('-') => {
-                // Positional argument - could be server or query
-                if target.is_empty() && arg.parse::<std::net::IpAddr>().is_ok() {
-                    // Looks like an IP address - it's the server
-                    target = arg.clone();
-                } else if query_argument.is_empty() {
-                    // Query name
-                    query_argument = arg.clone();
-                }
-            }
-            _ => {
-                debug!("evtdig: ignoring unknown option {}", arg);
-            }
+/// evtdig's long options (eperd/evtdig.c:680): name, takes an argument,
+/// what it sets.
+const EVTDIG_LONGOPTS: &[(&str, bool, DigOpt)] = &[
+    ("a", true, DigOpt::Query(1)),
+    ("aaaa", true, DigOpt::Query(28)),
+    ("any", true, DigOpt::Query(255)),
+    ("afsdb", true, DigOpt::Query(18)),
+    ("apl", true, DigOpt::Query(42)),
+    ("axfr", true, DigOpt::Query(252)),
+    ("caa", true, DigOpt::Query(257)),
+    ("cert", true, DigOpt::Query(37)),
+    ("cname", true, DigOpt::Query(5)),
+    ("dlv", true, DigOpt::Query(32769)),
+    ("dname", true, DigOpt::Query(39)),
+    ("dnskey", true, DigOpt::Query(48)),
+    ("ds", true, DigOpt::Query(43)),
+    ("ipseckey", true, DigOpt::Query(45)),
+    ("key", true, DigOpt::Query(25)),
+    ("loc", true, DigOpt::Query(29)),
+    ("mx", true, DigOpt::Query(15)),
+    ("naptr", true, DigOpt::Query(35)),
+    ("ns", true, DigOpt::Query(2)),
+    ("nsec", true, DigOpt::Query(47)),
+    ("nsec3", true, DigOpt::Query(50)),
+    ("nsec3param", true, DigOpt::Query(51)),
+    ("ptr", true, DigOpt::Query(12)),
+    ("rrsig", true, DigOpt::Query(46)),
+    ("rp", true, DigOpt::Query(17)),
+    ("soa", true, DigOpt::Query(6)),
+    ("sig", true, DigOpt::Query(24)),
+    ("spf", true, DigOpt::Query(99)),
+    ("sshfp", true, DigOpt::Query(44)),
+    ("srv", true, DigOpt::Query(33)),
+    ("ta", true, DigOpt::Query(32768)),
+    ("tlsa", true, DigOpt::Query(52)),
+    ("tsig", true, DigOpt::Query(250)),
+    ("txt", true, DigOpt::Query(16)),
+    ("type", true, DigOpt::Type),
+    ("class", true, DigOpt::Class),
+    ("query", true, DigOpt::QueryName),
+    ("hostname.bind", false, DigOpt::Chaos("hostname.bind.")),
+    ("id.server", false, DigOpt::Chaos("id.server.")),
+    ("version.bind", false, DigOpt::Chaos("version.bind.")),
+    ("version.server", false, DigOpt::Chaos("version.server.")),
+    ("c_output", false, DigOpt::Refused),
+    ("ad", false, DigOpt::Ad),
+    ("cd", false, DigOpt::Cd),
+    ("client-subnet", false, DigOpt::ClientSubnet),
+    ("cookies", false, DigOpt::Cookies),
+    ("do", false, DigOpt::Do),
+    ("evdns", false, DigOpt::Evdns),
+    ("noabuf", false, DigOpt::NoAbuf),
+    ("nsid", false, DigOpt::Nsid),
+    ("p_probe_id", false, DigOpt::PrependProbeId),
+    ("qbuf", false, DigOpt::Qbuf),
+    ("resolv", false, DigOpt::Resolv),
+    ("tls", false, DigOpt::Tls),
+    ("https", false, DigOpt::Https),
+    ("sni-cert-name", true, DigOpt::SniCertName),
+    ("https-path", true, DigOpt::HttpsPath),
+    ("ttl", false, DigOpt::Ttl),
+    ("edns0", true, DigOpt::Edns0),
+    ("edns-flags", true, DigOpt::EdnsFlags),
+    ("edns-option", true, DigOpt::EdnsOption),
+    ("edns-version", true, DigOpt::EdnsVersion),
+    ("ipv6-dest-option", true, DigOpt::Ipv6DestOption),
+    ("out-file", true, DigOpt::OutFile),
+    ("port", true, DigOpt::Port),
+    ("retry", true, DigOpt::Retry),
+    ("timeout", true, DigOpt::Timeout),
+    ("write-response", true, DigOpt::WriteResponse),
+    ("read-response", true, DigOpt::ReadResponse),
+];
+
+/// evtdig's short options, "46adD:e:tbhinqO:Rrs:A:B:I:?": `-D`, `-q` and
+/// `-?` are in the string but not the switch, so they are refused.
+fn evtdig_shortopt(c: char) -> Option<(bool, DigOpt)> {
+    Some(match c {
+        '4' => (false, DigOpt::V4),
+        '6' => (false, DigOpt::V6),
+        'a' => (false, DigOpt::Both),
+        'd' => (false, DigOpt::Do),
+        'D' => (true, DigOpt::Refused),
+        'e' => (true, DigOpt::Edns0),
+        't' => (false, DigOpt::Tcp),
+        'b' => (false, DigOpt::Chaos("version.bind.")),
+        'h' => (false, DigOpt::Chaos("hostname.bind.")),
+        'i' => (false, DigOpt::Chaos("id.server.")),
+        'n' => (false, DigOpt::Nsid),
+        'q' | '?' => (false, DigOpt::Refused),
+        'O' => (true, DigOpt::OutFile),
+        'R' => (false, DigOpt::Rd),
+        'r' => (false, DigOpt::Chaos("version.server.")),
+        's' => (true, DigOpt::Query(6)),
+        'A' => (true, DigOpt::Atlas),
+        'B' => (true, DigOpt::Bundle),
+        'I' => (true, DigOpt::Interface),
+        _ => return None,
+    })
+}
+
+/// getopt_long() over evtdig's arguments: options (`-46`, `-e512`,
+/// `--qbuf`, `--type=1`, a unique prefix of a long name) wherever they are,
+/// and the rest in order. Err on what getopt_long() would answer `?` to.
+fn evtdig_getopt(args: &[String]) -> Result<(Vec<(DigOpt, String)>, Vec<String>), String> {
+    let mut opts = Vec::new();
+    let mut operands = Vec::new();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if arg == "--" {
+            operands.extend(it.by_ref().cloned());
+            break;
         }
-        i += 1;
-    }
-
-    // Handle resolver mode - use a placeholder for system resolver
-    if use_resolver && target.is_empty() {
-        // Use Google DNS as fallback when --resolv is specified
-        // In a real implementation, we'd read /etc/resolv.conf
-        target = if af == 4 {
-            "8.8.8.8"
+        if let Some(long) = arg.strip_prefix("--") {
+            let (name, inline) = match long.split_once('=') {
+                Some((n, v)) => (n, Some(v)),
+                None => (long, None),
+            };
+            let exact = EVTDIG_LONGOPTS.iter().find(|o| o.0 == name);
+            let mut prefixed = EVTDIG_LONGOPTS.iter().filter(|o| o.0.starts_with(name));
+            let &(_, has_arg, opt) = match (exact, prefixed.next(), prefixed.next()) {
+                (Some(o), _, _) => o,
+                (None, Some(o), None) => o,
+                (None, Some(_), Some(_)) => return Err(format!("ambiguous option {arg}")),
+                (None, None, _) => return Err(format!("unknown option {arg}")),
+            };
+            let value = match (has_arg, inline) {
+                (true, Some(v)) => v.to_string(),
+                (true, None) => it
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| format!("{arg} needs an argument"))?,
+                (false, Some(_)) => return Err(format!("{arg} takes no argument")),
+                (false, None) => String::new(),
+            };
+            opts.push((opt, value));
+        } else if arg.len() > 1 && arg.starts_with('-') {
+            for (i, c) in arg[1..].char_indices() {
+                let (has_arg, opt) =
+                    evtdig_shortopt(c).ok_or_else(|| format!("unknown option -{c}"))?;
+                if !has_arg {
+                    opts.push((opt, String::new()));
+                    continue;
+                }
+                let rest = &arg[1 + i + c.len_utf8()..];
+                let value = if rest.is_empty() {
+                    it.next()
+                        .cloned()
+                        .ok_or_else(|| format!("-{c} needs an argument"))?
+                } else {
+                    rest.to_string()
+                };
+                opts.push((opt, value));
+                break;
+            }
         } else {
-            "2001:4860:4860::8888"
+            operands.push(arg.clone());
         }
-        .to_string();
     }
+    Ok((opts, operands))
+}
 
-    // If still no server, try to use the query_argument as server
-    if target.is_empty()
-        && !query_argument.is_empty()
-        && query_argument.parse::<std::net::IpAddr>().is_ok()
-    {
-        target = query_argument.clone();
-        query_argument = ".".to_string();
-    }
+/// strtoul(s, NULL, base) as far as it reads: leading digits, 0 if none
+/// (base 0 also takes 0x… and 0…).
+fn strtoul(s: &str, base: u32) -> u64 {
+    let s = s.trim_start();
+    let (s, radix) = match base {
+        0 if s.starts_with("0x") || s.starts_with("0X") => (&s[2..], 16),
+        0 if s.starts_with('0') => (s, 8),
+        0 => (s, 10),
+        b => (s, b),
+    };
+    let end = s.find(|c: char| !c.is_digit(radix)).unwrap_or(s.len());
+    u64::from_str_radix(&s[..end], radix).unwrap_or(0)
+}
 
-    if target.is_empty() {
-        warn!("evtdig: no DNS server specified, args={:?}", args);
-        return TelnetCommand::Unknown(format!("evtdig {:?}", args));
-    }
-
-    if query_argument.is_empty() {
-        // Default query if none specified
-        query_argument = ".".to_string();
-    }
-
-    // Remove trailing dot from query name if present
-    if query_argument.ends_with('.') && query_argument.len() > 1 {
-        query_argument = query_argument[..query_argument.len() - 1].to_string();
-    }
-
-    trace!(
-        "Parsed evtdig: msm_id={}, server={}, query={} {} {}, protocol={}, interval={}",
-        msm_id,
-        target,
-        query_argument,
-        query_type,
-        query_class,
-        protocol,
-        interval
-    );
-
-    TelnetCommand::Dns(DnsSpec {
-        msm_id,
-        target,
-        af,
-        protocol,
-        query_type,
-        query_class,
-        query_argument,
-        use_dnssec,
-        recursion_desired,
+/// Parse an evtdig CRONLINE as tdig_init() and argProcess() do
+/// (eperd/evtdig.c:2293, 2397): the reference's options with its defaults
+/// (TXT CH, no RD, EDNS0 size 512 but no OPT record unless something needs
+/// one), and what it refuses refused (an unknown option, a name without its
+/// final dot, no server or more than one).
+///
+/// Taken but not acted on: `-I` (bind to an interface),
+/// `--ipv6-dest-option`, `-O`, `--write-response` and `--read-response`.
+/// Refused: `--tls` and `--https`, which Starla can't do; it would put
+/// plain DNS on port 853 or 443.
+fn parse_evtdig(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
+    let unknown = |why: &str| {
+        warn!("evtdig: {}, args={:?}", why, args);
+        TelnetCommand::Unknown(format!("evtdig {:?}", args))
+    };
+    let (opts, operands) = match evtdig_getopt(args) {
+        Ok(parsed) => parsed,
+        Err(why) => return unknown(&why),
+    };
+    let mut spec = DnsSpec {
         spread: Some(spread),
         schedule: ScheduleSpec {
             interval,
             start_time: 0,
             stop_time: end_time,
         },
-    })
+        ..DnsSpec::default()
+    };
+    let (mut v4, mut v6) = (false, false);
+    let mut query: Option<String> = None;
+    for (opt, value) in opts {
+        let num = |base| strtoul(&value, base);
+        match opt {
+            DigOpt::Query(qtype) => {
+                spec.qtype = qtype;
+                spec.qclass = 1;
+                query = Some(value);
+            }
+            DigOpt::Type => {
+                spec.qtype = num(10) as u16;
+                if spec.qclass == 0 {
+                    spec.qclass = 1;
+                }
+            }
+            DigOpt::Class => spec.qclass = num(10) as u16,
+            DigOpt::QueryName => query = Some(value),
+            DigOpt::Chaos(name) => query = Some(name.to_string()),
+            DigOpt::V4 => v4 = true,
+            DigOpt::V6 => v6 = true,
+            DigOpt::Both => (v4, v6) = (true, true),
+            DigOpt::Atlas | DigOpt::Bundle => {
+                // validate_atlas_id(): digits only
+                if !value.bytes().all(|b| b.is_ascii_digit()) {
+                    return unknown("bad atlas ID");
+                }
+                let id = value.parse().unwrap_or(0);
+                if opt == DigOpt::Atlas {
+                    spec.msm_id = id;
+                } else {
+                    spec.bundle = Some(id);
+                }
+            }
+            DigOpt::ClientSubnet => spec.client_subnet = true,
+            DigOpt::Cookies => spec.cookies = true,
+            DigOpt::Do => spec.dnssec = true,
+            DigOpt::Edns0 => spec.edns0 = num(10) as u32,
+            DigOpt::EdnsVersion => spec.edns_version = num(10) as u8,
+            DigOpt::EdnsFlags => spec.edns_flags = num(0) as u16,
+            DigOpt::EdnsOption => spec.edns_option = num(0) as u16,
+            DigOpt::Nsid => spec.nsid = true,
+            DigOpt::Port => spec.port = num(10) as u16,
+            DigOpt::Rd => spec.rd = true,
+            DigOpt::Tcp => spec.protocol = "TCP".to_string(),
+            DigOpt::Timeout => spec.timeout_ms = num(10) as u32,
+            DigOpt::Qbuf => spec.qbuf = true,
+            DigOpt::NoAbuf => spec.abuf = false,
+            DigOpt::Ad => spec.ad = true,
+            DigOpt::Cd => spec.cd = true,
+            DigOpt::Retry => spec.retry = num(10) as u32,
+            DigOpt::Resolv => {
+                spec.resolv = true;
+                (v4, v6) = (true, true);
+            }
+            DigOpt::PrependProbeId => spec.prepend_probe_id = true,
+            DigOpt::Ttl => spec.ttl = true,
+            DigOpt::Tls | DigOpt::Https => return unknown("DNS over TLS/HTTPS is not supported"),
+            DigOpt::Interface
+            | DigOpt::Ipv6DestOption
+            | DigOpt::OutFile
+            | DigOpt::SniCertName
+            | DigOpt::HttpsPath
+            | DigOpt::WriteResponse
+            | DigOpt::ReadResponse
+            | DigOpt::Evdns => debug!("evtdig: not acting on {:?} {}", opt, value),
+            DigOpt::Refused => return unknown("unknown option"),
+        }
+    }
+
+    // argProcess(): one server unless --resolv, and a name ending in a dot
+    if !spec.resolv {
+        let [server] = operands.as_slice() else {
+            return unknown("no server IP address in input");
+        };
+        spec.target = server.clone();
+    }
+    let Some(query) = query else {
+        return unknown("no query in command line");
+    };
+    if !query.ends_with('.') {
+        return unknown("query does not end with a dot");
+    }
+    spec.query_argument = query;
+    spec.af = match (v4, v6) {
+        (true, true) => 0,
+        (_, true) => 6,
+        _ => 4,
+    };
+
+    trace!(
+        "Parsed evtdig: msm_id={}, server={}, query={} {} {}, protocol={}, interval={}",
+        spec.msm_id,
+        spec.target,
+        spec.query_argument,
+        spec.qtype,
+        spec.qclass,
+        spec.protocol,
+        interval
+    );
+    TelnetCommand::Dns(spec)
 }
 
 /// Parse evhttpget command arguments
@@ -1932,41 +2094,52 @@ fn parse_json_command(spec: &serde_json::Value) -> TelnetCommand {
             schedule,
         }),
 
-        "dns" => TelnetCommand::Dns(DnsSpec {
-            msm_id,
-            target,
-            af,
-            protocol: spec
-                .get("protocol")
-                .and_then(|v| v.as_str())
-                .unwrap_or("UDP")
-                .to_string(),
-            query_type: spec
-                .get("query_type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("A")
-                .to_string(),
-            query_class: spec
-                .get("query_class")
-                .and_then(|v| v.as_str())
-                .unwrap_or("IN")
-                .to_string(),
-            query_argument: spec
-                .get("query_argument")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            use_dnssec: spec
-                .get("use_dnssec")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-            recursion_desired: spec
-                .get("recursion_desired")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true),
-            spread,
-            schedule,
-        }),
+        "dns" => {
+            let text = |key: &str, default: &str| {
+                spec.get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(default)
+                    .to_string()
+            };
+            // A type or class by name (evtdig's long option names) or number
+            let code = |key: &str, default: u16| {
+                let name = text(key, "").to_lowercase();
+                name.parse().ok().unwrap_or_else(|| match name.as_str() {
+                    "" => default,
+                    "in" => 1,
+                    "ch" => 3,
+                    "hs" => 4,
+                    _ => EVTDIG_LONGOPTS
+                        .iter()
+                        .find_map(|&(n, _, o)| match o {
+                            DigOpt::Query(t) if n == name => Some(t),
+                            _ => None,
+                        })
+                        .unwrap_or(default),
+                })
+            };
+            let mut query_argument = text("query_argument", ".");
+            if !query_argument.ends_with('.') {
+                query_argument.push('.');
+            }
+            let flag = |key: &str, default: bool| {
+                spec.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
+            };
+            TelnetCommand::Dns(DnsSpec {
+                msm_id,
+                target,
+                af,
+                protocol: text("protocol", "UDP").to_uppercase(),
+                qtype: code("query_type", 1),
+                qclass: code("query_class", 1),
+                query_argument,
+                dnssec: flag("use_dnssec", false),
+                rd: flag("recursion_desired", true),
+                spread,
+                schedule,
+                ..DnsSpec::default()
+            })
+        }
 
         "http" | "https" => TelnetCommand::Http(HttpSpec {
             msm_id,
@@ -2080,7 +2253,9 @@ mod tests {
             TelnetCommand::Dns(spec) => {
                 assert_eq!(spec.msm_id, 1002);
                 assert_eq!(spec.target, "9.9.9.9");
-                assert_eq!(spec.query_argument, "example.com");
+                assert_eq!(spec.query_argument, "example.com.");
+                assert_eq!((spec.qtype, spec.qclass), (1, 1));
+                assert!(spec.rd);
             }
             _ => panic!("Expected Dns command"),
         }
@@ -2209,91 +2384,175 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_cronline_evtdig() {
-        // Test with --aaaa (Atlas format for AAAA query)
-        let cmd = parse_command(
-            r#"CRONLINE 900 0 0 UNIFORM 5 evtdig -4 --aaaa example.com. -A "6001" @9.9.9.9"#,
-        );
-        match cmd {
-            TelnetCommand::Dns(spec) => {
-                assert_eq!(spec.msm_id, 6001);
-                assert_eq!(spec.target, "9.9.9.9");
-                assert_eq!(spec.query_argument, "example.com"); // trailing dot stripped
-                assert_eq!(spec.query_type, "AAAA");
-                assert_eq!(spec.af, 4);
-            }
-            _ => panic!("Expected Dns command, got {:?}", cmd),
+    fn dns(line: &str) -> DnsSpec {
+        match parse_command(line) {
+            TelnetCommand::Dns(spec) => spec,
+            other => panic!("{line}: {other:?}"),
         }
     }
 
     #[test]
-    fn test_parse_cronline_evtdig_dnssec() {
-        // Test with -d for DNSSEC and --a for A record query
-        let cmd = parse_command(
-            r#"CRONLINE 1800 0 0 UNIFORM 3 evtdig -4 -d --a dnssec-test.org. -A "6002" @8.8.8.8"#,
-        );
-        match cmd {
-            TelnetCommand::Dns(spec) => {
-                assert_eq!(spec.msm_id, 6002);
-                assert!(spec.use_dnssec);
-                assert_eq!(spec.query_argument, "dnssec-test.org");
-            }
-            _ => panic!("Expected Dns command"),
-        }
+    fn test_parse_cronline_evtdig() {
+        let spec =
+            dns(r#"CRONLINE 900 0 0 UNIFORM 5 evtdig -4 --aaaa example.com. -A "6001" 9.9.9.9"#);
+        assert_eq!(spec.msm_id, 6001);
+        assert_eq!(spec.target, "9.9.9.9");
+        assert_eq!(spec.query_argument, "example.com."); // as given, dot and all
+        assert_eq!((spec.qtype, spec.qclass), (28, 1));
+        assert_eq!(spec.af, 4);
+        assert!(!spec.rd, "evtdig sets RD only with -R or --resolv");
     }
 
     #[test]
     fn test_parse_cronline_evtdig_soa() {
-        // Test real Atlas SOA query format
-        let cmd = parse_command(
+        let spec = dns(
             r#"CRONLINE 1800 795 1770762780 UNIFORM 3 evtdig -4 --soa . -A "10001" -O /home/atlas/data/new/7 193.0.14.129"#,
         );
-        match cmd {
-            TelnetCommand::Dns(spec) => {
-                assert_eq!(spec.msm_id, 10001);
-                assert_eq!(spec.target, "193.0.14.129");
-                assert_eq!(spec.query_argument, ".");
-                assert_eq!(spec.query_type, "SOA");
-                assert_eq!(spec.af, 4);
-                assert_eq!(spec.protocol, "UDP");
-            }
-            _ => panic!("Expected Dns command, got {:?}", cmd),
-        }
+        assert_eq!(spec.msm_id, 10001);
+        assert_eq!(spec.target, "193.0.14.129");
+        assert_eq!(spec.query_argument, ".");
+        assert_eq!((spec.qtype, spec.qclass), (6, 1));
+        assert_eq!(spec.af, 4);
+        assert_eq!(spec.protocol, "UDP");
     }
 
     #[test]
     fn test_parse_cronline_evtdig_tcp_soa() {
-        // Test TCP SOA query (with -t for TCP)
-        let cmd = parse_command(
+        let spec = dns(
             r#"CRONLINE 1800 1945 1770762780 UNIFORM 3 evtdig -4 -t --soa . -A "10101" -O /home/atlas/data/new/7 193.0.14.129"#,
         );
-        match cmd {
-            TelnetCommand::Dns(spec) => {
-                assert_eq!(spec.msm_id, 10101);
-                assert_eq!(spec.target, "193.0.14.129");
-                assert_eq!(spec.query_type, "SOA");
-                assert_eq!(spec.protocol, "TCP");
-            }
-            _ => panic!("Expected Dns command, got {:?}", cmd),
-        }
+        assert_eq!(spec.msm_id, 10101);
+        assert_eq!(spec.target, "193.0.14.129");
+        assert_eq!(spec.qtype, 6);
+        assert_eq!(spec.protocol, "TCP");
     }
 
+    /// Every evtdig line of the twin scenario (enodia 2026-10-13 01:31),
+    /// parsed as tdig_init() parses it. Starla sent `-r` as ". IN A" with
+    /// EDNS 4096 and DO, dropped `-e`, `-n` and `--qbuf`, set RD everywhere
+    /// and sent `--resolv` to Google Public DNS.
     #[test]
-    fn test_parse_cronline_evtdig_hostname() {
-        // Test -h for hostname.bind query
-        let cmd = parse_command(
-            r#"CRONLINE 240 659 1770762780 UNIFORM 3 evtdig -4 -h -A "10301" -O /home/atlas/data/new/7 193.0.14.129"#,
+    fn the_scenarios_evtdig_lines_parse_as_tdig_init_parses_them() {
+        let spec = dns(
+            r#"CRONLINE 600 1485933101 1794447121 UNIFORM 3 evtdig -4 --resolv --qbuf --type 1 --query $p.atlas.ripe.net.$r. --class 1  -A "30001" -O /home/atlas/data/new/7"#,
         );
-        match cmd {
-            TelnetCommand::Dns(spec) => {
-                assert_eq!(spec.msm_id, 10301);
-                assert_eq!(spec.target, "193.0.14.129");
-                assert_eq!(spec.query_argument, "hostname.bind");
-                assert_eq!(spec.query_type, "TXT");
-                assert_eq!(spec.query_class, "CH");
-            }
-            _ => panic!("Expected Dns command, got {:?}", cmd),
+        assert!(spec.resolv && spec.qbuf && !spec.rd);
+        assert_eq!(spec.target, "", "the probe's resolvers, nobody else");
+        assert_eq!(spec.af, 0, "--resolv asks each resolver, v4 or v6");
+        assert_eq!((spec.qtype, spec.qclass), (1, 1));
+        assert_eq!(spec.query_argument, "$p.atlas.ripe.net.$r.");
+        assert_eq!(spec.msm_id, 30001);
+
+        let spec = dns(
+            r#"CRONLINE 3600 1714559586 1791883921 UNIFORM 3 evtdig -6 --resolv -e 512 --qbuf --aaaa $r-$t-$p.rpkitest6.nlnetlabs.nl. -R --retry 0  --timeout 5000 -A "70502079" -O /home/atlas/data/new/7"#,
+        );
+        assert!(spec.resolv && spec.rd && spec.qbuf);
+        assert_eq!((spec.af, spec.qtype, spec.qclass), (0, 28, 1));
+        assert_eq!((spec.edns0, spec.nsid, spec.dnssec), (512, false, false));
+        assert_eq!((spec.retry, spec.timeout_ms), (0, 5000));
+        assert_eq!(spec.query_argument, "$r-$t-$p.rpkitest6.nlnetlabs.nl.");
+
+        let spec = dns(
+            r#"CRONLINE 1800 1297 1794447121 UNIFORM 3 evtdig -6 --soa . -A "11001" -O /home/atlas/data/new/7 2001:7fd::1"#,
+        );
+        assert_eq!(
+            (spec.af, spec.qtype, spec.qclass, spec.rd),
+            (6, 6, 1, false)
+        );
+        assert_eq!(
+            (spec.target.as_str(), spec.protocol.as_str()),
+            ("2001:7fd::1", "UDP")
+        );
+
+        for (opt, name) in [
+            ("-b", "version.bind."),
+            ("-h", "hostname.bind."),
+            ("-i", "id.server."),
+            ("-r", "version.server."),
+        ] {
+            let spec = dns(&format!(
+                r#"CRONLINE 43200 20160 1794447121 UNIFORM 3 evtdig -6 {opt} -A "11501" -O /home/atlas/data/new/7 2001:7fd::1"#
+            ));
+            assert_eq!(spec.query_argument, name, "{opt}");
+            assert_eq!((spec.qtype, spec.qclass), (16, 3), "{opt}: TXT CH");
+            assert!(!spec.rd && !spec.dnssec && !spec.nsid, "{opt}");
+        }
+
+        let spec = dns(
+            r#"CRONLINE 43200 1680201148 1791883921 UNIFORM 3 evtdig -6 -t -e 512 -n --qbuf --a paypal.com. --retry 0 --timeout 5000 -A "51457586" -O /home/atlas/data/new/7 2001:7fd::1"#,
+        );
+        assert_eq!(spec.protocol, "TCP");
+        assert!(spec.nsid && spec.qbuf && !spec.rd);
+        assert_eq!((spec.edns0, spec.qtype, spec.qclass), (512, 1, 1));
+        assert_eq!(spec.query_argument, "paypal.com.");
+        assert_eq!(spec.msm_id, 51457586);
+
+        let spec = dns(
+            r#"CRONLINE 86400 1771519272 1791883921 UNIFORM 3 evtdig -6 -e 512 -h --retry 0 --timeout 5000 -A "156156173" -O /home/atlas/data/new/7 2620:fe::fe"#,
+        );
+        assert_eq!(spec.query_argument, "hostname.bind.");
+        assert!(!spec.nsid && !spec.qbuf);
+
+        let spec = dns(
+            r#"CRONLINE 28800 1773332354 1791883921 UNIFORM 3 evtdig -6 -t -e 512 -n --qbuf --aaaa $p.ripe-tld-experiment.$r. --retry 0  --timeout 5000 -A "158899652" -O /home/atlas/data/new/7 2001:7fd::1"#,
+        );
+        assert_eq!(spec.query_argument, "$p.ripe-tld-experiment.$r.");
+        assert_eq!((spec.qtype, spec.protocol.as_str()), (28, "TCP"));
+    }
+
+    /// getopt_long(): long options by unique prefix or with `=`, short ones
+    /// clustered or with their argument attached, options after the server.
+    #[test]
+    fn evtdig_options_parse_as_getopt_long_parses_them() {
+        let spec = dns(
+            r#"CRONLINE 60 0 0 UNIFORM 1 evtdig 192.0.2.53 -46dn -e4096 --type=28 --class 1 --que=x. --resol --timeo 900 --edns-flags 0x10 --cd -A "7""#,
+        );
+        assert_eq!(spec.af, 0);
+        assert!(spec.dnssec && spec.nsid && spec.cd && spec.resolv);
+        assert_eq!((spec.edns0, spec.qtype, spec.qclass), (4096, 28, 1));
+        assert_eq!((spec.timeout_ms, spec.edns_flags), (900, 0x10));
+        assert_eq!(spec.query_argument, "x.");
+
+        // --type keeps the CH class unless --class says otherwise
+        let spec = dns(r#"CRONLINE 60 0 0 UNIFORM 1 evtdig --type 16 --query x. -A 7 192.0.2.53"#);
+        assert_eq!((spec.qtype, spec.qclass), (16, 3));
+        let spec = dns(
+            r#"CRONLINE 60 0 0 UNIFORM 1 evtdig -B 12 --p_probe_id -h --port 5353 -A 7 -- 192.0.2.53"#,
+        );
+        assert_eq!((spec.bundle, spec.port), (Some(12), 5353));
+        assert!(spec.prepend_probe_id);
+        assert_eq!(spec.target, "192.0.2.53");
+        assert!(!spec.ttl);
+
+        // --ttl (O_TTL): report the reply's TTL, by its name or a prefix
+        let spec = dns(r#"CRONLINE 60 0 0 UNIFORM 1 evtdig -6 --ttl -h -A 7 2001:db8::53"#);
+        assert!(spec.ttl);
+        let spec = dns(r#"CRONLINE 60 0 0 UNIFORM 1 evtdig -6 -b --tt -A 7 2001:db8::53"#);
+        assert!(spec.ttl);
+    }
+
+    /// What tdig_init() refuses, Starla refuses: no measurement at all.
+    #[test]
+    fn evtdig_refuses_what_tdig_init_refuses() {
+        for args in [
+            "-4 --soa . 192.0.2.53 192.0.2.54", // two servers
+            "-4 --soa .",                       // none
+            "-4 --a example.com 192.0.2.53",    // no final dot
+            "-4 192.0.2.53",                    // no query
+            "-4 -h -q 192.0.2.53",              // -q is in the string, not the switch
+            "-4 -h --c_output 192.0.2.53",      // likewise
+            "-4 -h --bogus 192.0.2.53",         // unknown
+            "-4 -h --ns 192.0.2.53",            // --ns needs its NAME, so no server
+            "-4 -h --edns 1 192.0.2.53",        // ambiguous prefix
+            "-4 -h -A 12a 192.0.2.53",          // bad atlas id
+            "-4 -h -p 5353 192.0.2.53",         // no -p, only --port
+            "-4 -h --tls 192.0.2.53",           // Starla can't
+        ] {
+            let line = format!("CRONLINE 60 0 0 UNIFORM 1 evtdig {args}");
+            assert!(
+                matches!(parse_command(&line), TelnetCommand::Unknown(_)),
+                "{args}"
+            );
         }
     }
 

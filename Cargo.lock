@@ -5523,6 +5523,7 @@ dependencies = [
  "hex",
  "hickory-proto",
  "hickory-resolver",
+ "libc",
  "pnet",
  "pnet_packet",
  "rand 0.10.3",
