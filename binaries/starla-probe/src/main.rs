@@ -558,9 +558,23 @@ async fn main() -> Result<()> {
                     "ping",
                     "ping",
                     MeasurementSpec::Ping(PingJobSpec {
+                        // A redelivered line keeps what its runs left.
+                        kept: starla_scheduler::job::PingKept::for_line(
+                            starla_scheduler::job::PingLine {
+                                msm_id: spec.msm_id,
+                                target: spec.target.clone(),
+                                af: spec.af,
+                                packets: spec.packets,
+                                packet_interval: spec.packet_interval,
+                                size: spec.size,
+                                interval: spec.schedule.interval,
+                                start_time: spec.schedule.start_time,
+                            }
+                        ),
                         target: spec.target,
                         af: spec.af,
                         packets: spec.packets,
+                        packet_interval: spec.packet_interval,
                         size: spec.size,
                     })
                 ),

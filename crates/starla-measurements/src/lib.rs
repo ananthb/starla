@@ -4,6 +4,7 @@ pub mod dns;
 pub mod http;
 pub mod ntp;
 pub mod ping;
+pub mod target;
 pub mod tls;
 pub mod traceroute;
 pub mod traits;

@@ -5601,10 +5601,12 @@ name = "starla-scheduler"
 version = "0.8.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "futures",
  "rand 0.10.3",
  "starla-common",
+ "starla-controller",
  "starla-measurements",
  "starla-metrics",
  "starla-results",

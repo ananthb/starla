@@ -15,9 +15,14 @@ starla-results = { workspace = true }
 starla-metrics = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+async-trait = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
 rand = { workspace = true }
+
+[dev-dependencies]
+# Tests run the controller's own CRONLINEs through parse_command.
+starla-controller = { workspace = true }

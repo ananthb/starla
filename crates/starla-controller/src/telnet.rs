@@ -1181,13 +1181,25 @@ fn tokenize_cronline(cmd: &str) -> Vec<String> {
     tokens
 }
 
-/// Parse evping command arguments
+/// Parse evping command arguments as ping_init does (ping.c:1262-1281,
+/// 1347-1350). PING_OPT_STRING is "!46eprc:s:A:B:O:i:I:R:W:": -c, -s, -A,
+/// -B, -O, -i, -I, -R and -W take a value, -4, -6, -e, -p and -r do not.
+/// The family is IPv6 unless -4 is given, and -s is 0 without one: the
+/// least data, 32 bytes (see starla_measurements::ping::data_len).
 ///
-/// Usage: evping [-4|-6] [-c count] [-s size] [-A msm_id] [-O output] target
+/// -e is read and not followed: with it ping_init looks the name up once,
+/// with libc, and takes no measurement if that fails or the address is
+/// refused, and every line then has "ttr":0.000000 (ping.c:1352-1384).
+/// The controller sends no -e (none of the twin's evping lines of
+/// 2026-10-13 has it); only the probe's own SOS ping, msm 9017, does
+/// (bin/ripe-atlas.in), which belongs to registration.
+///
+/// Usage: evping [-4|-6] [-c count] [-s size] [-i interval] [-A msm_id] [-O output] target
 fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
-    let mut af: u8 = 4;
+    let mut v4 = false;
     let mut count: u32 = 3;
-    let mut size: u16 = 64;
+    let mut size: u16 = 0;
+    let mut packet_interval: u32 = 1000;
     let mut msm_id: u64 = 0;
     let mut target = String::new();
 
@@ -1195,40 +1207,20 @@ fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> T
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
-            "-4" => af = 4,
-            "-6" => af = 6,
-            "-c" => {
-                if i + 1 < args.len() {
-                    count = args[i + 1].parse().unwrap_or(3);
-                    i += 1;
+            "-4" => v4 = true,
+            "-6" | "-e" | "-p" | "-r" => {}
+            "-c" | "-s" | "-A" | "-i" | "-B" | "-O" | "-I" | "-R" | "-W" => {
+                let value = args.get(i + 1).map(String::as_str).unwrap_or("");
+                match arg.as_str() {
+                    "-c" => count = value.parse().unwrap_or(3),
+                    "-s" => size = value.parse().unwrap_or(0),
+                    "-A" => msm_id = value.parse().unwrap_or(0),
+                    "-i" => packet_interval = value.parse().unwrap_or(1000),
+                    // -B bundle, -O output file, -I interface, -R/-W
+                    // fuzzing files
+                    _ => {}
                 }
-            }
-            "-s" => {
-                if i + 1 < args.len() {
-                    size = args[i + 1].parse().unwrap_or(64);
-                    i += 1;
-                }
-            }
-            "-A" => {
-                if i + 1 < args.len() {
-                    msm_id = args[i + 1].parse().unwrap_or(0);
-                    i += 1;
-                }
-            }
-            "-O" => {
-                // Output path - skip it
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "-I" => {
-                // Interval between packets - skip for now
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "-R" => {
-                // Resolve flag - skip
+                i += 1;
             }
             _ if !arg.starts_with('-') => {
                 // This is the target
@@ -1240,6 +1232,8 @@ fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> T
         }
         i += 1;
     }
+    // ping.c:1347-1350: -4 wins, whatever else is given
+    let af: u8 = if v4 { 4 } else { 6 };
 
     if target.is_empty() {
         warn!("evping: no target specified");
@@ -1262,7 +1256,7 @@ fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> T
         af,
         packets: count,
         size,
-        packet_interval: 1000, // Default 1 second between packets
+        packet_interval,
         spread: Some(spread),
         schedule: ScheduleSpec {
             interval,
@@ -1286,6 +1280,11 @@ fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> T
 /// [-c count] [-f first_hop] [-g gap_limit] [-i interface] [-m max_hops]
 /// [-p port] [-t tos] [-w timeout_ms] [-z dup_timeout_ms] [-A msm_id]
 /// [-B bundle] [-O output] [-S size] [-H hbh_size] [-D dest_size] target
+///
+/// -a is parismod, 16 without one, -b parisbase, 0 without one, and -p the
+/// destination port (traceroute.c:4247-4248, 4259-4262), not a Paris id:
+/// Starla read -p as the paris_id (RIPE stored "paris_id":80 for -p 80,
+/// starla-25603345.json) and dropped -a.
 fn parse_evtraceroute(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
     let refuse = |why: &str| {
         warn!("evtraceroute: {}, not scheduled: {:?}", why, args);
@@ -2399,6 +2398,52 @@ mod tests {
         }
     }
 
+    /// The twin's evping lines (enodia's controller session of 2026-10-13):
+    /// a name target, the default size (0, sent as 32 data bytes), and
+    /// -i's value taken as the interval, not as a target.
+    #[test]
+    fn evping_reads_its_options_as_ping_init_does() {
+        let spec = |line: &str| match parse_command(line) {
+            TelnetCommand::Ping(spec) => spec,
+            other => panic!("{other:?}"),
+        };
+        let s = spec(
+            r#"CRONLINE 21600 1384530082 1791883921 UNIFORM 14 evping -6 -c 16 -A "1040114" -O /home/atlas/data/new/7 bits.wikimedia.org"#,
+        );
+        assert_eq!(
+            (s.msm_id, s.target.as_str(), s.af, s.packets, s.size),
+            (1040114, "bits.wikimedia.org", 6, 16, 0)
+        );
+        let s = spec(
+            r#"CRONLINE 240 1737367695 1791883921 UNIFORM 14 evping -6 -c 3 -s 48 -i 1000 -A "86206978" -O /home/atlas/data/new/7 google.com"#,
+        );
+        assert_eq!(
+            (s.target.as_str(), s.size, s.packet_interval),
+            ("google.com", 48, 1000)
+        );
+        let s = spec(
+            r#"CRONLINE 28800 1393596000 1791883921 UNIFORM 14 evping -6 -c 5 -s 1460 -A "1517509" -O /home/atlas/data/new/7 2a01:4f8:110:3169::37:134"#,
+        );
+        assert_eq!((s.size, s.packets), (1460, 5));
+        // IPv6 unless -4 is given, and -4 wins
+        assert_eq!(
+            spec(r#"CRONLINE 240 1 2 UNIFORM 3 evping -c 3 -A "1" www.ripe.net"#).af,
+            6
+        );
+        assert_eq!(
+            spec(r#"CRONLINE 240 1 2 UNIFORM 3 evping -4 -6 -A "1" www.ripe.net"#).af,
+            4
+        );
+        // every value option skips its value
+        let s = spec(
+            r#"CRONLINE 240 1 2 UNIFORM 3 evping -4 -B 77 -I eth0 -R in -W out -i 500 -A "1" -O /home/atlas/data/new/7 193.0.14.129"#,
+        );
+        assert_eq!(
+            (s.target.as_str(), s.packet_interval),
+            ("193.0.14.129", 500)
+        );
+    }
+
     #[test]
     fn test_parse_cronline_evtraceroute_udp() {
         let cmd = parse_command(
@@ -2444,6 +2489,39 @@ mod tests {
             },
             other => panic!("{line}: {other:?}"),
         }
+    }
+
+    /// -a is parismod (16 without one), -b parisbase (0 without one) and
+    /// -p the destination port (traceroute.c:4247-4248, 4259-4262). RIPE's
+    /// built-in 6152 has none of them; its user-defined lines give
+    /// `-a 16 … -p 80` (the twin's 25603345), which Starla reported as
+    /// "paris_id":80 (starla-25603345.json).
+    #[test]
+    fn evtraceroute_paris_is_a_and_b_not_p() {
+        let paris = |line: &str| match parse_command(line) {
+            TelnetCommand::Traceroute(s) => {
+                (s.opts.paris_mod, s.opts.paris_base, s.target, s.opts.size)
+            }
+            other => panic!("{line}: {other:?}"),
+        };
+        assert_eq!(
+            paris(
+                r#"CRONLINE 900 2833 1794447121 UNIFORM 3 evtraceroute -6 -I -c 3 -w 4000 -A "6152" -O /home/atlas/data/new/7 topology6.dyndns.atlas.ripe.net"#
+            ),
+            (16, 0, "topology6.dyndns.atlas.ripe.net".into(), 40)
+        );
+        assert_eq!(
+            paris(
+                r#"CRONLINE 900 1 2000000000 UNIFORM 3 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603345" -O /home/atlas/data/new/7 dyna.wikimedia.org"#
+            ),
+            (16, 0, "dyna.wikimedia.org".into(), 48)
+        );
+        assert_eq!(
+            paris(
+                r#"CRONLINE 900 1 2000000000 UNIFORM 3 evtraceroute -4 -T -a 0 -b 3 -p 443 -A "7" 192.0.2.1"#
+            ),
+            (0, 3, "192.0.2.1".into(), 40)
+        );
     }
 
     /// Every evtraceroute the controller gave enodia on 2026-10-13 (the

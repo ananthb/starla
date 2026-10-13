@@ -705,6 +705,25 @@ mod tests {
         assert_eq!(line.matches("\"lts\" : 0 , ").count(), 3, "{line}");
     }
 
+    /// Ping writes its own envelope (ping.c's report(), with dst_name and
+    /// ttr): queued with lts 12, it is the reference's line for msm 1040114
+    /// on the twin of 2026-10-13, byte for byte (first three replies).
+    #[test]
+    fn a_ping_line_is_the_references() {
+        let mut result = make_ping_result();
+        result.data = MeasurementData::FullLine(
+            r#""id":"1040114", "fw":5130, "mver": "2.6.4", "lts":0, "time":1791871295, "dst_name":"bits.wikimedia.org", "ttr":1.030459, "af":6, "dst_addr":"2001:db8:7769:6e00::20", "src_addr":"2001:db8:7769:6e00::31", "proto":"ICMP", "ttl":64, "size":32, "result": [ { "rtt":0.082583 }, { "rtt":0.220125 }, { "rtt":0.124625 } ]"#
+                .to_string(),
+        );
+        let line = AtlasResult::from_measurement(result, None)
+            .with_lts(12)
+            .to_result_line();
+        assert_eq!(
+            line,
+            "RESULT { \"id\":\"1040114\", \"fw\":5130, \"mver\": \"2.6.4\", \"lts\":12, \"time\":1791871295, \"dst_name\":\"bits.wikimedia.org\", \"ttr\":1.030459, \"af\":6, \"dst_addr\":\"2001:db8:7769:6e00::20\", \"src_addr\":\"2001:db8:7769:6e00::31\", \"proto\":\"ICMP\", \"ttl\":64, \"size\":32, \"result\": [ { \"rtt\":0.082583 }, { \"rtt\":0.220125 }, { \"rtt\":0.124625 } ] }\n"
+        );
+    }
+
     #[test]
     fn test_http_result_minimal_envelope() {
         // HTTP result should have all fields inside the result array, not in envelope

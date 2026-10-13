@@ -22,6 +22,7 @@
 use super::engine::{Probe, Trace};
 use super::wire::{self, TraceId, BASE_PORT, SRC_BASE_PORT};
 use super::{Traceroute, TracerouteBackend, TracerouteConfig};
+use crate::target::DstName;
 use serde_json::Value;
 use starla_common::{MeasurementId, ProbeId, TracerouteOptions, TracerouteProtocol as P};
 use std::collections::HashMap;
@@ -298,6 +299,8 @@ fn replay(msm: u64, stored: &str, opts: TracerouteOptions) {
         "{msm}: the reference's trace ended here"
     );
 
+    // dst_name and ttr are the target lookup's (their own tests); here
+    // they only take their place in the line.
     let line = Traceroute {
         config: TracerouteConfig {
             target: dst.into(),
@@ -307,17 +310,15 @@ fn replay(msm: u64, stored: &str, opts: TracerouteOptions) {
         },
         probe_id: ProbeId(1),
         msm_id: MeasurementId(msm),
+        dst_name: DstName {
+            name: theirs["dst_name"].as_str().unwrap().to_string(),
+            ttr: theirs.get("ttr").map(|ttr| ttr.as_f64().unwrap()),
+        },
     };
-    // dst_name and ttr are the target resolution's (their own tests); here
-    // they only take their place in the line.
-    let mut dst_fields = format!("\"dst_name\":\"{}\"", theirs["dst_name"].as_str().unwrap());
-    if let Some(ttr) = theirs.get("ttr") {
-        dst_fields += &format!(", \"ttr\":{:.6}", ttr.as_f64().unwrap());
-    }
     let body = line.result_body(
         theirs["timestamp"].as_i64().unwrap(),
         theirs["endtime"].as_i64().unwrap(),
-        &dst_fields,
+        &line.dst_name.fields(),
         Some(src.into()),
         paris,
         trace.hops(),
