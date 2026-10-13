@@ -110,6 +110,8 @@ pub struct NtpJobSpec {
     pub target: String,
     pub af: u8,
     pub packets: u32,
+    pub timeout_ms: u32,
+    pub gap_ms: u32,
 }
 
 impl MeasurementJob {
@@ -221,8 +223,11 @@ impl MeasurementJob {
                 Ok(Box::new(Ntp {
                     config: NtpConfig {
                         target,
-                        timeout_ms: 5000,
+                        dst_name: spec.target.clone(),
+                        timeout_ms: spec.timeout_ms as u64,
                         port: 123,
+                        count: spec.packets,
+                        gap_ms: spec.gap_ms as u64,
                     },
                     probe_id,
                     msm_id,

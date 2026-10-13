@@ -622,6 +622,8 @@ async fn main() -> Result<()> {
                         target: spec.target,
                         af: spec.af,
                         packets: spec.packets,
+                        timeout_ms: spec.timeout_ms,
+                        gap_ms: spec.gap_ms,
                     })
                 ),
                 TelnetCommand::HostTelemetry(spec) => {

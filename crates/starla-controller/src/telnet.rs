@@ -148,6 +148,10 @@ pub struct NtpSpec {
     pub target: String,
     pub af: u8,
     pub packets: u32,
+    /// `-w`: ms to wait for each reply (evntp default 1000)
+    pub timeout_ms: u32,
+    /// `-g`: minimum ms between requests (5130; default 4000, 2000..=60000)
+    pub gap_ms: u32,
     pub spread: Option<u32>,
     pub schedule: ScheduleSpec,
 }
@@ -1366,9 +1370,17 @@ fn parse_evsslgetcert(args: &[String], interval: u64, end_time: i64, spread: u32
 /// Parse evntp command arguments
 ///
 /// Usage: evntp [-4|-6] [-c count] [-A msm_id] [-O output] target
+/// evntp's defaults and 5130's gap bounds (probe-busybox/eperd/ntp.c).
+pub const NTP_TIMEOUT_DEFAULT_MS: u32 = 1000;
+pub const NTP_GAP_DEFAULT_MS: u32 = 4000;
+pub const NTP_GAP_MIN_MS: u32 = 2000;
+pub const NTP_GAP_MAX_MS: u32 = 60000;
+
 fn parse_evntp(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
     let mut af: u8 = 4;
     let mut packets: u32 = 3;
+    let mut timeout_ms = NTP_TIMEOUT_DEFAULT_MS;
+    let mut gap_ms = NTP_GAP_DEFAULT_MS;
     let mut msm_id: u64 = 0;
     let mut target = String::new();
 
@@ -1384,13 +1396,28 @@ fn parse_evntp(args: &[String], interval: u64, end_time: i64, spread: u32) -> Te
                     i += 1;
                 }
             }
+            "-w" => {
+                if i + 1 < args.len() {
+                    timeout_ms = args[i + 1].parse().unwrap_or(NTP_TIMEOUT_DEFAULT_MS);
+                    i += 1;
+                }
+            }
+            "-g" => {
+                if i + 1 < args.len() {
+                    // Unparsable is out of range: evntp's getopt32 "g+"
+                    // would not have accepted it either.
+                    gap_ms = args[i + 1].parse().unwrap_or(0);
+                    i += 1;
+                }
+            }
             "-A" => {
                 if i + 1 < args.len() {
                     msm_id = args[i + 1].parse().unwrap_or(0);
                     i += 1;
                 }
             }
-            "-O" => {
+            // Options with a value Starla does not use.
+            "-O" | "-s" | "-i" | "-B" => {
                 if i + 1 < args.len() {
                     i += 1;
                 }
@@ -1410,6 +1437,12 @@ fn parse_evntp(args: &[String], interval: u64, end_time: i64, spread: u32) -> Te
         return TelnetCommand::Unknown(format!("evntp {:?}", args));
     }
 
+    // 5130's evntp refuses a gap outside its bounds ("bad gap").
+    if !(NTP_GAP_MIN_MS..=NTP_GAP_MAX_MS).contains(&gap_ms) {
+        warn!("evntp: bad gap {} ms, not scheduled", gap_ms);
+        return TelnetCommand::Unknown(format!("evntp {:?}", args));
+    }
+
     trace!(
         "Parsed evntp: msm_id={}, target={}, af={}, packets={}, interval={}",
         msm_id,
@@ -1424,6 +1457,8 @@ fn parse_evntp(args: &[String], interval: u64, end_time: i64, spread: u32) -> Te
         target,
         af,
         packets,
+        timeout_ms,
+        gap_ms,
         spread: Some(spread),
         schedule: ScheduleSpec {
             interval,
@@ -1587,6 +1622,8 @@ fn parse_json_command(spec: &serde_json::Value) -> TelnetCommand {
             target,
             af,
             packets: spec.get("packets").and_then(|v| v.as_u64()).unwrap_or(3) as u32,
+            timeout_ms: NTP_TIMEOUT_DEFAULT_MS,
+            gap_ms: NTP_GAP_DEFAULT_MS,
             spread,
             schedule,
         }),
@@ -1967,5 +2004,46 @@ mod tests {
     fn test_parse_cronline_conntrack_ignored() {
         let cmd = parse_command("CRONLINE 600 0 0 UNIFORM 5 conntrack");
         assert!(matches!(cmd, TelnetCommand::Ignored(_)));
+    }
+
+    fn ntp(line: &str) -> Option<NtpSpec> {
+        match parse_command(line) {
+            TelnetCommand::Ntp(spec) => Some(spec),
+            _ => None,
+        }
+    }
+
+    /// evntp's defaults, -c/-w/-g honoured, and 5130's gap bounds.
+    #[test]
+    fn evntp_options_follow_5130() {
+        let spec = ntp(r#"CRONLINE 1800 12 2000000000 UNIFORM 30 evntp -4 -A "30001" -O /home/atlas/data/new/7 ntp.ripe.net"#).unwrap();
+        assert_eq!(
+            (spec.packets, spec.timeout_ms, spec.gap_ms),
+            (3, 1000, 4000)
+        );
+        assert_eq!(spec.target, "ntp.ripe.net");
+
+        let spec = ntp(r#"CRONLINE 1800 12 2000000000 UNIFORM 30 evntp -6 -c 5 -w 2500 -g 6000 -s 48 -i eth0 -B 7 -A "30002" ntp.ripe.net"#).unwrap();
+        assert_eq!(
+            (spec.packets, spec.timeout_ms, spec.gap_ms),
+            (5, 2500, 6000)
+        );
+        assert_eq!(
+            spec.target, "ntp.ripe.net",
+            "option values are not the target"
+        );
+
+        for bad in ["1999", "60001", "x"] {
+            let line = format!(
+                r#"CRONLINE 1800 12 2000000000 UNIFORM 30 evntp -4 -g {bad} -A "30003" ntp.ripe.net"#
+            );
+            assert!(ntp(&line).is_none(), "gap {bad} must be refused");
+        }
+        for ok in ["2000", "60000"] {
+            let line = format!(
+                r#"CRONLINE 1800 12 2000000000 UNIFORM 30 evntp -4 -g {ok} -A "30003" ntp.ripe.net"#
+            );
+            assert!(ntp(&line).is_some(), "gap {ok} is in bounds");
+        }
     }
 }
