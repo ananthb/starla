@@ -171,15 +171,41 @@ pub struct TelnetServer {
     command_tx: Option<mpsc::Sender<TelnetCommand>>,
 }
 
-// RIPE Atlas telnet protocol constants
+// RIPE Atlas telnet protocol constants (networking/telnetd.c:139-170)
 const ATLAS_LOGIN: &str = "C_TO_P_TEST_V1";
 const LOGIN_PREFIX: &str = "Atlas probe, see http://atlas.ripe.net/\r\n\r\n";
 const LOGIN_PROMPT: &str = " login: ";
 const PASSWORD_PROMPT: &str = "\r\nPassword: ";
+
+// The request lines telnetd knows (telnetd.c:148-152), matched as it matches
+// them: case-sensitive prefixes that include their space (strncmp), and
+// REBOOT and RELOAD whole (strcmp).
+const CMD_CRONTAB: &str = "CRONTAB ";
+const CMD_CRONLINE: &str = "CRONLINE ";
+const CMD_ONEOFF: &str = "ONEOFF ";
+const CMD_REBOOT: &str = "REBOOT";
+const CMD_RELOAD: &str = "RELOAD";
+
+// Its replies (telnetd.c:154-164). The others there never apply to Starla:
+// CRONTAB_BUSY cannot happen even in the reference (a CRONTAB line ends the
+// open crontab, and a new session's takeover closes it, :1112-1124), and
+// UNABLE_TO_CREATE_NEW_CRONTAB, IO_ERROR and BAD_FW_FILE report failures to
+// write the crontab, oneoff and firmware files, which Starla does not keep.
 const RESULT_OK: &str = "OK\r\n\r\n";
 const BAD_PASSWORD: &str = "BAD_PASSWORD\r\n\r\n";
-#[allow(dead_code)]
 const BAD_COMMAND: &str = "BAD_COMMAND\r\n\r\n";
+const NAME_TOO_LONG: &str = "NAME_TOO_LONG\r\n\r\n";
+const BAD_PATH: &str = "BAD_PATH\r\n\r\n";
+const BAD_REMOUNT: &str = "BAD_REMOUNT\r\n\r\n";
+
+// Where request paths may point: rebased_validated_filename(ATLAS_SPOOLDIR,
+// path, "crons") (libbb/validate_filename.c) takes a path under
+// /home/atlas/crons/ (what RIPE's controller sends) and rebases it onto the
+// spool directory, or one already under the spool directory's crons/. The
+// spool directory is configure.ac:145's default, as packaged and as the
+// twin's reference ran it.
+const ATLAS_HOME: &str = "/home/atlas";
+const ATLAS_SPOOLDIR: &str = "/var/spool/ripe-atlas";
 
 impl TelnetServer {
     /// Create a new telnet server
@@ -251,18 +277,77 @@ const TELOPT_ECHO: u8 = 1;
 const TELOPT_SGA: u8 = 3; // Suppress Go Ahead
 const TELOPT_NAWS: u8 = 31; // Negotiate About Window Size
 
-/// Connection state for the Atlas telnet protocol
+/// The Atlas states of the reference's telnetd (telnetd.c:175-183), less
+/// DO_TRADITIONAL: the /bin/login session it starts for any other login
+/// name, which Starla does not offer.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ConnectionState {
-    /// Waiting for login name
-    AwaitingLoginName,
-    /// Waiting for password (session ID)
-    AwaitingPassword,
-    /// Authenticated, ready for commands
-    Authenticated,
+    /// GET_LOGINNAME: waiting for the login name
+    GetLoginName,
+    /// GET_PASSWORD: waiting for the password (the controller session ID)
+    GetPassword,
+    /// GET_CMD: authenticated, waiting for a request line
+    GetCmd,
+    /// DO_CRONTAB: inside a CRONTAB, taking its CRONLINEs
+    DoCrontab,
+    /// EOM_SEEN: the empty line ended the request; nothing more is taken
+    EomSeen,
 }
 
-/// Handle a single telnet connection with Atlas authentication.
+/// Splits the controller's input into lines as getline_2pty does
+/// (telnetd.c:1402-1448): a line ends at a '\n' or a '\r'. One difference:
+/// "\r\n" is one line end here. getline_2pty ends the line at the '\r' and
+/// reads the '\n' as an empty line of its own, which would end the request
+/// (in ATLAS mode nothing turns CR-LF into CR before it, whatever its comment
+/// at :1412 says). RIPE's controller sends a bare "\n", so the reference never
+/// meets that. The NUL a telnet client puts after a bare '\r' (RFC 854) is
+/// part of the line end too; telnetd drops a NUL only when it ends a read
+/// (:1059-1062). A line that still holds a NUL is a "bad line" there, and
+/// skipped (:1432-1445).
+#[derive(Debug, Default)]
+struct LineSplitter {
+    partial: Vec<u8>,
+    /// The last line ended at a '\r': a '\n' or NUL right after it is part of
+    /// that line end, even when it comes in the next read.
+    after_cr: bool,
+}
+
+impl LineSplitter {
+    /// Take in a chunk of input and return the lines it completes.
+    fn feed(&mut self, data: &[u8]) -> Vec<String> {
+        let mut lines = Vec::new();
+        for &b in data {
+            if std::mem::take(&mut self.after_cr) && (b == b'\n' || b == 0) {
+                continue;
+            }
+            match b {
+                b'\n' | b'\r' => {
+                    self.after_cr = b == b'\r';
+                    let line = std::mem::take(&mut self.partial);
+                    if line.contains(&0) {
+                        debug!("Telnet: skipping a line with a NUL in it");
+                        continue;
+                    }
+                    lines.push(String::from_utf8_lossy(&line).into_owned());
+                }
+                _ => self.partial.push(b),
+            }
+        }
+        lines
+    }
+
+    /// Bytes of the line not yet ended
+    fn pending(&self) -> usize {
+        self.partial.len()
+    }
+}
+
+/// Handle a single telnet connection with Atlas authentication: the ATLAS
+/// half of the reference's telnetd (telnetd.c:1069-1284).
+///
+/// The reference answers a request once, with OK on the empty line that ends
+/// it; it says nothing after the password or after a command it takes, and
+/// answers only what it cannot take (BAD_PASSWORD, BAD_COMMAND, BAD_PATH …).
 ///
 /// Accepts any async stream: works with both TCP sockets (for local testing)
 /// and SSH channel streams (for production controller connections).
@@ -312,128 +397,318 @@ pub async fn handle_connection(
 
     let mut reader = BufReader::new(reader);
     let mut raw_buf = [0u8; 4096];
-    let mut state = ConnectionState::AwaitingLoginName;
-    let mut line_buffer = String::new();
+    let mut state = ConnectionState::GetLoginName;
+    let mut lines = LineSplitter::default();
+    // Set once authenticated: tells when a newer session has taken over
+    let mut atlas: Option<tokio::sync::watch::Receiver<()>> = None;
 
-    // Maximum line buffer size to prevent unbounded memory growth
-    // from a malicious or malfunctioning controller
+    // Maximum length of a line not yet ended, to bound the memory a
+    // malicious or malfunctioning controller can take
     const MAX_LINE_LEN: usize = 256 * 1024; // 256KB
 
-    loop {
+    'session: loop {
         use tokio::io::AsyncReadExt;
-        match reader.read(&mut raw_buf).await {
-            Ok(0) => break, // EOF
-            Ok(n) => {
-                // Filter out telnet IAC sequences and extract text
-                let text = filter_telnet_commands(&raw_buf[..n]);
-                if text.is_empty() {
-                    continue;
-                }
-
-                // Accumulate into line buffer
-                if line_buffer.len() + text.len() > MAX_LINE_LEN {
-                    error!(
-                        "Telnet line buffer exceeded {}KB, disconnecting",
-                        MAX_LINE_LEN / 1024
-                    );
-                    anyhow::bail!("Line buffer overflow");
-                }
-                line_buffer.push_str(&text);
-
-                // Process complete lines
-                while let Some(newline_pos) = line_buffer.find(['\n', '\r']) {
-                    let line: String = line_buffer.drain(..=newline_pos).collect();
-                    let line = line.trim();
-
-                    if line.is_empty() {
-                        continue;
-                    }
-
-                    debug!("Telnet state {:?}, received: '{}'", state, line);
-
-                    match state {
-                        ConnectionState::AwaitingLoginName => {
-                            if line == ATLAS_LOGIN {
-                                // Valid Atlas login, ask for password
-                                trace!("Atlas login received, requesting password");
-                                if let Err(e) = writer.write_all(PASSWORD_PROMPT.as_bytes()).await {
-                                    warn!("Failed to send password prompt: {}", e);
-                                }
-                                let _ = writer.flush().await;
-                                state = ConnectionState::AwaitingPassword;
-                            } else {
-                                // Echo back the login name (traditional mode - not supported)
-                                debug!("Unknown login '{}', closing connection", line);
-                                break;
-                            }
-                        }
-                        ConnectionState::AwaitingPassword => {
-                            // Check if password matches session ID
-                            let valid = {
-                                let sid = session_id.read().await;
-                                sid.as_ref().map(|s| s == line).unwrap_or(false)
-                            };
-
-                            if valid {
-                                debug!("Telnet session authenticated");
-                                if let Err(e) = writer.write_all(RESULT_OK.as_bytes()).await {
-                                    warn!("Failed to send OK: {}", e);
-                                }
-                                let _ = writer.flush().await;
-                                state = ConnectionState::Authenticated;
-                            } else {
-                                warn!("Bad password received");
-                                if let Err(e) = writer.write_all(BAD_PASSWORD.as_bytes()).await {
-                                    warn!("Failed to send BAD_PASSWORD: {}", e);
-                                }
-                                let _ = writer.flush().await;
-                                break; // Close connection on bad password
-                            }
-                        }
-                        ConnectionState::Authenticated => {
-                            trace!("Received command: {}", line);
-
-                            let command = parse_command(line);
-
-                            // Send acknowledgment
-                            let response = match &command {
-                                TelnetCommand::Unknown(s) => {
-                                    format!("ERROR: Unknown command: {}\r\n\r\n", s)
-                                }
-                                _ => RESULT_OK.to_string(),
-                            };
-
-                            if let Err(e) = writer.write_all(response.as_bytes()).await {
-                                // Broken pipe is expected when connection closes - log at debug
-                                // level
-                                debug!("Failed to send response: {}", e);
-                            }
-                            let _ = writer.flush().await;
-
-                            // Forward command to handler
-                            if let Some(ref tx) = command_tx {
-                                if let Err(e) = tx.send(command).await {
-                                    // Channel closed likely means shutdown is in progress
-                                    debug!("Command channel closed (shutdown in progress): {}", e);
-                                    break; // Stop processing commands
-                                }
-                            }
-                        }
-                    }
-                }
+        let read = tokio::select! {
+            read = reader.read(&mut raw_buf) => read,
+            () = taken_over(&mut atlas) => {
+                debug!("A newer controller session took over, closing this one");
+                break;
             }
+        };
+        let n = match read {
+            Ok(0) => break, // EOF
+            Ok(n) => n,
             Err(e) => {
                 error!("Error reading from telnet: {}", e);
                 break;
             }
+        };
+
+        // Filter out telnet IAC sequences and split the rest into lines
+        for line in lines.feed(&filter_telnet_commands(&raw_buf[..n])) {
+            if atlas
+                .as_ref()
+                .is_some_and(|rx| rx.has_changed().unwrap_or(false))
+            {
+                debug!("A newer controller session took over, closing this one");
+                break 'session;
+            }
+            log_received(state, &line);
+
+            match state {
+                ConnectionState::GetLoginName => {
+                    if line == ATLAS_LOGIN {
+                        trace!("Atlas login received, requesting password");
+                        reply(&mut writer, PASSWORD_PROMPT).await;
+                        state = ConnectionState::GetPassword;
+                    } else {
+                        // The reference echoes any other name and runs
+                        // /bin/login for it on a pty (telnetd.c:1087-1100).
+                        // Starla has no login session to offer: it echoes
+                        // the name the same way, and closes.
+                        debug!("Unknown login '{}', closing connection", line);
+                        reply(&mut writer, &line).await;
+                        break 'session;
+                    }
+                }
+                ConnectionState::GetPassword => {
+                    let valid = session_id.read().await.as_deref() == Some(line.as_str());
+                    if valid {
+                        // No reply: straight to GET_CMD (telnetd.c:1108-1127)
+                        debug!("Telnet session authenticated");
+                        atlas = Some(take_over(&session_id));
+                        state = ConnectionState::GetCmd;
+                    } else {
+                        // BAD_PASSWORD, and the state stays GET_PASSWORD
+                        // (telnetd.c:1129-1136): the connection stays open
+                        // and the next line is another try.
+                        warn!("Bad password received");
+                        reply(&mut writer, BAD_PASSWORD).await;
+                    }
+                }
+                ConnectionState::DoCrontab if line.starts_with(CMD_CRONLINE) => {
+                    // add_to_crontab, no reply (telnetd.c:1241-1262).
+                    // A known difference: the reference only writes the line
+                    // to root.new, and installs the crontab in end_crontab
+                    // (:1535-1600) when a line other than a CRONLINE comes; a
+                    // crontab still open when the session is killed
+                    // (:1302-1311) or taken over (:1112-1122) is closed and
+                    // never renamed into place. Starla hands each CRONLINE on
+                    // as it comes, as it always has, so it acts on a crontab
+                    // the controller never finished.
+                    if !forward(&command_tx, parse_command(&line)).await {
+                        break 'session;
+                    }
+                }
+                ConnectionState::GetCmd | ConnectionState::DoCrontab => {
+                    // Any other line ends the crontab and is the next
+                    // command ("goto do_cmd", telnetd.c:1242-1256).
+                    let (response, command, next) = get_cmd(&line);
+                    if let Some(response) = response {
+                        reply(&mut writer, response).await;
+                    }
+                    if let Some(command) = command {
+                        if !forward(&command_tx, command).await {
+                            break 'session;
+                        }
+                    }
+                    state = next;
+                }
+                ConnectionState::EomSeen => {
+                    // "Just eat all input and return bad command"
+                    // (telnetd.c:1265-1278)
+                    reply(&mut writer, BAD_COMMAND).await;
+                }
+            }
+        }
+
+        if lines.pending() > MAX_LINE_LEN {
+            error!(
+                "Telnet line exceeded {}KB, disconnecting",
+                MAX_LINE_LEN / 1024
+            );
+            anyhow::bail!("Line buffer overflow");
         }
     }
 
     Ok(())
 }
 
-/// Filter out telnet IAC sequences from raw data and return just the text
-fn filter_telnet_commands(data: &[u8]) -> String {
+/// One controller session at a time, as telnetd's `atlas_ts`
+/// (telnetd.c:243-247): a session that authenticates takes over
+/// (:1112-1124), and an older one is killed on its next pass through the
+/// loop, input or not (`if (ts != atlas_ts) goto kill_session`, :1143, :1234,
+/// :1266). Each authenticated session watches its probe's channel here, and
+/// is over at the next send. Keyed by the address of the session-ID cell, so
+/// each probe (and each test) has its own.
+type AtlasSessions = std::collections::HashMap<usize, tokio::sync::watch::Sender<()>>;
+static ATLAS_SESSIONS: std::sync::LazyLock<std::sync::Mutex<AtlasSessions>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// This session has authenticated: it takes over from any older one.
+fn take_over(
+    session_id: &std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
+) -> tokio::sync::watch::Receiver<()> {
+    let key = std::sync::Arc::as_ptr(session_id) as usize;
+    let mut sessions = ATLAS_SESSIONS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let tx = sessions
+        .entry(key)
+        .or_insert_with(|| tokio::sync::watch::channel(()).0);
+    tx.send_replace(());
+    tx.subscribe()
+}
+
+/// Resolves when a newer session has taken over; never before this one has
+/// authenticated.
+async fn taken_over(atlas: &mut Option<tokio::sync::watch::Receiver<()>>) {
+    if let Some(rx) = atlas {
+        if rx.changed().await.is_ok() {
+            return;
+        }
+    }
+    std::future::pending().await
+}
+
+/// Send a reply to the controller. A failed write is not fatal here: the
+/// next read finds the connection gone.
+async fn reply(writer: &mut (impl AsyncWrite + Unpin), text: &str) {
+    if let Err(e) = writer.write_all(text.as_bytes()).await {
+        // Broken pipe is expected when the connection closes
+        debug!("Failed to send telnet reply: {}", e);
+    }
+    let _ = writer.flush().await;
+}
+
+/// Hand a command to the probe; false once the channel is closed, which
+/// ends the session.
+async fn forward(command_tx: &Option<mpsc::Sender<TelnetCommand>>, command: TelnetCommand) -> bool {
+    trace!("Received command: {:?}", command);
+    let Some(tx) = command_tx else {
+        return true;
+    };
+    match tx.send(command).await {
+        Ok(()) => true,
+        Err(e) => {
+            // Channel closed likely means shutdown is in progress
+            debug!("Command channel closed (shutdown in progress): {}", e);
+            false
+        }
+    }
+}
+
+/// The debug line for each line from the controller.
+///
+/// The text logged for a request line is load-bearing: the twin that compares
+/// Starla with RIPE's probe on the wire (andrii infra/vultr/atlas/twin,
+/// src/scenario.rs `extract`) rebuilds the controller's requests from
+/// Starla's journal by matching "Telnet state Authenticated, received: '",
+/// one request line each, and adds the empty line that ends a request
+/// itself (twin/src/control.rs). So every line GET_CMD or DO_CRONTAB takes
+/// or answers keeps that text, with nothing after the closing quote (no
+/// tracing field, which the journal would print there). The empty line and
+/// what follows it are logged otherwise: under that text the replay would
+/// send two empty lines, the second drawing a BAD_COMMAND from both probes.
+fn log_received(state: ConnectionState, line: &str) {
+    use ConnectionState::{DoCrontab, EomSeen, GetCmd, GetLoginName, GetPassword};
+    match state {
+        GetLoginName => debug!("Telnet state {:?}, received: '{}'", state, line),
+        // The session ID stays out of the log
+        GetPassword => debug!("Telnet state {:?}, received a password", state),
+        GetCmd | DoCrontab if line.is_empty() => debug!("Telnet: end of request"),
+        GetCmd | DoCrontab => debug!("Telnet state Authenticated, received: '{}'", line),
+        EomSeen => debug!("Telnet: after the end of request, received: '{}'", line),
+    }
+}
+
+/// GET_CMD for one line (telnetd.c:1138-1228): the reply, if any, the
+/// command to hand to the probe, if any, and the next state.
+fn get_cmd(line: &str) -> (Option<&'static str>, Option<TelnetCommand>, ConnectionState) {
+    use ConnectionState::{DoCrontab, EomSeen, GetCmd};
+
+    if let Some(dir) = line.strip_prefix(CMD_CRONTAB) {
+        // start_crontab (telnetd.c:1471-1518); its CRONLINEs follow
+        return match crontab_dir_check(dir) {
+            Ok(()) => (None, Some(parse_command(line)), DoCrontab),
+            Err(reply) => (Some(reply), None, GetCmd),
+        };
+    }
+    if let Some(rest) = line.strip_prefix(CMD_ONEOFF) {
+        // do_oneoff (telnetd.c:1616-1696), no reply when it is taken
+        return match oneoff_file_check(rest) {
+            Ok(()) => (None, Some(parse_command(line)), GetCmd),
+            Err(reply) => (Some(reply), None, GetCmd),
+        };
+    }
+    if line == CMD_REBOOT {
+        // reboot(2) needs CAP_SYS_BOOT, which ripe-atlas.service withholds
+        // from its unprivileged user: the call fails and nothing is sent
+        // (telnetd.c:1179-1186).
+        debug!("Telnet: REBOOT is not for a software probe");
+        return (None, None, GetCmd);
+    }
+    if line == CMD_RELOAD {
+        // RELOAD first remounts / read-write, which mount(2) refuses the
+        // unprivileged ripe-atlas user: BAD_REMOUNT (telnetd.c:1187-1196).
+        return (Some(BAD_REMOUNT), None, GetCmd);
+    }
+    if line.is_empty() {
+        // End of request: the one OK (telnetd.c:1212-1221)
+        return (Some(RESULT_OK), None, EomSeen);
+    }
+
+    // Anything else is a bad command (telnetd.c:1223-1227) and gets
+    // BAD_COMMAND, whatever it is, so the bytes on the wire are the
+    // reference's for any input. Starla still takes its own commands, which
+    // no RIPE controller sends, once it has answered: STATUS and
+    // STOP <msm_id> (in either letter case, as parse_command reads them) and
+    // a measurement as a JSON object. Nothing else that lands here is taken,
+    // a CRONLINE outside a CRONTAB among them.
+    let command = match parse_command(line) {
+        command @ (TelnetCommand::Status | TelnetCommand::Stop(_)) => Some(command),
+        TelnetCommand::Unknown(_) => None,
+        command if line.starts_with('{') => Some(command),
+        _ => None,
+    };
+    (Some(BAD_COMMAND), command, GetCmd)
+}
+
+/// start_crontab's checks of its directory (telnetd.c:1484-1505): BAD_PATH,
+/// then NAME_TOO_LONG when the rebased directory with "/root.new" after it
+/// does not fit telnetd's 256-byte buffers. (Its first length check, of the
+/// directory alone, is within this one.)
+fn crontab_dir_check(dir: &str) -> Result<(), &'static str> {
+    let len = rebased_crons_path_len(dir).ok_or(BAD_PATH)?;
+    if len + "/root.new".len() + 1 > 256 {
+        return Err(NAME_TOO_LONG);
+    }
+    Ok(())
+}
+
+/// do_oneoff's checks of its file (telnetd.c:1623-1660): the name runs to
+/// the first white space; NAME_TOO_LONG when it with ".new" after it does
+/// not fit 256 bytes, then BAD_PATH. (The ".new" name's own BAD_PATH check
+/// cannot fail where the name's passed.)
+fn oneoff_file_check(rest: &str) -> Result<(), &'static str> {
+    let name = &rest[..rest.find(c_isspace).unwrap_or(rest.len())];
+    if name.len() + ".new".len() + 1 > 256 {
+        return Err(NAME_TOO_LONG);
+    }
+    rebased_crons_path_len(name).map(|_| ()).ok_or(BAD_PATH)
+}
+
+/// rebased_validated_filename(ATLAS_SPOOLDIR, path, "crons")
+/// (libbb/validate_filename.c:3-131): the path's length once rebased onto
+/// the spool directory, or None where the reference answers BAD_PATH. The
+/// path is /home/atlas/crons/… or <spooldir>/crons/… (properties 1 and 2),
+/// holds no "/../" and does not end in "/.." (3 and 4).
+fn rebased_crons_path_len(path: &str) -> Option<usize> {
+    let under = |base: &str| {
+        path.strip_prefix(base)
+            .is_some_and(|rest| rest.starts_with("/crons/"))
+    };
+    let len = if under(ATLAS_HOME) {
+        path.len() - ATLAS_HOME.len() + ATLAS_SPOOLDIR.len()
+    } else if under(ATLAS_SPOOLDIR) {
+        path.len()
+    } else {
+        return None;
+    };
+    if path.contains("/../") || path.ends_with("/..") {
+        return None;
+    }
+    Some(len)
+}
+
+/// isspace(3) in the C locale, which do_oneoff splits the name off with
+fn c_isspace(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')
+}
+
+/// Filter out telnet IAC sequences from raw data and return just the data
+/// bytes (made text a whole line at a time, by LineSplitter)
+fn filter_telnet_commands(data: &[u8]) -> Vec<u8> {
     let mut result = Vec::new();
     let mut i = 0;
 
@@ -493,7 +768,7 @@ fn filter_telnet_commands(data: &[u8]) -> String {
         }
     }
 
-    String::from_utf8_lossy(&result).to_string()
+    result
 }
 
 /// Parse a command line into a TelnetCommand
@@ -1652,6 +1927,9 @@ fn parse_json_command(spec: &serde_json::Value) -> TelnetCommand {
         _ => TelnetCommand::Unknown(format!("Unknown measurement type: {}", msm_type)),
     }
 }
+
+#[cfg(test)]
+mod session_tests;
 
 #[cfg(test)]
 mod tests {
