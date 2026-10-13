@@ -51,8 +51,6 @@ impl Default for UploaderConfig {
 pub struct ResultUploader {
     transport: Box<dyn UploadTransport>,
     config: UploaderConfig,
-    /// Process start time (unix timestamp) for uptime reporting
-    start_time: u64,
     /// Host telemetry registry; pending lines are drained per upload batch.
     host_telemetry: Arc<HostTelemetry>,
     /// Marked synced when an accepted upload's Date agrees with our clock.
@@ -69,14 +67,9 @@ impl ResultUploader {
         host_telemetry: Arc<HostTelemetry>,
         time_sync: Arc<TimeSyncTracker>,
     ) -> Self {
-        let start_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
         Self {
             transport,
             config,
-            start_time,
             host_telemetry,
             time_sync,
             metrics,
@@ -109,7 +102,6 @@ impl ResultUploader {
     pub async fn upload_batch(
         &self,
         results: &[QueuedResult],
-        lts: i64,
         session_id: Option<&str>,
     ) -> anyhow::Result<()> {
         // An empty batch is still posted (header, telemetry, footer), as the
@@ -125,11 +117,6 @@ impl ResultUploader {
         let mut body = Vec::new();
         body.extend_from_slice(b"P_TO_C_REPORT\n");
 
-        // System status results (disk, uptime, interfaces, ongoing status)
-        // The controller expects these alongside measurement results
-        let status = system_status::system_status_lines(lts, self.start_time);
-        body.extend_from_slice(status.as_bytes());
-
         // Host telemetry RESULT lines (buddyinfo, rptaddrs) accumulated since
         // the last upload. Pushed by HostTelemetry's periodic reporters, and
         // put back if this upload fails (below).
@@ -142,6 +129,9 @@ impl ResultUploader {
             let atlas_result =
                 AtlasResult::from_measurement(queued.result.clone(), None).with_lts(queued.lts);
             body.extend_from_slice(atlas_result.to_result_line().as_bytes());
+        }
+        if !results.is_empty() {
+            body.extend_from_slice(system_status::results_marker().as_bytes());
         }
 
         if let Some(sid) = session_id {
@@ -205,15 +195,17 @@ impl ResultUploader {
                 warn!("Clock not in sync with the controller: local {now}, remote {server}");
                 self.host_telemetry
                     .push(format!(
-                        "RESULT 9015 ongoing {now} httppost not in sync, local {now}, remote {server}\n"
+                        "RESULT 9015 ongoing {now} httppost not in sync, local {now}, remote {server}\n{}",
+                        system_status::main_marker()
                     ))
                     .await;
             }
             ClockVerdict::SlowAnswer => {
                 self.host_telemetry
                     .push(format!(
-                        "RESULT 9015 ongoing {now} httppost rtt {} ms\n",
-                        format_g(rtt.as_secs_f64() * 1000.0)
+                        "RESULT 9015 ongoing {now} httppost rtt {} ms\n{}",
+                        format_g(rtt.as_secs_f64() * 1000.0),
+                        system_status::main_marker()
                     ))
                     .await;
             }
@@ -483,7 +475,7 @@ mod tests {
     async fn a_rate_limited_upload_keeps_its_telemetry() {
         let (u, telemetry, mut seen) = uploader("HTTP/1.1 429 Too Many Requests\r\n\r\n");
         telemetry.push(REPORT.into()).await;
-        let err = u.upload_batch(&one_result(), 0, None).await.unwrap_err();
+        let err = u.upload_batch(&one_result(), None).await.unwrap_err();
         assert!(err.to_string().contains("rate limited"), "{err}");
         assert!(
             seen.recv().await.unwrap().contains(REPORT),
@@ -496,7 +488,7 @@ mod tests {
     async fn an_accepted_upload_consumes_its_telemetry() {
         let (u, telemetry, mut seen) = uploader("HTTP/1.1 200 OK\r\n\r\nOK");
         telemetry.push(REPORT.into()).await;
-        u.upload_batch(&one_result(), 0, None).await.unwrap();
+        u.upload_batch(&one_result(), None).await.unwrap();
         assert!(seen.recv().await.unwrap().contains(REPORT));
         assert!(telemetry.drain().await.is_empty());
     }
@@ -555,7 +547,7 @@ mod tests {
     async fn an_accepted_upload_in_step_is_a_time_sync() {
         let (u, telemetry, sync) = with_time_sync(reply_dated(0));
         assert_eq!(sync.lts(), -1);
-        u.upload_batch(&[], -1, Some("s")).await.unwrap();
+        u.upload_batch(&[], Some("s")).await.unwrap();
         assert!((0..2).contains(&sync.lts()), "{}", sync.lts());
         assert!(telemetry.drain().await.is_empty());
     }
@@ -563,7 +555,7 @@ mod tests {
     #[tokio::test]
     async fn an_answer_an_hour_off_is_reported_not_trusted() {
         let (u, telemetry, sync) = with_time_sync(reply_dated(3600));
-        u.upload_batch(&[], -1, Some("s")).await.unwrap();
+        u.upload_batch(&[], Some("s")).await.unwrap();
         assert_eq!(sync.lts(), -1);
         let lines = telemetry.drain().await;
         assert_eq!(lines.len(), 1, "{lines:?}");
@@ -573,5 +565,37 @@ mod tests {
             "{}",
             lines[0]
         );
+        // condmv's marker for data/new/main follows httppost's own line.
+        assert!(
+            lines[0].contains("\nRESULT 9901 ongoing ")
+                && lines[0].ends_with(" /home/atlas/data/new/main\n"),
+            "{}",
+            lines[0]
+        );
+    }
+
+    /// The reference sends status lines from its 180 s loop, not with every
+    /// upload, and marks eperd's results with condmv's 9907 line.
+    #[tokio::test]
+    async fn an_upload_carries_results_and_their_marker_only() {
+        let (u, _telemetry, mut seen) = uploader("HTTP/1.1 200 \r\n\r\nOK\n");
+        u.upload_batch(&one_result(), Some("s")).await.unwrap();
+        let req = seen.recv().await.unwrap();
+        let body = &req[req.find("\r\n\r\n").unwrap() + 4..];
+        let lines: Vec<&str> = body.lines().collect();
+        assert_eq!(lines[0], "P_TO_C_REPORT");
+        assert!(lines[1].contains("\"1001\""), "{body}");
+        assert!(
+            lines[2].starts_with("RESULT 9907 ongoing ")
+                && lines[2].ends_with(" /home/atlas/data/new/7"),
+            "{body}"
+        );
+        for gone in ["\"7001\"", "\"9018\"", "\"9002\"", "starla"] {
+            assert!(!body.contains(gone), "{gone} in {body}");
+        }
+
+        u.upload_batch(&[], Some("s")).await.unwrap();
+        let req = seen.recv().await.unwrap();
+        assert!(!req.contains("9907"), "no results, no marker: {req}");
     }
 }

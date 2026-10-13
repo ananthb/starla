@@ -39,6 +39,9 @@ pub struct ResultHandlerConfig {
     pub cleanup_interval: Duration,
     /// Maximum number of results in queue
     pub max_queue_size: usize,
+    /// Send interface counters (9002) with the 180 s status lines, as the
+    /// reference probe does only with RXTXRPT=yes.
+    pub rxtxrpt: bool,
 }
 
 impl Default for ResultHandlerConfig {
@@ -49,6 +52,7 @@ impl Default for ResultHandlerConfig {
             max_attempts: 5,
             cleanup_interval: Duration::from_secs(300), // 5 minutes
             max_queue_size: 10000,
+            rxtxrpt: false,
         }
     }
 }
@@ -198,15 +202,11 @@ impl ResultHandler {
             debug!("Uploading no results (status and clock check)");
         }
 
-        let lts = self.time_sync.lts();
         let session_id = self.session_id.lock().await;
         let session_id_ref = session_id.as_deref();
 
         let uploader = self.uploader.lock().await;
-        match uploader
-            .upload_batch(&uploadable, lts, session_id_ref)
-            .await
-        {
+        match uploader.upload_batch(&uploadable, session_id_ref).await {
             Ok(()) => {
                 info!("Successfully uploaded {} results", count);
                 self.metrics.record_upload_success();
@@ -257,6 +257,10 @@ impl ResultHandler {
 
         let mut upload_interval = tokio::time::interval(self.config.upload_interval);
         let mut cleanup_interval = tokio::time::interval(self.config.cleanup_interval);
+        // The reference main loop's status lines: first pass at start.
+        let mut status_interval =
+            tokio::time::interval(Duration::from_secs(system_status::STATUS_INTERVAL_SECS));
+        let data_dir = starla_common::state_dir();
         let mut timesync_interval = tokio::time::interval_at(
             tokio::time::Instant::now() + TIMESYNC_INTERVAL,
             TIMESYNC_INTERVAL,
@@ -318,6 +322,13 @@ impl ResultHandler {
 
                 _ = cleanup_interval.tick() => {
                     self.run_cleanup().await;
+                }
+
+                _ = status_interval.tick() => {
+                    let lts = self.time_sync.lts();
+                    for line in system_status::status_lines(lts, &data_dir, self.config.rxtxrpt) {
+                        self.host_telemetry.push(line).await;
+                    }
                 }
 
                 tick = timesync_interval.tick() => {
