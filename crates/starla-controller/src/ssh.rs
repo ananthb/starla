@@ -124,6 +124,31 @@ impl ProbeInitInfo {
     }
 }
 
+/// Which registration entry to try first: uniform over the list, as the
+/// reference's reginit picks one with `rchoose $REG_1_HOST … $REG_6_HOST`.
+///
+/// The list is a hostname, its IPv4 literal and its IPv6 literal for each of
+/// two servers, and a hostname resolves to IPv6 first on a dual-stack host,
+/// so the reference registers over IPv4 one time in three. Starla walked
+/// the list from the top, so it always registered over IPv6: on 2026-10-13
+/// every connection RIPE had logged from probes 1018212 and 1015560
+/// (msm 7000) was IPv6, and neither has an IPv4 address in RIPE's view.
+fn random_start(len: usize) -> usize {
+    use rand::RngExt;
+    if len == 0 {
+        0
+    } else {
+        rand::rng().random_range(0..len)
+    }
+}
+
+/// The entries from `start`, then the ones before it: the first is the
+/// reference's single choice, the rest are Starla's fallbacks.
+fn from_random_start<T>(items: &[T], start: usize) -> impl Iterator<Item = &T> {
+    let start = start.min(items.len());
+    items[start..].iter().chain(items[..start].iter())
+}
+
 /// Detect the probe sub-architecture string sent during registration.
 ///
 /// Format: `<os_id>/<os_version>/<arch>/starla/<starla_version>`,
@@ -544,7 +569,7 @@ impl SshConnection {
 
         let mut last_error: Option<anyhow::Error> = None;
 
-        for server in servers {
+        for server in from_random_start(servers, random_start(servers.len())) {
             let (host, port) = parse_server(server);
 
             match Self::connect(host, port, key, config.clone(), known_hosts.clone(), None).await {
@@ -1405,5 +1430,41 @@ mod tests {
         assert!(ok, "subsequent verifications with the same key must match");
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn registration_starts_at_a_random_entry_and_keeps_the_rest_as_fallbacks() {
+        let servers = [
+            "reg-05",
+            "193.0.19.75",
+            "[2001::b]",
+            "reg-06",
+            "193.0.19.76",
+            "[2001::c]",
+        ];
+        let order: Vec<_> = from_random_start(&servers, 4).copied().collect();
+        assert_eq!(
+            order,
+            [
+                "193.0.19.76",
+                "[2001::c]",
+                "reg-05",
+                "193.0.19.75",
+                "[2001::b]",
+                "reg-06"
+            ]
+        );
+        assert_eq!(from_random_start(&servers, 0).count(), 6);
+        assert_eq!(from_random_start::<&str>(&[], 0).count(), 0);
+
+        // Uniform like rchoose: every entry comes first, the IPv4 literals
+        // about one time in three between them.
+        let mut first = [0usize; 6];
+        for _ in 0..6000 {
+            first[random_start(6)] += 1;
+        }
+        assert!(first.iter().all(|&n| (800..1200).contains(&n)), "{first:?}");
+        let v4 = first[1] + first[4];
+        assert!((1700..2300).contains(&v4), "{v4}");
     }
 }
