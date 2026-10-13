@@ -198,20 +198,13 @@ impl MeasurementJob {
                     msm_id,
                 }))
             }
-            MeasurementSpec::Tls(spec) => {
-                let target = resolve_target(&spec.target, spec.af)?;
-                let hostname = spec.hostname.clone().unwrap_or_else(|| spec.target.clone());
-                Ok(Box::new(Tls {
-                    config: TlsConfig {
-                        target,
-                        port: spec.port,
-                        hostname,
-                        timeout_ms: 10000,
-                    },
-                    probe_id,
-                    msm_id,
-                }))
-            }
+            // sslgetcert resolves the name itself (its ttr and dnserr), and
+            // sends a server_name only for -h
+            MeasurementSpec::Tls(spec) => Ok(Box::new(Tls {
+                config: TlsConfig::new(&spec.target, spec.port, spec.af, spec.hostname.clone()),
+                probe_id,
+                msm_id,
+            })),
             MeasurementSpec::Ntp(spec) => {
                 let target = resolve_target(&spec.target, spec.af)?;
                 Ok(Box::new(Ntp {

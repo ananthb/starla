@@ -248,7 +248,9 @@ pub struct TlsSpec {
     pub msm_id: u64,
     pub target: String,
     pub port: u16,
+    /// `-4`/`-6`; 0 for neither (evsslgetcert resolves either family)
     pub af: u8,
+    /// `-h`: the server_name to send; evsslgetcert sends none without it
     pub hostname: Option<String>,
     pub spread: Option<u32>,
     pub schedule: ScheduleSpec,
@@ -1845,16 +1847,22 @@ fn parse_evhttpget(args: &[String], interval: u64, end_time: i64, spread: u32) -
     })
 }
 
-/// Parse evsslgetcert command arguments
+/// Parse evsslgetcert command arguments as sslgetcert_init() does
+/// (probe-busybox/eperd/sslgetcert.c:816-867, getopt "A:B:h:O:R:V:W:i:p:46").
 ///
-/// Usage: evsslgetcert [-4|-6] [-p port] [-h hostname] [-A msm_id] [-O output]
-/// target
+/// Usage: evsslgetcert [-4|-6] [-p port] [-h server_name] [-A msm_id]
+/// [-O output] hostname
+///
+/// Neither -4 nor -6 is af 0: either family. The server_name is -h's alone —
+/// without it the reference sends none (state->sni is h_arg, :966), so the
+/// hostname is not a default. An unknown option or other than one hostname
+/// makes sslgetcert_init() refuse the line.
 fn parse_evsslgetcert(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
-    let mut af: u8 = 4;
+    let mut af: u8 = 0;
     let mut port: u16 = 443;
     let mut msm_id: u64 = 0;
-    let mut target = String::new();
     let mut hostname: Option<String> = None;
+    let mut targets: Vec<&String> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -1862,44 +1870,35 @@ fn parse_evsslgetcert(args: &[String], interval: u64, end_time: i64, spread: u32
         match arg.as_str() {
             "-4" => af = 4,
             "-6" => af = 6,
-            "-p" => {
-                if i + 1 < args.len() {
-                    port = args[i + 1].parse().unwrap_or(443);
-                    i += 1;
+            // -B bundle, -O output, -R/-W fuzzing files, -V protocol version
+            // (the controller sends none of them but -O), -i interface
+            "-p" | "-A" | "-h" | "-B" | "-O" | "-R" | "-V" | "-W" | "-i" => {
+                let Some(value) = args.get(i + 1) else {
+                    warn!("evsslgetcert: {} needs an argument", arg);
+                    return TelnetCommand::Unknown(format!("evsslgetcert {:?}", args));
+                };
+                match arg.as_str() {
+                    "-p" => port = value.parse().unwrap_or(443),
+                    "-A" => msm_id = value.parse().unwrap_or(0),
+                    "-h" => hostname = Some(value.clone()),
+                    _ => {}
                 }
+                i += 1;
             }
-            "-A" => {
-                if i + 1 < args.len() {
-                    msm_id = args[i + 1].parse().unwrap_or(0);
-                    i += 1;
-                }
-            }
-            "-O" => {
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            // Note: Atlas uses -h for hostname (SNI), not -H
-            "-h" | "-H" | "--hostname" => {
-                if i + 1 < args.len() {
-                    hostname = Some(args[i + 1].clone());
-                    i += 1;
-                }
-            }
-            _ if !arg.starts_with('-') => {
-                target = arg.clone();
-            }
+            _ if !arg.starts_with('-') => targets.push(arg),
             _ => {
-                debug!("evsslgetcert: ignoring unknown option {}", arg);
+                warn!("evsslgetcert: bad option {}", arg);
+                return TelnetCommand::Unknown(format!("evsslgetcert {:?}", args));
             }
         }
         i += 1;
     }
 
-    if target.is_empty() {
-        warn!("evsslgetcert: no target specified");
+    let [target] = targets[..] else {
+        warn!("evsslgetcert: exactly one hostname expected");
         return TelnetCommand::Unknown(format!("evsslgetcert {:?}", args));
-    }
+    };
+    let target = target.clone();
 
     trace!(
         "Parsed evsslgetcert: msm_id={}, target={}, hostname={:?}, port={}, af={}, interval={}",
@@ -1913,10 +1912,10 @@ fn parse_evsslgetcert(args: &[String], interval: u64, end_time: i64, spread: u32
 
     TelnetCommand::Tls(TlsSpec {
         msm_id,
-        target: target.clone(),
+        target,
         port,
         af,
-        hostname: hostname.or(Some(target)),
+        hostname,
         spread: Some(spread),
         schedule: ScheduleSpec {
             interval,
@@ -2604,6 +2603,58 @@ mod tests {
             }
             _ => panic!("Expected Tls command"),
         }
+    }
+
+    /// The twin scenario's line (enodia-2026-10-13T0131): -h is the
+    /// server_name, the hostname is what is resolved and reported.
+    #[test]
+    fn evsslgetcert_takes_the_server_name_from_h_only() {
+        let cmd = parse_command(
+            r#"CRONLINE 43200 6472 1794447121 UNIFORM 3 evsslgetcert -6 -h www.ripe.net -A "15001" -O /home/atlas/data/new/7 www.ripe.net"#,
+        );
+        let TelnetCommand::Tls(spec) = cmd else {
+            panic!("Expected Tls command, got {cmd:?}");
+        };
+        assert_eq!(spec.msm_id, 15001);
+        assert_eq!(spec.target, "www.ripe.net");
+        assert_eq!(spec.hostname.as_deref(), Some("www.ripe.net"));
+        assert_eq!(spec.port, 443);
+        assert_eq!(spec.af, 6);
+
+        // Without -h no server_name, and without -4/-6 either family
+        let cmd = parse_command(
+            r#"CRONLINE 43200 0 0 UNIFORM 3 evsslgetcert -A "15003" -O /home/atlas/data/new/7 www.ripe.net"#,
+        );
+        let TelnetCommand::Tls(spec) = cmd else {
+            panic!("Expected Tls command, got {cmd:?}");
+        };
+        assert_eq!(spec.hostname, None);
+        assert_eq!(spec.af, 0);
+        assert_eq!(spec.target, "www.ripe.net");
+    }
+
+    /// sslgetcert_init() refuses a line without exactly one hostname or
+    /// with an option it does not know.
+    #[test]
+    fn evsslgetcert_refuses_what_sslgetcert_init_refuses() {
+        for line in [
+            r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -6 -A "1" a.example b.example"#,
+            r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -6 -A "1""#,
+            r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -6 -H x -A "1" a.example"#,
+            r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -6 -A "1" a.example -p"#,
+        ] {
+            assert!(
+                matches!(parse_command(line), TelnetCommand::Unknown(_)),
+                "{line}"
+            );
+        }
+        // -V's argument is not taken for the hostname
+        let cmd =
+            parse_command(r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -V TLS1.2 -A "1" a.example"#);
+        assert!(
+            matches!(cmd, TelnetCommand::Tls(ref s) if s.target == "a.example"),
+            "{cmd:?}"
+        );
     }
 
     #[test]
