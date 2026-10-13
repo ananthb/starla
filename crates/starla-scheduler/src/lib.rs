@@ -293,7 +293,7 @@ impl Scheduler {
             for (msm_id, task) in tasks.iter_mut() {
                 if task.is_due(now) {
                     due.push(task.job.clone());
-                    task.schedule_next();
+                    task.schedule_next(now);
 
                     if task.is_expired(now) {
                         exp.push(*msm_id);

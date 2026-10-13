@@ -560,7 +560,8 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
             return TelnetCommand::Unknown(cmd.to_string());
         }
     };
-    let _offset: u64 = tokens[2].parse().unwrap_or(0);
+    // The cycle's phase: eperd runs cycle k at start_time + k * interval.
+    let start_time: i64 = tokens[2].parse().unwrap_or(0);
     let end_time: i64 = tokens[3].parse().unwrap_or(0);
     let _spread_type = &tokens[4]; // UNIFORM, etc.
     let spread: u32 = tokens[5].parse().unwrap_or(0);
@@ -570,8 +571,9 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
     let measurement_args = &tokens[7..];
 
     trace!(
-        "CRONLINE: interval={}, end_time={}, spread={}, cmd={}, args={:?}",
+        "CRONLINE: interval={}, start_time={}, end_time={}, spread={}, cmd={}, args={:?}",
         interval,
+        start_time,
         end_time,
         spread,
         measurement_cmd,
@@ -579,7 +581,7 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
     );
 
     // Parse the measurement command
-    match measurement_cmd.as_str() {
+    let mut parsed = match measurement_cmd.as_str() {
         "evping" => parse_evping(measurement_args, interval, end_time, spread),
         "evtraceroute" => parse_evtraceroute(measurement_args, interval, end_time, spread),
         "evtdig" => parse_evtdig(measurement_args, interval, end_time, spread),
@@ -623,7 +625,24 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
             warn!("Unknown measurement command: {}", measurement_cmd);
             TelnetCommand::Unknown(cmd.to_string())
         }
-    }
+    };
+    set_start_time(&mut parsed, start_time);
+    parsed
+}
+
+/// Give a parsed measurement the CRONLINE's start time; the per-tool parsers
+/// only see the tool's own arguments.
+fn set_start_time(cmd: &mut TelnetCommand, start_time: i64) {
+    let schedule = match cmd {
+        TelnetCommand::Ping(s) => &mut s.schedule,
+        TelnetCommand::Traceroute(s) => &mut s.schedule,
+        TelnetCommand::Dns(s) => &mut s.schedule,
+        TelnetCommand::Http(s) => &mut s.schedule,
+        TelnetCommand::Tls(s) => &mut s.schedule,
+        TelnetCommand::Ntp(s) => &mut s.schedule,
+        _ => return,
+    };
+    schedule.start_time = start_time;
 }
 
 /// Parse a `buddyinfo [lowmem_kb] [logfile]` CRONLINE.
@@ -1665,10 +1684,31 @@ mod tests {
                 assert_eq!(spec.af, 4);
                 assert_eq!(spec.packets, 3);
                 assert_eq!(spec.schedule.interval, 240);
+                assert_eq!(spec.schedule.start_time, 274);
                 assert_eq!(spec.schedule.stop_time, 1770761451);
                 assert_eq!(spec.spread, Some(3));
             }
             _ => panic!("Expected Ping command, got {:?}", cmd),
+        }
+    }
+
+    /// Every measurement kind keeps the CRONLINE's start time (the phase of
+    /// its slots); they were all scheduled from "now" before.
+    #[test]
+    fn every_measurement_keeps_the_cronlines_start_time() {
+        for line in [
+            r#"CRONLINE 900 312 2000000000 UNIFORM 14 evtraceroute -6 -I -A "1004732" -O /home/atlas/data/new/7 www.google.com"#,
+            r#"CRONLINE 86400 77 2000000000 UNIFORM 3 evtdig -6 -e 512 -h --retry 0 --timeout 5000 -A "156156173" -O /home/atlas/data/new/7 2620:fe::fe"#,
+            r#"CRONLINE 86400 77 2000000000 UNIFORM 3 evhttpget -6 -1 -A "13023" -O /home/atlas/data/new/7 http://www.ripe.net/favicon.ico"#,
+        ] {
+            let start = line.split(' ').nth(2).unwrap().parse::<i64>().unwrap();
+            let got = match parse_command(line) {
+                TelnetCommand::Traceroute(s) => s.schedule.start_time,
+                TelnetCommand::Dns(s) => s.schedule.start_time,
+                TelnetCommand::Http(s) => s.schedule.start_time,
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(got, start, "{line}");
         }
     }
 
