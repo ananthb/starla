@@ -95,6 +95,8 @@ pub struct HttpJobSpec {
     pub headers: Vec<String>,
     pub body: Option<String>,
     pub max_body_size: Option<u32>,
+    pub store_headers: u32,
+    pub http10: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +201,9 @@ impl MeasurementJob {
                         timeout_ms: 30000,
                         verify_ssl: true,
                         version: None,
+                        af: spec.af,
+                        store_headers: spec.store_headers as usize,
+                        http10: spec.http10,
                     },
                     probe_id,
                     msm_id,

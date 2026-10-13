@@ -125,6 +125,13 @@ pub struct HttpSpec {
     pub headers: Vec<String>,
     pub body: Option<String>,
     pub max_body_size: Option<u32>,
+    /// `--store-headers N`: report the response header lines within N bytes
+    /// (the ip-echo built-ins ask for 1024; RIPE reads X-Client-IP there)
+    #[serde(default)]
+    pub store_headers: u32,
+    /// `-0`: HTTP/1.0 (evhttpget's default, and `-1`, is HTTP/1.1)
+    #[serde(default)]
+    pub http10: bool,
     pub spread: Option<u32>,
     pub schedule: ScheduleSpec,
 }
@@ -1213,6 +1220,8 @@ fn parse_evhttpget(args: &[String], interval: u64, end_time: i64, spread: u32) -
     let mut msm_id: u64 = 0;
     let mut url = String::new();
     let mut max_body_size: Option<u32> = None;
+    let mut store_headers: u32 = 0;
+    let mut http10 = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -1220,9 +1229,8 @@ fn parse_evhttpget(args: &[String], interval: u64, end_time: i64, spread: u32) -
         match arg.as_str() {
             "-4" => af = 4,
             "-6" => af = 6,
-            "-1" => {
-                // HTTP/1.1 mode - skip
-            }
+            "-0" => http10 = true,
+            "-1" => http10 = false,
             "-A" => {
                 if i + 1 < args.len() {
                     msm_id = args[i + 1].parse().unwrap_or(0);
@@ -1241,7 +1249,16 @@ fn parse_evhttpget(args: &[String], interval: u64, end_time: i64, spread: u32) -
                 }
             }
             "--store-headers" => {
-                // Max header storage size - skip
+                if i + 1 < args.len() {
+                    store_headers = args[i + 1].parse().unwrap_or(0);
+                    i += 1;
+                }
+            }
+            // httpget options with a value Starla does not use: their value
+            // must not be taken for the URL.
+            "-I" | "-R" | "-W" | "-b" | "--host" | "--post-file" | "--post-header"
+            | "--post-footer" | "--read-limit" | "--store-body" | "--user-agent" | "--sni"
+            | "--timeout" => {
                 if i + 1 < args.len() {
                     i += 1;
                 }
@@ -1277,6 +1294,8 @@ fn parse_evhttpget(args: &[String], interval: u64, end_time: i64, spread: u32) -
         headers: vec![],
         body: None,
         max_body_size,
+        store_headers,
+        http10,
         spread: Some(spread),
         schedule: ScheduleSpec {
             interval,
@@ -1599,6 +1618,8 @@ fn parse_json_command(spec: &serde_json::Value) -> TelnetCommand {
                 .get("max_body_size")
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32),
+            store_headers: 0,
+            http10: false,
             spread,
             schedule,
         }),
@@ -2045,5 +2066,32 @@ mod tests {
             );
             assert!(ntp(&line).is_some(), "gap {ok} is in bounds");
         }
+    }
+
+    /// The controller's ip-echo and favicon built-ins, as pushed to 1018212.
+    #[test]
+    fn evhttpget_keeps_store_headers_family_and_version() {
+        let spec = match parse_command(
+            r#"CRONLINE 3600 3751 1794447121 UNIFORM 3 evhttpget -6 -1 --store-headers 1024 -A "13027" -O /home/atlas/data/new/7 http://[2001:67c:2e8:16::c100:68d]"#,
+        ) {
+            TelnetCommand::Http(s) => s,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(spec.msm_id, 13027);
+        assert_eq!(spec.url, "http://[2001:67c:2e8:16::c100:68d]");
+        assert_eq!((spec.af, spec.store_headers, spec.http10), (6, 1024, false));
+        assert_eq!(spec.schedule.start_time, 3751);
+
+        let spec = match parse_command(
+            r#"CRONLINE 86400 24620 1794447121 UNIFORM 3 evhttpget -4 -0 --user-agent x --timeout 5000 -A "12023" -O /home/atlas/data/new/7 http://www.ripe.net/favicon.ico"#,
+        ) {
+            TelnetCommand::Http(s) => s,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!((spec.af, spec.store_headers, spec.http10), (4, 0, true));
+        assert_eq!(
+            spec.url, "http://www.ripe.net/favicon.ico",
+            "option values are not the URL"
+        );
     }
 }
