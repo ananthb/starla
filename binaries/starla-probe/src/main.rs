@@ -469,22 +469,59 @@ async fn main() -> Result<()> {
             counts.clear();
         };
 
+        // A crontab comes whole, once the controller has ended it
+        // (CrontabSpec). Its lines are taken one by one, each as any command,
+        // and its recurring measurements gathered: once its last line is
+        // taken, they are its file's line set, which the scheduler takes as
+        // one (SchedulerCommand::Crontab), as eperd reads a crontab anew
+        // (eperd.c:513-645). Each keeps its command text (cl_Shell), which
+        // with its interval and start time makes it the same line in the
+        // controller's next push.
+        let mut crontab_lines = std::collections::VecDeque::new();
+        let mut crontab: Option<starla_scheduler::Crontab> = None;
+
         loop {
-            // Use timeout to batch log messages
-            let cmd = tokio::select! {
-                cmd = cmd_rx.recv() => cmd,
-                _ = tokio::time::sleep(LOG_BATCH_INTERVAL) => {
-                    // Timeout - log any accumulated counts
+            let (cmd, shell) = if let Some((cmd, shell)) = crontab_lines.pop_front() {
+                (cmd, Some(shell))
+            } else {
+                if let Some(crontab) = crontab.take() {
+                    let send = scheduler_tx_cmd.send(SchedulerCommand::Crontab(crontab));
+                    if let Err(e) = send.await {
+                        scheduler_send_failed(&scheduler_cancel_cmd, e);
+                        break;
+                    }
+                }
+
+                // Use timeout to batch log messages
+                let cmd = tokio::select! {
+                    cmd = cmd_rx.recv() => cmd,
+                    _ = tokio::time::sleep(LOG_BATCH_INTERVAL) => {
+                        // Timeout - log any accumulated counts
+                        log_scheduled_summary(&mut scheduled_counts);
+                        last_log_time = std::time::Instant::now();
+                        continue;
+                    }
+                };
+
+                let Some(cmd) = cmd else {
+                    // Channel closed - log final counts
                     log_scheduled_summary(&mut scheduled_counts);
-                    last_log_time = std::time::Instant::now();
+                    break;
+                };
+
+                if let TelnetCommand::Crontab(spec) = cmd {
+                    debug!("Crontab {}: {} CRONLINEs", spec.dir, spec.lines.len());
+                    crontab_lines.extend(spec.lines.into_iter().map(|line| {
+                        let shell = line.shell().to_string();
+                        (line.command, shell)
+                    }));
+                    crontab = Some(starla_scheduler::Crontab {
+                        file: spec.dir,
+                        lines: Vec::new(),
+                    });
                     continue;
                 }
-            };
-
-            let Some(cmd) = cmd else {
-                // Channel closed - log final counts
-                log_scheduled_summary(&mut scheduled_counts);
-                break;
+                (cmd, None)
             };
 
             // Check if scheduler has been cancelled
@@ -541,7 +578,17 @@ async fn main() -> Result<()> {
                         spec: $measurement_spec,
                     };
                     if is_recurring {
-                        scheduler_tx_cmd.send(SchedulerCommand::Schedule(job)).await
+                        match (&mut crontab, &shell) {
+                            // A crontab's line: one of its file's line set
+                            (Some(crontab), Some(shell)) => {
+                                crontab.lines.push(starla_scheduler::CrontabLine {
+                                    command: shell.clone(),
+                                    job,
+                                });
+                                Ok(())
+                            }
+                            _ => scheduler_tx_cmd.send(SchedulerCommand::Schedule(job)).await,
+                        }
                     } else {
                         scheduler_tx_cmd
                             .send(SchedulerCommand::ExecuteNow(job))
@@ -721,6 +768,10 @@ async fn main() -> Result<()> {
                     // A ONEOFF inside a ONEOFF: the parser makes none.
                     Ok(())
                 }
+                TelnetCommand::Crontab(_) => {
+                    // A crontab inside a crontab: its lines are CRONLINEs.
+                    Ok(())
+                }
                 TelnetCommand::Status => {
                     debug!("Status request received");
                     Ok(())
@@ -730,8 +781,8 @@ async fn main() -> Result<()> {
                     scheduler_tx_cmd.send(SchedulerCommand::Stop(msm_id)).await
                 }
                 TelnetCommand::Ignored(_) => {
-                    // Known commands that we don't need to handle (CRONTAB, internal Atlas
-                    // commands)
+                    // Known commands that we don't need to handle (condmv,
+                    // internal Atlas commands)
                     Ok(())
                 }
                 TelnetCommand::Unknown(s) => {
@@ -741,15 +792,7 @@ async fn main() -> Result<()> {
             };
 
             if let Err(e) = result {
-                // Channel closed likely means shutdown is in progress
-                if scheduler_cancel_cmd.is_cancelled() {
-                    debug!("Scheduler cancelled during command send");
-                } else {
-                    warn!(
-                        "Failed to send command to scheduler: {} (scheduler may be shutting down)",
-                        e
-                    );
-                }
+                scheduler_send_failed(&scheduler_cancel_cmd, e);
                 break;
             }
         }
@@ -1479,6 +1522,19 @@ async fn main() -> Result<()> {
     info!("Shutting down probe");
 
     Ok(())
+}
+
+/// A command the scheduler did not take: its channel is closed, which likely
+/// means shutdown is in progress.
+fn scheduler_send_failed(cancel: &CancellationToken, e: impl std::fmt::Display) {
+    if cancel.is_cancelled() {
+        debug!("Scheduler cancelled during command send");
+    } else {
+        warn!(
+            "Failed to send command to scheduler: {} (scheduler may be shutting down)",
+            e
+        );
+    }
 }
 
 /// The measurement id of a ONEOFF's command, whose result is the one-off's.

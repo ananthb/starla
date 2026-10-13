@@ -81,6 +81,44 @@ fn handed_on(commands: &[TelnetCommand]) -> String {
     format!("{commands:?}")
 }
 
+/// A CRONLINE as a crontab holds it: what add_to_crontab writes (the line
+/// after "CRONLINE "), and how parse_command reads it.
+fn crontab_line(line: &str) -> CrontabLine {
+    let command = parse_command(line);
+    assert!(!matches!(command, TelnetCommand::Unknown(_)), "{command:?}");
+    CrontabLine {
+        line: line.strip_prefix("CRONLINE ").unwrap().to_string(),
+        command,
+    }
+}
+
+/// The crontab of `/home/atlas/crons/<dir>` with `lines`, as it is handed
+/// on once it has ended: its directory rebased onto the spool directory.
+fn crontab(dir: &str, lines: &[&str]) -> TelnetCommand {
+    TelnetCommand::Crontab(CrontabSpec {
+        dir: format!("/var/spool/ripe-atlas/crons/{dir}"),
+        lines: lines.iter().map(|l| crontab_line(l)).collect(),
+    })
+}
+
+/// The crontabs of a request's lines (CRONTAB lines, each followed by its
+/// CRONLINEs), each whole.
+fn crontabs<S: AsRef<str>>(lines: &[S]) -> Vec<TelnetCommand> {
+    let mut crontabs = Vec::new();
+    for line in lines {
+        let line = line.as_ref();
+        if let Some(dir) = line.strip_prefix("CRONTAB /home/atlas/crons/") {
+            crontabs.push(crontab(dir, &[]));
+        } else {
+            let Some(TelnetCommand::Crontab(spec)) = crontabs.last_mut() else {
+                panic!("{line}");
+            };
+            spec.lines.push(crontab_line(line));
+        }
+    }
+    crontabs
+}
+
 /// The request shape of the twin's first batch (scenario
 /// enodia-2026-10-13T0131, from the enodia journal): three CRONTABs and
 /// their CRONLINEs, 201 lines.
@@ -118,22 +156,129 @@ async fn a_crontab_request_gets_one_ok_on_its_empty_line() {
     let (out, commands) = session(&request).await;
     assert_eq!(out, "\r\nPassword: OK\r\n\r\n");
 
-    // Every line is still handed on as it comes, in order, as parse_command
-    // reads it (the CRONTABs too)
-    assert_eq!(commands.len(), 201);
-    assert_eq!(handed_on(&commands), parsed(&lines));
+    // Each crontab is handed on whole once a line ends it: main and 2 by
+    // the next CRONTAB, 7 by the empty line (end_crontab,
+    // telnetd.c:1535-1600)
+    assert_eq!(commands.len(), 3);
+    assert_eq!(handed_on(&commands), handed_on(&crontabs(&lines)));
 
     // No empty line, no OK: the request has not ended (Starla used to skip
-    // the empty line and answer every other one).
+    // the empty line and answer every other one). Crontab 7 is still open
+    // when the session ends, and the reference closes it and never installs
+    // it (kill_session, :1302-1311); Starla handed on its lines as they came,
+    // and acted on a crontab the controller never finished.
     let request = format!("{}{}\n", login(), lines.join("\n"));
     let (out, commands) = session(&request).await;
     assert_eq!(out, "\r\nPassword: ");
-    // Not the reference's behaviour, a known difference: the reference
-    // installs a crontab only when a line other than a CRONLINE ends it
-    // (end_crontab, telnetd.c:1535-1600), and drops one still open when the
-    // session ends (kill_session, :1302-1311). Starla has handed on every
-    // line as it came, and keeps doing so.
-    assert_eq!(handed_on(&commands), parsed(&lines));
+    assert_eq!(handed_on(&commands), handed_on(&crontabs(&lines)[..2]));
+}
+
+#[tokio::test]
+async fn a_crontab_ends_at_the_first_line_that_is_not_a_cronline() {
+    // DO_CRONTAB ends the crontab at any other line, which is then the next
+    // command (telnetd.c:1241-1256): the next CRONTAB, a ONEOFF, the empty
+    // line, anything. The spool directory's own spelling is the same
+    // directory (rebased_validated_filename).
+    let a = "CRONLINE 60 12 2000000000 UNIFORM 20 httppost --post-dir /home/atlas/data/out http://127.0.0.1:8080/?PROBE_ID=1018212";
+    let b = "CRONLINE 600 1791854199 1791854229 UNIFORM 3 evtdig -4 --resolv --qbuf --type 1 --class 1 --query jd.com. -A \"30002\" -O /home/atlas/data/new/7";
+    let c = "CRONLINE 60 1 2000000000 UNIFORM 14 condmv -A \"RESULT 9901 ongoing\" /home/atlas/data/new/2 /home/atlas/data/out/2";
+    let oneoff = "ONEOFF /home/atlas/crons/oneoff evping -A \"1\" 192.0.2.1";
+    let request = format!(
+        "{}CRONTAB /home/atlas/crons/main\n{a}\nCRONTAB /home/atlas/crons/7\n{b}\n{oneoff}\n\
+         CRONTAB /var/spool/ripe-atlas/crons/2\n{c}\n\n",
+        login()
+    );
+    let (out, commands) = session(&request).await;
+    assert_eq!(out, "\r\nPassword: OK\r\n\r\n");
+    let mut wanted = vec![crontab("main", &[a]), crontab("7", &[b])];
+    wanted.push(parse_command(oneoff));
+    wanted.push(crontab("2", &[c]));
+    assert_eq!(handed_on(&commands), handed_on(&wanted));
+
+    // A crontab with no CRONLINE is an empty file: it is handed on, and
+    // empties its directory's crontab. A bad command ends one too.
+    let request = format!(
+        "{}CRONTAB /home/atlas/crons/7\nCRONTAB /home/atlas/crons/2\nFOO\n\n",
+        login()
+    );
+    let (out, commands) = session(&request).await;
+    assert_eq!(out, "\r\nPassword: BAD_COMMAND\r\n\r\nOK\r\n\r\n");
+    assert_eq!(
+        handed_on(&commands),
+        handed_on(&[crontab("7", &[]), crontab("2", &[])])
+    );
+}
+
+#[tokio::test]
+async fn a_crontab_its_session_leaves_open_is_never_handed_on() {
+    // The connection goes mid-crontab: kill_session closes root.new, which
+    // is never renamed into place (telnetd.c:1302-1311)
+    let b = "CRONLINE 600 1791854199 1791854229 UNIFORM 3 evtdig -4 --resolv --qbuf --type 1 --class 1 --query jd.com. -A \"30002\" -O /home/atlas/data/new/7";
+    let request = format!("{}CRONTAB /home/atlas/crons/7\n{b}\n", login());
+    let (out, commands) = session(&request).await;
+    assert_eq!(out, "\r\nPassword: ");
+    assert!(commands.is_empty(), "{commands:?}");
+
+    // A newer session takes over mid-crontab: the old one's is closed and
+    // never installed (:1112-1122), and the newer session's crontab is
+    // the one handed on.
+    let probe = Arc::new(tokio::sync::RwLock::new(Some(SID.to_string())));
+    let mut first = open(&probe);
+    authenticate(&mut first).await;
+    first
+        .controller
+        .write_all(format!("CRONTAB /home/atlas/crons/7\n{b}\n").as_bytes())
+        .await
+        .unwrap();
+    // Wait until the first session has taken the CRONLINE in: it logs each
+    // line before it takes it, and takes a CRONLINE without an await
+    Journal::open();
+    let taken = format!("Telnet state Authenticated, received: '{b}'");
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !Journal::has(&taken) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the first session takes its CRONLINE");
+    Journal::close();
+    let mut second = open(&probe);
+    authenticate(&mut second).await;
+    first.handler.await.unwrap().unwrap();
+    assert!(first.commands.recv().await.is_none(), "nothing handed on");
+
+    let c = "CRONLINE 240 17 2000000000 UNIFORM 3 evping -6 -c 3 -A \"1002\" 2001:7fd::1";
+    second
+        .controller
+        .write_all(format!("CRONTAB /home/atlas/crons/7\n{c}\n\n").as_bytes())
+        .await
+        .unwrap();
+    let command = second.commands.recv().await.unwrap();
+    assert_eq!(handed_on(&[command]), handed_on(&[crontab("7", &[c])]));
+}
+
+#[tokio::test]
+async fn a_crontab_is_read_no_further_than_its_cron_daemon_reads() {
+    // eperd and perd read at most 65534 lines of a crontab (maxLines,
+    // eperd.c:542-549, perd.c:458-474): the lines after those are not taken
+    let line = |i: usize| format!("CRONLINE 60 {i} 2000000000 NONE 0 evping -A \"{i}\" 192.0.2.1");
+    let mut request = format!("{}CRONTAB /home/atlas/crons/7\n", login());
+    for i in 0..CRONTAB_MAX_LINES + 2 {
+        request += &line(i);
+        request.push('\n');
+    }
+    request.push('\n');
+    let (out, commands) = session(&request).await;
+    assert_eq!(out, "\r\nPassword: OK\r\n\r\n");
+    let [TelnetCommand::Crontab(crontab)] = &commands[..] else {
+        panic!("{} commands", commands.len());
+    };
+    assert_eq!(crontab.lines.len(), CRONTAB_MAX_LINES);
+    let last = line(CRONTAB_MAX_LINES - 1);
+    assert_eq!(
+        crontab.lines.last().unwrap().line,
+        last.strip_prefix("CRONLINE ").unwrap()
+    );
 }
 
 #[tokio::test]
@@ -154,7 +299,7 @@ async fn crlf_line_ends_make_no_extra_empty_line() {
     let request = format!("C_TO_P_TEST_V1\r\n{SID}\r\n{}\r\n\r\n", lines.join("\r\n"));
     let (out, commands) = session(&request).await;
     assert_eq!(out, "\r\nPassword: OK\r\n\r\n");
-    assert_eq!(handed_on(&commands), parsed(&lines));
+    assert_eq!(handed_on(&commands), handed_on(&crontabs(&lines)));
 
     // As getline_2pty, a bare '\r' ends a line too, and a telnet client's
     // CR NUL is one line end.
@@ -327,9 +472,9 @@ async fn reboot_and_reload_as_on_a_software_probe() {
 async fn starla_own_commands_get_bad_command_and_are_taken() {
     // The reference knows none of STATUS, STOP and JSON: each is a
     // BAD_COMMAND (telnetd.c:1223-1227), and one inside a CRONTAB ends it
-    // first (:1241-1256), so a CRONLINE after it is a BAD_COMMAND too.
-    // Starla answers as the reference does (it used to answer OK), and still
-    // takes its own.
+    // first (:1241-1256) — the crontab, empty, is installed — so a CRONLINE
+    // after it is a BAD_COMMAND too. Starla answers as the reference does
+    // (it used to answer OK), and still takes its own.
     let json = r#"{"type":"ping","msm_id":1001,"target":"192.0.2.1"}"#;
     let request = format!(
         "{}CRONTAB /home/atlas/crons/main\nstatus\n\
@@ -342,15 +487,9 @@ async fn starla_own_commands_get_bad_command_and_are_taken() {
         out,
         format!("\r\nPassword: {}OK\r\n\r\n", BAD_COMMAND.repeat(6))
     );
-    assert_eq!(
-        handed_on(&commands),
-        parsed(&[
-            "CRONTAB /home/atlas/crons/main",
-            "status",
-            "STOP 1001",
-            json
-        ])
-    );
+    let mut wanted = vec![crontab("main", &[])];
+    wanted.extend(["status", "STOP 1001", json].map(parse_command));
+    assert_eq!(handed_on(&commands), handed_on(&wanted));
 }
 
 /// A session the test drives line by line, left open
@@ -455,6 +594,17 @@ impl Journal {
 
     fn close() -> Vec<String> {
         JOURNAL.take().expect("a journal is open")
+    }
+
+    /// Whether the open journal has `entry` yet
+    fn has(entry: &str) -> bool {
+        JOURNAL.with_borrow(|journal| {
+            journal
+                .as_ref()
+                .expect("a journal is open")
+                .iter()
+                .any(|e| e == entry)
+        })
     }
 }
 

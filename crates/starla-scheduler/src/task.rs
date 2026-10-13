@@ -44,21 +44,41 @@ impl ScheduledTask {
         spread: u64,
         job: MeasurementJob,
     ) -> Self {
-        let cycle = first_cycle_after(now, start_time, interval);
-        Self {
+        let mut task = Self {
             id,
             interval,
             start_time,
             end_time,
             spread,
             job,
-            cycle,
-            next_run: slot(start_time, interval, cycle) + uniform_offset(spread),
-        }
+            cycle: 0,
+            next_run: 0,
+        };
+        task.draw_cycle(now);
+        task
     }
 
     pub fn is_due(&self, now: i64) -> bool {
         self.next_run <= now && (self.end_time == 0 || self.next_run <= self.end_time)
+    }
+
+    /// A crontab repeats this line, with `end_time`. Insert() takes the end
+    /// time and re-arms the line's timer for the time it had,
+    /// set_timeout(oldLine, 0) (eperd.c:815-824): the line keeps its cycle
+    /// and offset. Except a line that had stopped — its next run past its
+    /// old end time, where RunJob returned without arming its timer again
+    /// (eperd.c:1313-1317) — whose next run is now more than 10 s past: the
+    /// re-armed timer fires at once, and RunJob, finding the time more than
+    /// 10 s from nexttime, runs nothing and draws the first cycle after now
+    /// (set_timeout(line, 1), eperd.c:1268-1310). Such a line does not run
+    /// between slots.
+    pub(crate) fn take_end_time(&mut self, end_time: i64, now: i64) {
+        let had_stopped = self.end_time != 0 && self.next_run > self.end_time;
+        self.end_time = end_time;
+        self.job.end_time = end_time;
+        if had_stopped && now > self.next_run + TIME_SLACK {
+            self.draw_cycle(now);
+        }
     }
 
     /// Move to the next cycle after a run; if that slot has already passed
@@ -77,7 +97,19 @@ impl ScheduledTask {
     pub fn is_expired(&self, now: i64) -> bool {
         self.end_time > 0 && now > self.end_time
     }
+
+    /// eperd's set_timeout(line, 1) (eperd.c:744-753): the first cycle
+    /// after `now`, its offset drawn afresh (do_distr, :489-511).
+    fn draw_cycle(&mut self, now: i64) {
+        self.cycle = first_cycle_after(now, self.start_time, self.interval);
+        self.next_run =
+            slot(self.start_time, self.interval, self.cycle) + uniform_offset(self.spread);
+    }
 }
+
+/// How far from its time RunJob still runs a line (eperd.c:1268): further,
+/// the time is "inconsistent", and the line's cycle is drawn again.
+const TIME_SLACK: i64 = 10;
 
 fn unix_now() -> i64 {
     SystemTime::now()
