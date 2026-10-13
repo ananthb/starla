@@ -28,6 +28,12 @@ pub enum TelnetCommand {
     /// Schedule a host-telemetry report (buddyinfo / rptaddrs).
     /// Not a measurement — produces a synthesized RESULT line each interval.
     HostTelemetry(HostTelemetrySpec),
+    /// A measurement from a ONEOFF line: telnetd queues it for eooqd
+    /// (telnetd.c do_oneoff, 1615-1690), which runs it once and posts its
+    /// result on its own, with `&SRC=oneoff`
+    Oneoff(Box<TelnetCommand>),
+    /// An httppost CRONLINE: when and where the probe posts its results
+    Httppost(HttppostSpec),
     /// Status query
     Status,
     /// Stop a running measurement
@@ -58,6 +64,27 @@ pub struct HostTelemetrySpec {
     pub msm_id: Option<u32>,
     /// buddyinfo's lowmem threshold (KB) — recorded but not acted on.
     pub lowmem: Option<u32>,
+}
+
+/// An httppost CRONLINE, with the options of networking/httppost.c that
+/// matter to Starla, which posts from its queues rather than spool files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HttppostSpec {
+    pub interval: u64,
+    /// The cycles' phase: perd runs cycle k at start_time + k * interval
+    pub start_time: i64,
+    pub end_time: i64,
+    /// UNIFORM spread in seconds (0 for NONE)
+    pub spread: u32,
+    /// The one URL, e.g. `http://127.0.0.1:8080/?PROBE_ID=…&SESSION_ID=…`
+    pub url: String,
+    /// `--post-dir`: the results go in the body (the main line); without
+    /// it, header and footer only (the `&SRC=timesync` line)
+    pub post_dir: bool,
+    /// `--set-time N`: judge the clock against the answer's Date
+    pub set_time: Option<i64>,
+    /// `--local-time`: send a `Unix-Date:` header
+    pub local_time: bool,
 }
 
 /// Common scheduling fields for recurring measurements
@@ -806,7 +833,12 @@ pub fn parse_command(cmd: &str) -> TelnetCommand {
                 let measurement_parts = &parts[2..]; // skip ONEOFF and path
                 let fake_cronline =
                     format!("CRONLINE 0 0 0 UNIFORM 0 {}", measurement_parts.join(" "));
-                parse_cronline(&fake_cronline)
+                // Marked, so its result is posted as eooqd posts one-offs
+                // and not in the next main upload.
+                match parse_cronline(&fake_cronline) {
+                    unknown @ TelnetCommand::Unknown(_) => unknown,
+                    measurement => TelnetCommand::Oneoff(Box::new(measurement)),
+                }
             } else {
                 TelnetCommand::Unknown(cmd.to_string())
             }
@@ -880,11 +912,16 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
         "buddyinfo" => parse_buddyinfo(measurement_args, interval),
         "rptaddrs" => parse_rptaddrs(measurement_args, interval),
 
-        // Result-upload transport. starla uploads natively via
-        // starla-results::uploader, so this CRONLINE is redundant.
+        // Result upload. Starla posts from its own queues, but on this
+        // line's slots and to its URL, as perd runs it.
         "httppost" => {
-            trace!("Ignoring httppost CRONLINE (uploader handles uploads natively)");
-            TelnetCommand::Ignored(cmd.to_string())
+            let spread = if tokens[4] == "UNIFORM" { spread } else { 0 };
+            parse_httppost(measurement_args, interval, start_time, end_time, spread).unwrap_or_else(
+                |why| {
+                    warn!("Ignoring httppost CRONLINE ({}): {}", why, cmd);
+                    TelnetCommand::Ignored(cmd.to_string())
+                },
+            )
         }
 
         // Hardware-probe spool plumbing: rotates result files between
@@ -914,6 +951,72 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
     };
     set_start_time(&mut parsed, start_time);
     parsed
+}
+
+/// Parse an httppost CRONLINE's arguments as httppost_main's getopt_long
+/// does (httppost.c:44-56, 135-182): `-A`/`-O` and the long options, any
+/// order, `--opt=value` too, and exactly one URL. perd's atlas_run takes an
+/// output redirection (`>> /home/atlas/data/new/main`, or `>>file`) out of
+/// the arguments (perd.c:1031-1060). `--post-file` is refused: Starla has
+/// no such file to post.
+fn parse_httppost(
+    args: &[String],
+    interval: u64,
+    start_time: i64,
+    end_time: i64,
+    spread: u32,
+) -> Result<TelnetCommand, &'static str> {
+    if interval == 0 {
+        // perd.c:494-503
+        return Err("interval 0");
+    }
+    let mut urls = Vec::new();
+    let mut post_dir = false;
+    let mut set_time = None;
+    let mut local_time = false;
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        if let Some(file) = arg.strip_prefix(">>").or_else(|| arg.strip_prefix('>')) {
+            if file.is_empty() {
+                it.next();
+            }
+            continue;
+        }
+        let (name, inline) = match arg.split_once('=') {
+            Some((name, value)) if arg.starts_with("--") => (name, Some(value.to_string())),
+            _ => (arg.as_str(), None),
+        };
+        let mut value = || inline.clone().or_else(|| it.next().cloned());
+        match name {
+            "--delete-file" => {}
+            "--local-time" => local_time = true,
+            "-A" | "-O" | "--maxpostsize" | "--post-header" | "--post-footer" | "--timeout" => {
+                value().ok_or("option without its value")?;
+            }
+            "--post-dir" => {
+                value().ok_or("option without its value")?;
+                post_dir = true;
+            }
+            "--set-time" => {
+                let t = value().ok_or("option without its value")?;
+                set_time = Some(t.parse().map_err(|_| "bad --set-time")?);
+            }
+            "--post-file" => return Err("--post-file: no such file in Starla"),
+            opt if opt.starts_with('-') => return Err("unknown option"),
+            url => urls.push(url.to_string()),
+        }
+    }
+    let [url] = <[String; 1]>::try_from(urls).map_err(|_| "exactly one url expected")?;
+    Ok(TelnetCommand::Httppost(HttppostSpec {
+        interval,
+        start_time,
+        end_time,
+        spread,
+        url,
+        post_dir,
+        set_time,
+        local_time,
+    }))
 }
 
 /// Give a parsed measurement the CRONLINE's start time; the per-tool parsers
@@ -2288,11 +2391,122 @@ mod tests {
 
     #[test]
     fn test_parse_cronline_httppost_ignored() {
-        // httppost shouldn't be dispatched — we upload natively.
+        // A --post-file line posts a file Starla does not have.
         let cmd = parse_command(
             "CRONLINE 60 0 0 UNIFORM 5 httppost -O /home/atlas/data/out/foo --post-file foo",
         );
         assert!(matches!(cmd, TelnetCommand::Ignored(_)));
+        // httppost refuses to run without exactly one URL.
+        for line in [
+            "CRONLINE 60 0 0 UNIFORM 5 httppost --post-dir /home/atlas/data/out",
+            "CRONLINE 60 0 0 UNIFORM 5 httppost http://127.0.0.1:8080/ http://127.0.0.1:8080/",
+            "CRONLINE 60 0 0 UNIFORM 5 httppost --set-time x http://127.0.0.1:8080/",
+            "CRONLINE 0 0 0 UNIFORM 5 httppost http://127.0.0.1:8080/",
+        ] {
+            assert!(
+                matches!(parse_command(line), TelnetCommand::Ignored(_)),
+                "{line}"
+            );
+        }
+    }
+
+    const TWIN_SESSION: &str = "b6c053a85ee60b777fa64503f459764141780eea4c80d096c75cb2300531a15d";
+
+    /// Session 2 of enodia's 2026-10-13 journal, as the twin replayed it.
+    #[test]
+    fn the_controllers_httppost_lines_parse() {
+        let main = format!(
+            "CRONLINE 60 12 2000000000 UNIFORM 20 httppost -A 9015 --set-time 2 --delete-file \
+             --maxpostsize 9000000 --post-header /home/atlas/status/p_to_c_report_header \
+             --post-dir /home/atlas/data/out --post-footer /home/atlas/status/con_session_id.txt \
+             -O /home/atlas/data/new/main_sent.vol \
+             http://127.0.0.1:8080/?PROBE_ID=1018212&SESSION_ID={TWIN_SESSION} >> \
+             /home/atlas/data/new/main"
+        );
+        let TelnetCommand::Httppost(spec) = parse_command(&main) else {
+            panic!("{main}");
+        };
+        assert_eq!(
+            spec,
+            HttppostSpec {
+                interval: 60,
+                start_time: 12,
+                end_time: 2_000_000_000,
+                spread: 20,
+                url: format!("http://127.0.0.1:8080/?PROBE_ID=1018212&SESSION_ID={TWIN_SESSION}"),
+                post_dir: true,
+                set_time: Some(2),
+                local_time: false,
+            }
+        );
+
+        let timesync = format!(
+            "CRONLINE 900 312 2000000000 UNIFORM 20 httppost -A 9015 --set-time 2 \
+             --delete-file --maxpostsize 9000000 --post-header \
+             /home/atlas/status/p_to_c_report_header --post-footer \
+             /home/atlas/status/con_session_id.txt -O /home/atlas/data/new/main_sent.vol \
+             http://127.0.0.1:8080/?PROBE_ID=1018212&SESSION_ID={TWIN_SESSION}&SRC=timesync \
+             >> /home/atlas/data/new/main"
+        );
+        let TelnetCommand::Httppost(spec) = parse_command(&timesync) else {
+            panic!("{timesync}");
+        };
+        assert_eq!(
+            (spec.interval, spec.start_time, spec.spread),
+            (900, 312, 20)
+        );
+        assert!(!spec.post_dir, "header and footer only");
+        assert!(spec.url.ends_with("&SRC=timesync"));
+
+        // NONE has no spread; --opt=value and --local-time as getopt takes
+        // them; a redirection anywhere, as perd's atlas_run takes it.
+        let cmd = parse_command(
+            "CRONLINE 60 12 2000000000 NONE 20 httppost --set-time=3 >>/home/atlas/data/new/main \
+             --local-time > /home/atlas/data/new/x --post-dir=/home/atlas/data/out \
+             http://127.0.0.1:8080/?PROBE_ID=1",
+        );
+        let TelnetCommand::Httppost(spec) = cmd else {
+            panic!("{cmd:?}");
+        };
+        assert_eq!(spec.spread, 0);
+        assert_eq!(spec.set_time, Some(3));
+        assert!(spec.local_time && spec.post_dir);
+        assert_eq!(spec.url, "http://127.0.0.1:8080/?PROBE_ID=1");
+    }
+
+    /// The twin's ONEOFFs: marked, the measurement inside parsed as before.
+    #[test]
+    fn a_oneoff_line_is_marked() {
+        let cmd = parse_command(
+            r#"ONEOFF /home/atlas/crons/oneoff evping -6 -c 3 -s 48 -i 1000 -A "222024177" 2a06:fb00:1::1:1"#,
+        );
+        let TelnetCommand::Oneoff(inner) = cmd else {
+            panic!("{cmd:?}");
+        };
+        let TelnetCommand::Ping(spec) = *inner else {
+            panic!("{inner:?}");
+        };
+        assert_eq!(spec.msm_id, 222_024_177);
+        assert_eq!(spec.schedule.interval, 0);
+
+        let cmd = parse_command(
+            r#"ONEOFF /home/atlas/crons/oneoff evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "222017431" google.com"#,
+        );
+        let TelnetCommand::Oneoff(inner) = cmd else {
+            panic!("{cmd:?}");
+        };
+        assert!(matches!(*inner, TelnetCommand::Traceroute(_)), "{inner:?}");
+        // A recurring CRONLINE is not one.
+        assert!(matches!(
+            parse_command(
+                r#"CRONLINE 240 274 1770761451 UNIFORM 3 evping -4 -c 3 -A "1001" 193.0.14.129"#
+            ),
+            TelnetCommand::Ping(_)
+        ));
+        assert!(matches!(
+            parse_command("ONEOFF /home/atlas/crons/oneoff nosuchtool x"),
+            TelnetCommand::Unknown(_)
+        ));
     }
 
     #[test]

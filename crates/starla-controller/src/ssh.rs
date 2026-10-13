@@ -833,8 +833,8 @@ impl SshConnection {
             .channel_open_direct_tcpip(
                 remote_host,
                 remote_port as u32,
-                "127.0.0.1", // originator address (us)
-                0,           // originator port (unused)
+                "127.0.0.1",
+                ephemeral_port() as u32,
             )
             .await?;
 
@@ -930,8 +930,10 @@ impl SshConnection {
                                 session_guard.channel_open_direct_tcpip(
                                     "127.0.0.1",
                                     remote_port,
-                                    "127.0.0.1",
-                                    0,
+                                    // The forwarded connection's own end,
+                                    // as ssh -L names it.
+                                    peer_addr.ip().to_string(),
+                                    peer_addr.port() as u32,
                                 ),
                             )
                             .await;
@@ -1111,6 +1113,72 @@ impl SshConnection {
     /// Get the port we're connected to
     pub fn port(&self) -> u16 {
         self.port
+    }
+}
+
+/// The originator port of an upload's direct-tcpip channel. The reference
+/// posts through `ssh -L 8080:127.0.0.1:8080`, so its channel names the
+/// local end of httppost's connection: 127.0.0.1 and the port the kernel
+/// gave it. The twin's reference probe named 15 such ports, all even and in
+/// 36898..=58654 (Linux's connect() favours even ports from
+/// ip_local_port_range, 32768-60999 by default); Starla named port 0 on all
+/// 11 of its channels. Starla has no local connection, so it names a port
+/// as the kernel would pick one.
+fn ephemeral_port() -> u16 {
+    let range = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")
+        .ok()
+        .and_then(|s| parse_port_range(&s))
+        .unwrap_or(DEFAULT_EPHEMERAL_PORTS);
+    even_port_in(range)
+}
+
+/// Linux's default ip_local_port_range.
+const DEFAULT_EPHEMERAL_PORTS: (u16, u16) = (32768, 60999);
+
+/// `ip_local_port_range`: two numbers, low and high.
+fn parse_port_range(s: &str) -> Option<(u16, u16)> {
+    let mut it = s.split_whitespace().map(|n| n.parse::<u16>().ok());
+    let (lo, hi) = (it.next()??, it.next()??);
+    (lo > 0 && lo <= hi).then_some((lo, hi))
+}
+
+/// A uniformly chosen even port in `[lo, hi]` (`lo` if there is none).
+fn even_port_in((lo, hi): (u16, u16)) -> u16 {
+    use rand::RngExt;
+    let first = lo + lo % 2;
+    if first > hi {
+        return lo;
+    }
+    first + 2 * rand::rng().random_range(0..=(hi - first) / 2)
+}
+
+#[cfg(test)]
+mod originator_tests {
+    use super::*;
+
+    #[test]
+    fn an_upload_channel_names_a_port_as_the_kernel_picks_one() {
+        assert_eq!(parse_port_range("32768\t60999\n"), Some((32768, 60999)));
+        assert_eq!(parse_port_range("1024 65535"), Some((1024, 65535)));
+        assert_eq!(parse_port_range("60999 32768"), None);
+        assert_eq!(parse_port_range("x"), None);
+
+        let ports: Vec<u16> = (0..2000).map(|_| ephemeral_port()).collect();
+        assert!(ports.iter().all(|&p| p != 0 && p % 2 == 0), "{ports:?}");
+        // On this host's range, or Linux's default where there is none.
+        let (lo, hi) = std::fs::read_to_string("/proc/sys/net/ipv4/ip_local_port_range")
+            .ok()
+            .and_then(|s| parse_port_range(&s))
+            .unwrap_or(DEFAULT_EPHEMERAL_PORTS);
+        assert!(ports.iter().all(|&p| (lo..=hi).contains(&p)), "{ports:?}");
+        let distinct: std::collections::BTreeSet<_> = ports.iter().collect();
+        assert!(distinct.len() > 1500, "a port per connection");
+
+        assert_eq!(even_port_in((32768, 32768)), 32768);
+        assert_eq!(even_port_in((32769, 32769)), 32769);
+        for _ in 0..100 {
+            assert!([32770, 32772].contains(&even_port_in((32769, 32773))));
+        }
     }
 }
 

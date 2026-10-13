@@ -47,6 +47,74 @@ impl Default for UploaderConfig {
     }
 }
 
+/// Where one httppost run posts, and the options that change its request
+/// or what it makes of the answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostTarget {
+    /// `Host:`, the URL's host without port or brackets (httppost.c
+    /// parse_url, 686-790)
+    pub host: String,
+    /// The request target: the URL's path and query
+    pub path: String,
+    /// `--set-time N`: judge the clock against the answer's Date, N seconds
+    /// tolerance. None (or 0) judges nothing (httppost.c:470).
+    pub set_time: Option<i64>,
+    /// `--local-time`: a `Unix-Date:` header (httppost.c:404-408)
+    pub local_time: bool,
+}
+
+/// The tunnel's one endpoint: the reference reaches the controller through
+/// `ssh -L 8080:127.0.0.1:8080`, Starla through a direct-tcpip channel to
+/// the same 127.0.0.1:8080.
+const TUNNEL_PORT: u16 = 8080;
+
+impl PostTarget {
+    /// The target of an httppost URL, split as httppost.c's parse_url splits
+    /// it (686-790): `http://` (any case), the authority up to the first
+    /// `/`, the rest (or `/`) as the path; the host is the authority less a
+    /// `:port` and the brackets of an IPv6 literal. Only the tunnel's port
+    /// is reachable: a URL naming another is refused, not posted to 8080.
+    pub fn from_url(url: &str, set_time: Option<i64>, local_time: bool) -> anyhow::Result<Self> {
+        let rest = url
+            .get(..7)
+            .filter(|p| p.eq_ignore_ascii_case("http://"))
+            .map(|_| &url[7..])
+            .ok_or_else(|| anyhow::anyhow!("bad prefix in url '{url}'"))?;
+        let (hostport, path) = match rest.find('/') {
+            Some(i) => (&rest[..i], &rest[i..]),
+            None => (rest, "/"),
+        };
+        let (host, port) = if let Some(v6) = hostport.strip_prefix('[') {
+            let (h, after) = v6
+                .split_once(']')
+                .filter(|(h, _)| !h.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("malformed IPv6 literal in url '{url}'"))?;
+            (h, after.strip_prefix(':'))
+        } else {
+            match hostport.split_once(':') {
+                Some((h, p)) => (h, Some(p)),
+                None => (hostport, None),
+            }
+        };
+        if host.is_empty() {
+            anyhow::bail!("missing host part in url '{url}'");
+        }
+        let port: u16 = port.unwrap_or("80").parse()?;
+        if port != TUNNEL_PORT {
+            anyhow::bail!("url '{url}' is not the tunnel's port {TUNNEL_PORT}");
+        }
+        if path.contains(['\r', '\n']) || host.contains(['\r', '\n']) {
+            anyhow::bail!("url contains invalid characters");
+        }
+        Ok(Self {
+            host: host.to_string(),
+            path: path.to_string(),
+            set_time: set_time.filter(|&t| t != 0),
+            local_time,
+        })
+    }
+}
+
 /// Uploads measurement results to the controller
 pub struct ResultUploader {
     transport: Box<dyn UploadTransport>,
@@ -94,6 +162,23 @@ impl ResultUploader {
         !self.config.endpoint_path.is_empty()
     }
 
+    /// Starla's own httppost line until the controller's arrives: the
+    /// session's endpoint, `src` appended (`&SRC=timesync`), judged with
+    /// `--set-time 2` as the controller's lines are.
+    pub fn default_target(&self, src: Option<&str>) -> PostTarget {
+        let mut path = self.config.endpoint_path.clone();
+        if let Some(src) = src {
+            path.push_str("&SRC=");
+            path.push_str(src);
+        }
+        PostTarget {
+            host: "127.0.0.1".into(),
+            path,
+            set_time: Some(SET_TIME_TOLERANCE_SECS),
+            local_time: false,
+        }
+    }
+
     /// Upload a batch of results
     ///
     /// Builds the POST body (P_TO_C_REPORT header, RESULT lines, SESSION_ID
@@ -101,6 +186,18 @@ impl ResultUploader {
     /// reads the response.
     pub async fn upload_batch(
         &self,
+        results: &[QueuedResult],
+        session_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.upload_batch_to(&self.default_target(None), results, session_id)
+            .await
+    }
+
+    /// [`upload_batch`](Self::upload_batch) as an httppost line with
+    /// `--post-dir` posts it: to `target`.
+    pub async fn upload_batch_to(
+        &self,
+        target: &PostTarget,
         results: &[QueuedResult],
         session_id: Option<&str>,
     ) -> anyhow::Result<()> {
@@ -148,8 +245,7 @@ impl ResultUploader {
         );
         trace!("Upload body:\n{}", String::from_utf8_lossy(&body));
 
-        let path = self.config.endpoint_path.clone();
-        let sent = self.post(&path, &body, results.len(), start_time).await;
+        let sent = self.post(target, &body, results.len(), start_time).await;
         if sent.is_err() {
             // The caller requeues this batch's results (`requeue_failed`); its
             // telemetry lines go back too, or a failed upload loses them.
@@ -161,6 +257,17 @@ impl ResultUploader {
     /// The controller's 900 s `httppost … &SRC=timesync` line: header and
     /// footer only, so the clock is judged even when nothing else is posted.
     pub async fn post_timesync(&self, session_id: Option<&str>) -> anyhow::Result<()> {
+        self.post_header_only(&self.default_target(Some("timesync")), session_id)
+            .await
+    }
+
+    /// An httppost line without `--post-dir` (the timesync line): its
+    /// `--post-header` and `--post-footer` files only.
+    pub async fn post_header_only(
+        &self,
+        target: &PostTarget,
+        session_id: Option<&str>,
+    ) -> anyhow::Result<()> {
         if !self.has_endpoint() {
             anyhow::bail!("No upload endpoint configured");
         }
@@ -168,15 +275,47 @@ impl ResultUploader {
         if let Some(sid) = session_id {
             body.extend_from_slice(format!("\nSESSION_ID {sid}\n").as_bytes());
         }
-        let path = format!("{}&SRC=timesync", self.config.endpoint_path);
-        self.post(&path, &body, 0, std::time::Instant::now()).await
+        self.post(target, &body, 0, std::time::Instant::now()).await
     }
 
-    /// httppost --set-time 2: compare the answer's Date with our clock. In
+    /// eooqd's post of one-off results (eooqd.c:792-820): `httppost -A 9015
+    /// --delete-file --post-header <P_TO_C_REPORT> --post-dir <ooq out>
+    /// --post-footer <session> -O ooq_sent
+    /// http://127.0.0.1:8080/?PROBE_ID=%d&SESSION_ID=%s&SRC=oneoff`. The URL
+    /// is built from the probe id and the session, not taken from a
+    /// CRONLINE; the body is header, the one-offs' RESULT lines, footer (no
+    /// telemetry, no condmv marker: eooqd's spool is its own); and with no
+    /// `--set-time` the answer's Date is not judged.
+    pub async fn post_oneoff(
+        &self,
+        results: &[QueuedResult],
+        session_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        if !self.has_endpoint() {
+            anyhow::bail!("No upload endpoint configured");
+        }
+        let mut body = b"P_TO_C_REPORT\n".to_vec();
+        for queued in results {
+            let atlas_result =
+                AtlasResult::from_measurement(queued.result.clone(), None).with_lts(queued.lts);
+            body.extend_from_slice(atlas_result.to_result_line().as_bytes());
+        }
+        if let Some(sid) = session_id {
+            body.extend_from_slice(format!("\nSESSION_ID {sid}\n").as_bytes());
+        }
+        let target = PostTarget {
+            set_time: None,
+            ..self.default_target(Some("oneoff"))
+        };
+        self.post(&target, &body, results.len(), std::time::Instant::now())
+            .await
+    }
+
+    /// httppost --set-time N: compare the answer's Date with our clock. In
     /// step and answered within a second: a time sync (lts restarts from 0).
     /// Otherwise a RESULT 9015 line, uploaded with the next batch, as
     /// httppost's stdout goes to data/new/main. Starla never sets the clock.
-    async fn judge_clock(&self, response: &str, rtt: Duration) {
+    async fn judge_clock(&self, response: &str, rtt: Duration, tolerance: i64) {
         let Some(server) = response
             .lines()
             .take_while(|l| !l.is_empty())
@@ -189,7 +328,7 @@ impl ResultUploader {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        match clock_verdict(now, server, rtt.as_secs_f64(), SET_TIME_TOLERANCE_SECS) {
+        match clock_verdict(now, server, rtt.as_secs_f64(), tolerance) {
             ClockVerdict::InSync => self.time_sync.mark_synced(),
             ClockVerdict::NotInSync => {
                 warn!("Clock not in sync with the controller: local {now}, remote {server}");
@@ -217,7 +356,7 @@ impl ResultUploader {
     /// controller's answer. Any error is the whole batch's failure.
     async fn post(
         &self,
-        path: &str,
+        target: &PostTarget,
         body: &[u8],
         count: usize,
         start_time: std::time::Instant,
@@ -229,14 +368,13 @@ impl ResultUploader {
                 anyhow::anyhow!("Transport open timed out after {:?}", self.config.timeout)
             })??;
 
-        // Write HTTP request
-        let request = format!(
-            "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: \
-             application/x-www-form-urlencoded\r\nUser-Agent: httppost for \
-             atlas.ripe.net\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
-            path,
-            body.len(),
-        );
+        let local_time = target.local_time.then(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64
+        });
+        let request = request_head(target, local_time, body.len());
 
         stream.write_all(request.as_bytes()).await?;
         stream.write_all(body).await?;
@@ -296,7 +434,10 @@ impl ResultUploader {
                         debug!("Batch upload successful: {} results", count);
                         self.metrics
                             .record_upload_duration(start_time.elapsed().as_secs_f64());
-                        self.judge_clock(&response_str, start_time.elapsed()).await;
+                        if let Some(tolerance) = target.set_time {
+                            self.judge_clock(&response_str, start_time.elapsed(), tolerance)
+                                .await;
+                        }
                         return Ok(());
                     } else {
                         debug!("Upload rejected: {:?}", resp_body);
@@ -307,7 +448,10 @@ impl ResultUploader {
                 debug!("Batch upload successful (no body): {} results", count);
                 self.metrics
                     .record_upload_duration(start_time.elapsed().as_secs_f64());
-                self.judge_clock(&response_str, start_time.elapsed()).await;
+                if let Some(tolerance) = target.set_time {
+                    self.judge_clock(&response_str, start_time.elapsed(), tolerance)
+                        .await;
+                }
                 return Ok(());
             } else {
                 anyhow::bail!("Upload failed: {}", status_line);
@@ -320,6 +464,24 @@ impl ResultUploader {
 
 /// The controller's crontab runs httppost with `--set-time 2`.
 const SET_TIME_TOLERANCE_SECS: i64 = 2;
+
+/// httppost's request line and headers, in its order (httppost.c:395-417):
+/// Host, Connection, User-Agent, Content-Type, `Unix-Date` with
+/// `--local-time`, Content-Length. The twin's reference probe sent exactly
+/// this on all 15 of its posts; Starla sent Content-Type second and
+/// Connection fourth.
+fn request_head(target: &PostTarget, local_time: Option<i64>, content_length: usize) -> String {
+    let mut head = format!(
+        "POST {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nUser-Agent: httppost for \
+         atlas.ripe.net\r\nContent-Type: application/x-www-form-urlencoded\r\n",
+        target.path, target.host,
+    );
+    if let Some(t) = local_time {
+        head.push_str(&format!("Unix-Date: {t}\r\n"));
+    }
+    head.push_str(&format!("Content-Length: {content_length}\r\n\r\n"));
+    head
+}
 
 #[derive(Debug, PartialEq)]
 enum ClockVerdict {
@@ -601,5 +763,137 @@ mod tests {
         u.upload_batch(&[], Some("s")).await.unwrap();
         let req = seen.recv().await.unwrap();
         assert!(!req.contains("9907"), "no results, no marker: {req}");
+    }
+
+    /// The twin's reference probe, 2026-10-13 (wire-ctrl.jsonl): its
+    /// timesync post, head and body byte for byte.
+    const REF_SESSION: &str = "b6c053a85ee60b777fa64503f459764141780eea4c80d096c75cb2300531a15d";
+
+    #[test]
+    fn the_request_head_is_httpposts_byte_for_byte() {
+        let url = format!(
+            "http://127.0.0.1:8080/?PROBE_ID=1018212&SESSION_ID={REF_SESSION}&SRC=timesync"
+        );
+        let target = PostTarget::from_url(&url, Some(2), false).unwrap();
+        assert_eq!(
+            request_head(&target, None, 91),
+            format!(
+                "POST /?PROBE_ID=1018212&SESSION_ID={REF_SESSION}&SRC=timesync HTTP/1.1\r\n\
+                 Host: 127.0.0.1\r\n\
+                 Connection: close\r\n\
+                 User-Agent: httppost for atlas.ripe.net\r\n\
+                 Content-Type: application/x-www-form-urlencoded\r\n\
+                 Content-Length: 91\r\n\r\n"
+            )
+        );
+        // --local-time: Unix-Date after Content-Type (httppost.c:404-408).
+        let head = request_head(&target, Some(1_791_871_521), 91);
+        assert!(
+            head.contains(
+                "Content-Type: application/x-www-form-urlencoded\r\nUnix-Date: \
+                 1791871521\r\nContent-Length: 91\r\n\r\n"
+            ),
+            "{head}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_upload_goes_out_in_httpposts_header_order() {
+        let (u, _telemetry, mut seen) = uploader("HTTP/1.1 200 \r\n\r\nOK\n");
+        u.upload_batch(&one_result(), Some("s")).await.unwrap();
+        let req = seen.recv().await.unwrap();
+        let (head, body) = req.split_once("\r\n\r\n").unwrap();
+        let names: Vec<&str> = head
+            .lines()
+            .skip(1)
+            .map(|l| l.split_once(':').unwrap().0)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Host",
+                "Connection",
+                "User-Agent",
+                "Content-Type",
+                "Content-Length"
+            ]
+        );
+        assert!(head.ends_with(&format!("Content-Length: {}", body.len())));
+    }
+
+    #[test]
+    fn a_url_splits_as_parse_url_splits_it() {
+        let t = PostTarget::from_url(
+            &format!("http://127.0.0.1:8080/?PROBE_ID=1018212&SESSION_ID={REF_SESSION}"),
+            Some(2),
+            false,
+        )
+        .unwrap();
+        assert_eq!(t.host, "127.0.0.1");
+        assert_eq!(
+            t.path,
+            format!("/?PROBE_ID=1018212&SESSION_ID={REF_SESSION}")
+        );
+        assert_eq!(t.set_time, Some(2));
+
+        let t = PostTarget::from_url("HTTP://[::1]:8080", None, false).unwrap();
+        assert_eq!((t.host.as_str(), t.path.as_str()), ("::1", "/"));
+        let t = PostTarget::from_url("http://localhost:8080/x", Some(0), true).unwrap();
+        assert_eq!(t.host, "localhost");
+        assert_eq!(t.set_time, None, "--set-time 0 judges nothing");
+        assert!(t.local_time);
+
+        for bad in [
+            "https://127.0.0.1:8080/",
+            "http://127.0.0.1/?PROBE_ID=1",
+            "http://127.0.0.1:8081/",
+            "http://:8080/",
+            "http://[]:8080/",
+            "http://127.0.0.1:8080/\r\nX: y",
+        ] {
+            assert!(PostTarget::from_url(bad, None, false).is_err(), "{bad}");
+        }
+    }
+
+    /// eooqd posts one-offs with no --set-time: header, the one-offs, footer,
+    /// to `&SRC=oneoff`, and the answer's Date is not judged.
+    #[tokio::test]
+    async fn a_one_off_post_is_eooqds() {
+        let (tx, mut seen) = tokio::sync::mpsc::unbounded_channel();
+        let telemetry = HostTelemetry::new();
+        let sync = Arc::new(TimeSyncTracker::new());
+        let mut u = ResultUploader::new(
+            Box::new(FakeController {
+                reply: reply_dated(3600),
+                seen: tx,
+            }),
+            UploaderConfig::default(),
+            starla_metrics::MetricsRegistry::new().unwrap(),
+            Arc::clone(&telemetry),
+            Arc::clone(&sync),
+        );
+        u.set_endpoint_path(format!("/?PROBE_ID=1018212&SESSION_ID={REF_SESSION}"))
+            .unwrap();
+        telemetry.push(REPORT.into()).await;
+        let results = one_result();
+        u.post_oneoff(&results, Some(REF_SESSION)).await.unwrap();
+
+        let req = seen.recv().await.unwrap();
+        let (head, body) = req.split_once("\r\n\r\n").unwrap();
+        assert!(
+            head.starts_with(&format!(
+                "POST /?PROBE_ID=1018212&SESSION_ID={REF_SESSION}&SRC=oneoff HTTP/1.1\r\n"
+            )),
+            "{head}"
+        );
+        let line = AtlasResult::from_measurement(results[0].result.clone(), None)
+            .with_lts(-1)
+            .to_result_line();
+        assert_eq!(
+            body,
+            format!("P_TO_C_REPORT\n{line}\nSESSION_ID {REF_SESSION}\n")
+        );
+        assert_eq!(sync.lts(), -1, "an hour off, and not judged");
+        assert_eq!(telemetry.drain().await, [REPORT], "no 9015, report kept");
     }
 }

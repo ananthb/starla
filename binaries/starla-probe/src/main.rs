@@ -433,6 +433,7 @@ async fn main() -> Result<()> {
     let scheduler_tx_cmd = scheduler_tx.clone();
     let scheduler_cancel_cmd = scheduler_cancel.clone();
     let host_telemetry_cmd = result_handler.host_telemetry();
+    let result_handler_cmd = result_handler.clone();
     // THE ADDRESS REPORT IS THE PROBE'S OWN JOB, NOT THE CONTROLLER'S. The
     // reference probe runs `rptaddrs -A 9104` in its main loop, every pass
     // (`bin/ripe-atlas.in`: `rptaddrs …`, then `sleepkick 180`), and RIPE's
@@ -499,6 +500,18 @@ async fn main() -> Result<()> {
             }
 
             debug!("Processing command: {:?}", cmd);
+
+            // A ONEOFF's result is eooqd's: posted on its own, at once, with
+            // `&SRC=oneoff` (eooqd.c:792-820), not in the next main upload.
+            let cmd = match cmd {
+                TelnetCommand::Oneoff(inner) => {
+                    if let Some(msm_id) = oneoff_msm_id(&inner) {
+                        result_handler_cmd.expect_oneoff(msm_id).await;
+                    }
+                    *inner
+                }
+                cmd => cmd,
+            };
 
             // Helper macro to schedule/execute a measurement job.
             // Handles logging, metrics, and recurring vs one-shot dispatch.
@@ -643,6 +656,29 @@ async fn main() -> Result<()> {
                                 .await;
                         }
                     }
+                    Ok(())
+                }
+                TelnetCommand::Httppost(spec) => {
+                    // The controller's upload line: its URL, on perd's slots.
+                    let line = starla_results::HttppostLine {
+                        schedule: starla_results::PostSchedule {
+                            interval: spec.interval,
+                            start_time: spec.start_time,
+                            end_time: spec.end_time,
+                            spread: spec.spread as u64,
+                        },
+                        url: spec.url,
+                        post_dir: spec.post_dir,
+                        set_time: spec.set_time,
+                        local_time: spec.local_time,
+                    };
+                    if let Err(e) = result_handler_cmd.set_httppost_line(line).await {
+                        warn!("Ignoring httppost line: {}", e);
+                    }
+                    Ok(())
+                }
+                TelnetCommand::Oneoff(_) => {
+                    // A ONEOFF inside a ONEOFF: the parser makes none.
                     Ok(())
                 }
                 TelnetCommand::Status => {
@@ -1401,6 +1437,19 @@ async fn main() -> Result<()> {
     info!("Shutting down probe");
 
     Ok(())
+}
+
+/// The measurement id of a ONEOFF's command, whose result is the one-off's.
+fn oneoff_msm_id(cmd: &TelnetCommand) -> Option<u64> {
+    match cmd {
+        TelnetCommand::Ping(s) => Some(s.msm_id),
+        TelnetCommand::Traceroute(s) => Some(s.msm_id),
+        TelnetCommand::Dns(s) => Some(s.msm_id),
+        TelnetCommand::Http(s) => Some(s.msm_id),
+        TelnetCommand::Tls(s) => Some(s.msm_id),
+        TelnetCommand::Ntp(s) => Some(s.msm_id),
+        _ => None,
+    }
 }
 
 /// The reference probe's main-loop period, which is how often it runs

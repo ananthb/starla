@@ -22,6 +22,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 libc = { workspace = true }
+rand = { workspace = true }
 
 [dev-dependencies]
 # Paused time for the upload loop's backoff test (no new crates).
