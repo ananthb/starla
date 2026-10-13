@@ -280,6 +280,10 @@ impl AtlasResult {
         // FullLine: the measurement provided the complete line body
         if let serde_json::Value::String(ref v) = self.result {
             if let Some(body) = v.strip_prefix("__FULLLINE__") {
+                // Traceroute, TLS and NTP write their own envelope with a
+                // placeholder "lts":0; the reference writes get_timesync()
+                // there, which is the lts the result was queued with.
+                let body = body.replacen(LTS_PLACEHOLDER, &format!("\"lts\":{},", self.lts), 1);
                 return format!("RESULT {{ {} }}\n", body);
             }
         }
@@ -408,6 +412,9 @@ impl ResultBundle {
         self.results.is_empty()
     }
 }
+
+/// The lts a full-line measurement writes in its own envelope.
+pub const LTS_PLACEHOLDER: &str = "\"lts\":0,";
 
 #[cfg(test)]
 mod tests {
@@ -597,6 +604,26 @@ mod tests {
         // Must NOT contain the standard envelope fields from AtlasResult
         assert!(!line.contains("\"mver\":"));
         assert!(!line.contains("\"dst_name\":"));
+    }
+
+    /// 2026-10-12: every traceroute, TLS and NTP result from probe 1018212
+    /// said "lts":0 whatever the clock's state.
+    #[test]
+    fn a_full_line_carries_the_lts_it_was_queued_with() {
+        let mut result = make_ping_result();
+        result.data = MeasurementData::FullLine(
+            "\"id\":\"5051\", \"fw\":5120, \"mver\": \"2.6.4\", \"lts\":0, \"time\":1, \"result\": [ { \"hop\":1 } ]"
+                .to_string(),
+        );
+        let line = AtlasResult::from_measurement(result.clone(), None)
+            .with_lts(-1)
+            .to_result_line();
+        assert!(line.contains(", \"lts\":-1, \"time\":1,"), "{line}");
+        let line = AtlasResult::from_measurement(result, None)
+            .with_lts(37)
+            .to_result_line();
+        assert!(line.contains(", \"lts\":37, "), "{line}");
+        assert_eq!(line.matches("\"lts\"").count(), 1, "{line}");
     }
 
     #[test]
