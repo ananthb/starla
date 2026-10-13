@@ -37,6 +37,11 @@ base64 = { workspace = true }
 # evtdig --ttl: IP_RECVTTL / IPV6_RECVHOPLIMIT and recvmsg()'s control messages
 libc = { workspace = true }
 
+# Traceroute's raw sockets: recvmsg ancillary data (IPv6 hop limit and
+# traffic class), CLOCK_MONOTONIC and the IPv6 socket options.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 # Scamper-backed measurement backends. The rscamper crate FFI-links against
 # CAIDA's libscamperfile/libscamperctrl, which are only built on Linux —
 # the source modules are gated on `cfg(target_os = "linux")` to match.

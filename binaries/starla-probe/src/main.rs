@@ -571,13 +571,18 @@ async fn main() -> Result<()> {
                     "traceroute",
                     "traceroute",
                     MeasurementSpec::Traceroute(TracerouteJobSpec {
+                        // A redelivered line keeps its slot and Paris id.
+                        instance: starla_scheduler::job::TracerouteInstance::for_line(
+                            spec.msm_id,
+                            &spec.target,
+                            spec.af,
+                            &spec.opts,
+                            spec.schedule.interval,
+                            spec.schedule.start_time,
+                        ),
                         target: spec.target,
                         af: spec.af,
-                        protocol: spec.protocol,
-                        paris: spec.paris.unwrap_or(0),
-                        first_hop: spec.first_hop,
-                        max_hops: spec.max_hops,
-                        size: spec.size,
+                        opts: spec.opts,
                     })
                 ),
                 TelnetCommand::Dns(spec) => dispatch_measurement!(

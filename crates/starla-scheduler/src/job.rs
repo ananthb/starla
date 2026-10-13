@@ -5,12 +5,8 @@
 
 use starla_common::{MeasurementId, ProbeId};
 use starla_measurements::{
-    http::HttpConfig,
-    ntp::NtpConfig,
-    ping::PingConfig,
-    tls::TlsConfig,
-    traceroute::{TracerouteConfig, TracerouteProtocol},
-    Dns, Http, Measurement, Ntp, Ping, Tls, Traceroute,
+    http::HttpConfig, ntp::NtpConfig, ping::PingConfig, tls::TlsConfig,
+    traceroute::TracerouteConfig, Dns, Http, Measurement, Ntp, Ping, Tls, Traceroute,
 };
 use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -80,15 +76,17 @@ pub struct PingJobSpec {
     pub size: u16,
 }
 
+/// What a traceroute measurement keeps between its runs; the command
+/// handler gets one per delivered line from `TracerouteInstance::for_line`.
+pub use starla_measurements::traceroute::TracerouteInstance;
+
 #[derive(Debug, Clone)]
 pub struct TracerouteJobSpec {
     pub target: String,
     pub af: u8,
-    pub protocol: String,
-    pub paris: u32,
-    pub first_hop: u8,
-    pub max_hops: u8,
-    pub size: u16,
+    pub opts: starla_common::TracerouteOptions,
+    /// The measurement's slot and run count, shared by its runs.
+    pub instance: std::sync::Arc<TracerouteInstance>,
 }
 
 #[derive(Debug, Clone)]
@@ -143,21 +141,12 @@ impl MeasurementJob {
             }
             MeasurementSpec::Traceroute(spec) => {
                 let target = resolve_target(&spec.target, spec.af)?;
-                let protocol = match spec.protocol.to_uppercase().as_str() {
-                    "TCP" => TracerouteProtocol::TCP,
-                    "UDP" => TracerouteProtocol::UDP,
-                    _ => TracerouteProtocol::ICMP,
-                };
                 Ok(Box::new(Traceroute {
                     config: TracerouteConfig {
                         target,
-                        protocol,
-                        first_hop: spec.first_hop,
-                        max_hops: spec.max_hops,
-                        paris: spec.paris as u16,
-                        size: spec.size,
-                        timeout_ms: 5000,
+                        opts: spec.opts.clone(),
                         backend: Default::default(),
+                        instance: spec.instance.clone(),
                     },
                     probe_id,
                     msm_id,

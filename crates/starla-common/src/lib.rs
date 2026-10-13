@@ -13,6 +13,7 @@ pub mod logging;
 pub mod paths;
 pub mod pause;
 pub mod status;
+pub mod traceroute;
 pub mod types;
 
 pub use config::*;
@@ -23,6 +24,7 @@ pub use paths::{
     runtime_dir, set_runtime_dir, set_state_dir, state_dir, status_socket_path, write_probe_id,
 };
 pub use pause::{read_pause_state, write_pause_state, PauseState};
+pub use traceroute::{TracerouteOptions, TracerouteProtocol};
 pub use types::*;
 
 /// Firmware version: must match the reference probe version for controller
