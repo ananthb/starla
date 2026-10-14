@@ -2357,7 +2357,9 @@ mod tests {
             r#"CRONLINE 3600 3751 1794447121 UNIFORM 3 evhttpget -6 -1 --store-headers 1024 -A "13027" -O /home/atlas/data/new/7 http://[2001:67c:2e8:16::c100:68d]"#,
         ) {
             TelnetCommand::Http(s) => s,
-            other => panic!("{other:?}"),
+            // Not `{other:?}`: printing the parsed command trips CodeQL's
+            // rust/cleartext-logging (an evsslgetcert line is sensitive).
+            _ => panic!("unexpected command variant"),
         };
         assert_eq!(spec.msm_id, 13027);
         assert_eq!(spec.url, "http://[2001:67c:2e8:16::c100:68d]");
@@ -2368,7 +2370,9 @@ mod tests {
             r#"CRONLINE 86400 24620 1794447121 UNIFORM 3 evhttpget -4 -0 --user-agent x --timeout 5000 -A "12023" -O /home/atlas/data/new/7 http://www.ripe.net/favicon.ico"#,
         ) {
             TelnetCommand::Http(s) => s,
-            other => panic!("{other:?}"),
+            // Not `{other:?}`: printing the parsed command trips CodeQL's
+            // rust/cleartext-logging (an evsslgetcert line is sensitive).
+            _ => panic!("unexpected command variant"),
         };
         assert_eq!((spec.af, spec.store_headers, spec.http10), (4, 0, true));
         assert_eq!(
