@@ -142,8 +142,8 @@ impl HostTelemetry {
     }
 }
 
-/// The most lines kept pending. Lines are restored on every failed upload, so an
-/// outage must not grow the list without bound. A report every 180 s that
+/// The most lines kept pending. Lines are restored on every failed upload, so
+/// an outage must not grow the list without bound. A report every 180 s that
 /// changes is far below this; when over it, the oldest go first.
 const MAX_PENDING: usize = 64;
 
