@@ -82,9 +82,9 @@ Add `https://github.com/ananthb/hass-addons` as an add-on repository (**Settings
 add-on. See the [add-on
 docs](https://github.com/ananthb/hass-addons/blob/main/starla/DOCS.md).
 
-Una vez iniciado, registra tu sonda en
-[atlas.ripe.net/apply/swprobe](https://atlas.ripe.net/apply/swprobe/) utilizando
-la clave pública de `probe_key.pub` en el directorio de estado.
+After starting, register your probe at
+[atlas.ripe.net/register/swprobe](https://atlas.ripe.net/register/swprobe/)
+using the public key from `probe_key.pub` in the state directory.
 
 Consulta la [guía completa de
 instalación](https://ananthb.github.io/starla/install.html) para ver todas las

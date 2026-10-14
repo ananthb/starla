@@ -67,7 +67,7 @@
       <h2 class="section"><span class="num">1</span>Connection lifecycle</h2>
 
       <h3>Registration</h3>
-      <p>On startup, the probe SSHes to a registration server (e.g. <code>reg03.atlas.ripe.net:443</code>) and runs <code>INIT</code> with probe identification on stdin:</p>
+      <p>On startup, the probe SSHes to a registration server (e.g. <code>reg-05.prod.atlas.ripe.net:443</code>) and runs <code>INIT</code> with probe identification on stdin:</p>
 
       <pre><div class="pre-head"><span class="lang">stdin</span><span>P_TO_R_INIT</span></div><div class="pre-body"><code>P_TO_R_INIT TOKEN_SPECS fluffy 1000 5120 debian/13/x86_64/starla/0.4.0 REASON_FOR_REGISTRATION NEW</code></div></pre>
 
@@ -75,7 +75,7 @@
 
       <pre><div class="pre-head"><span class="lang">stdout</span><span>response</span></div><div class="pre-body"><code>OK CONTROLLER ctr-dub-sw01.atlas.prod.ripe.net 443 ssh-rsa AAAA... REREGISTER 3000 PROBE_ID 1015186</code></div></pre>
 
-      <p>If the probe is not yet registered, the server responds with plain <code>OK</code> (no <code>CONTROLLER</code> line). The probe retries with backoff until approved at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.</p>
+      <p>If the probe is not yet registered, the server responds with plain <code>OK</code> (no <code>CONTROLLER</code> line). The probe retries with backoff until approved at <a href="https://atlas.ripe.net/register/swprobe/">atlas.ripe.net/register/swprobe</a>.</p>
 
       <h3>Controller INIT</h3>
       <p>After receiving the controller assignment, the probe connects to the controller via SSH and sends another <code>INIT</code> (no stdin data this time):</p>
@@ -191,9 +191,7 @@
       <p>RTT 3 decimals. 3 probes per hop. Requires <code>CAP_NET_RAW</code>.</p>
 
       <h3>DNS — <code>evtdig</code></h3>
-      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evtdig [-4|-6|-a] [-t] [-R] [-d] [-n] [-e size] [--qbuf] [--resolv]
-  [--soa NAME | --a NAME | --aaaa NAME | &hellip; | --type N --class N --query NAME | -h | -b | -i | -r]
-  [--retry N] [--timeout ms] [--port N] [-A msm_id] [-O output] server</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evtdig [-4|-6|-a] [-t] [-R] [-d] [-n] [-e size] [--qbuf] [--resolv] [--soa NAME | --a NAME | --aaaa NAME | … | --type N --class N --query NAME | -h | -b | -i | -r] [--retry N] [--timeout ms] [--port N] [-A msm_id] [-O output] server</code></div></pre>
 
       <p>Parsed as <code>eperd/evtdig.c</code> (firmware 5130) parses it, with getopt_long: options in any order, long ones by a unique prefix. The name must end with a dot, and there must be exactly one server unless <code>--resolv</code> is given. A line the reference refuses (an unknown option, no final dot, no server) is refused.</p>
 
@@ -203,7 +201,7 @@
           <tr><td><code>-4</code> / <code>-6</code> / <code>-a</code></td><td>The server's address family: IPv4 (default), IPv6, either</td></tr>
           <tr><td><code>-t</code></td><td>TCP (default UDP); the result adds <code>qt</code></td></tr>
           <tr><td><code>-h</code>, <code>-b</code>, <code>-i</code>, <code>-r</code></td><td><code>hostname.bind</code>, <code>version.bind</code>, <code>id.server</code>, <code>version.server</code>, CH TXT</td></tr>
-          <tr><td><code>--soa NAME</code>, <code>--a NAME</code>, <code>--aaaa NAME</code>, &hellip;</td><td>That type, class IN</td></tr>
+          <tr><td><code>--soa NAME</code>, <code>--a NAME</code>, <code>--aaaa NAME</code>, …</td><td>That type, class IN</td></tr>
           <tr><td><code>--type N</code>, <code>--class N</code>, <code>--query NAME</code></td><td>Numeric type and class (default TXT CH)</td></tr>
           <tr><td><code>-R</code></td><td>Set RD. evtdig never sets it otherwise, <code>--resolv</code> aside</td></tr>
           <tr><td><code>-d</code></td><td>The DO bit</td></tr>
@@ -228,12 +226,7 @@
       </table>
       <p>With <code>--resolv</code> the name is expanded afresh for each resolver. Any other <code>$</code> fails the expansion, which is reported.</p>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine · abuf</span></div><div class="pre-body"><code>RESULT { "id" : "11201" , "fw":5130, "mver": "2.6.4", "time" : 1791871219 , "lts" : 8 ,
-  "dst_addr" : "2001:db8:7769:6e00::20" , "dst_port" : "53" , "af" : 6 ,
-  "src_addr" : "2001:db8:7769:6e00::31" , "proto" : "UDP" ,"result" : { "rt" : 0.649,"size" : 53 ,
-  "abuf" : "sPqEAAABAAEAAAAAB3ZlcnNpb24EYmluZAAAEAADwAwAEAADAAAAAAALCmF0bGFzLXR3aW4=",
-  "ID" : 45306 , "ANCOUNT" : 1 , "QDCOUNT" : 1 , "NSCOUNT" : 0 , "ARCOUNT" : 0,
-  "answers" : [ {"TYPE" : "TXT" , "NAME" : "version.bind" , "RDATA" : [ "atlas-twin" ] } ] } }</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine · abuf</span></div><div class="pre-body"><code>RESULT { "id" : "11201" , "fw":5130, "mver": "2.6.4", "time" : 1791871219 , "lts" : 8 , "dst_addr" : "2001:db8:7769:6e00::20" , "dst_port" : "53" , "af" : 6 , "src_addr" : "2001:db8:7769:6e00::31" , "proto" : "UDP" ,"result" : { "rt" : 0.649,"size" : 53 , "abuf" : "sPqEAAABAAEAAAAAB3ZlcnNpb24EYmluZAAAEAADwAwAEAADAAAAAAALCmF0bGFzLXR3aW4=", "ID" : 45306 , "ANCOUNT" : 1 , "QDCOUNT" : 1 , "NSCOUNT" : 0 , "ARCOUNT" : 0, "answers" : [ {"TYPE" : "TXT" , "NAME" : "version.bind" , "RDATA" : [ "atlas-twin" ] } ] } }</code></div></pre>
 
       <p>The spacing is printReply()'s (<code>"key" : value , </code>), kept as it is (wrapped here). Only the first two answers are decoded, and only TXT and SOA (as <code>TYPE</code>, <code>NAME</code>, <code>TTL</code>, <code>MNAME</code>, <code>RNAME</code>, <code>SERIAL</code>); the rest is in <code>abuf</code>. With <code>--resolv</code> the line carries <code>"time"</code>, <code>"lts"</code> and a <code>"resultset"</code> whose entries add <code>subid</code> and <code>submax</code>.</p>
 
@@ -335,7 +328,7 @@
       <p>The HTTP measurement computed the address family correctly but hardcoded <code>af: 0</code> in the result struct. The controller silently drops results with <code>af:0</code> while returning <code>OK</code>.</p>
 
       <h3>DNS timeouts must be results, not errors</h3>
-      <p>When a DNS query times out (e.g. ISP blocks outbound UDP&nbsp;53), the official probe reports <code>"error" : { "timeout" : 5000}</code> as a valid measurement result. Treating timeouts as execution errors loses them.</p>
+      <p>When a DNS query times out (e.g. ISP blocks outbound UDP 53), the official probe reports <code>"error" : { "timeout" : 5000}</code> as a valid measurement result. Treating timeouts as execution errors loses them.</p>
 
       <h3>Upload rate: 60 seconds, not 10</h3>
       <p>The official <code>httppost</code> runs once per 60 seconds. Uploading more often triggers 429 rate limiting from the controller. The penalty is per-probe (tied to SSH key / probe ID) and persists across reconnections.</p>
@@ -344,7 +337,7 @@
       <p>The controller expects system health data (disk stats, uptime, network interface counters, ongoing status) in every upload batch. Sending only measurement RESULT lines causes persistent 429 rate limiting that survives reconnections and lasts hours.</p>
 
       <h3>DNS template variables</h3>
-      <p>Query names may contain <code>$r</code>, <code>$p</code>, and <code>$t</code> templates (measurement 30001 uses them). <code>$p</code> must be the probe ID registration assigned: the scheduler starts before registration, and until 2026-10-13 Starla asked for <code>0.ripe-tld-experiment.&hellip;</code> where the reference asked for <code>1018212.ripe-tld-experiment.&hellip;</code>.</p>
+      <p>Query names may contain <code>$r</code>, <code>$p</code>, and <code>$t</code> templates (measurement 30001 uses them). <code>$p</code> must be the probe ID registration assigned: the scheduler starts before registration, and until 2026-10-13 Starla asked for <code>0.ripe-tld-experiment.…</code> where the reference asked for <code>1018212.ripe-tld-experiment.…</code>.</p>
     </section>
 
     <hr class="divider">
