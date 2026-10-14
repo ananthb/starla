@@ -1588,6 +1588,8 @@ mod tests {
     /// RIPE's libevent takes an IPv6 zone on a nameserver
     /// (evutil_inet_pton_scope): an interface name or an index. A zone
     /// that is neither drops the line, as does a port of 0.
+    // zone_index uses if_nametoindex, Unix only.
+    #[cfg(unix)]
     #[test]
     fn scoped_nameservers_keep_their_zone() {
         let lo = if cfg!(target_os = "linux") {

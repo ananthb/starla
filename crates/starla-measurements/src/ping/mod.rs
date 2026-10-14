@@ -1566,6 +1566,8 @@ mod tests {
         assert!(kept.start().is_none());
     }
 
+    // strerror's ENETUNREACH text and errno are the Unix ones; Windows differs.
+    #[cfg(unix)]
     #[test]
     fn strerror_is_the_bare_text() {
         let e = std::io::Error::from_raw_os_error(libc_enetunreach());

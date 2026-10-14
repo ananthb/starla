@@ -822,6 +822,8 @@ mod tests {
 
     /// reporterr(TU_CONNECT_ERR), then TU_OUT_OF_ADDRS: report() with the
     /// last error and no src_addr.
+    // The refused text is Linux's "Connection refused"; Windows differs.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_refused_connect_is_reported_with_strerror() {
         let port = {
@@ -999,12 +1001,14 @@ mod tests {
         }
     }
 
-    /// Field for field, in RIPE's order, with RIPE's JSON types.
-    fn assert_shape(ours: &Object, ripe: &Object, body: &str) {
+    /// Field for field, in RIPE's order, with RIPE's JSON types. `_body` is
+    /// kept in the signature for call sites but not printed: the result line
+    /// holds a certificate, which CodeQL flags as cleartext logging.
+    fn assert_shape(ours: &Object, ripe: &Object, _body: &str) {
         let keys = |o: &Object| o.keys().cloned().collect::<Vec<_>>();
-        assert_eq!(keys(ours), keys(ripe), "{body}");
+        assert_eq!(keys(ours), keys(ripe), "key order/name mismatch");
         for (k, v) in ripe {
-            assert_eq!(kind(&ours[k]), kind(v), "{k}: {} against {v}", ours[k]);
+            assert_eq!(kind(&ours[k]), kind(v), "{k}: type mismatch");
         }
     }
 

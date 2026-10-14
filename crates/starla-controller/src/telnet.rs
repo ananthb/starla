@@ -3053,7 +3053,7 @@ mod tests {
             parse_command(r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -V TLS1.2 -A "1" a.example"#);
         assert!(
             matches!(cmd, TelnetCommand::Tls(ref s) if s.target == "a.example"),
-            "{cmd:?}"
+            "not a tls command"
         );
     }
 
