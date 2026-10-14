@@ -2306,7 +2306,7 @@ mod tests {
                 assert_eq!(spec.schedule.stop_time, 1770761451);
                 assert_eq!(spec.spread, Some(3));
             }
-            _ => panic!("Expected Ping command, got {:?}", cmd),
+            _ => panic!("Expected Ping command"),
         }
     }
 
@@ -2363,7 +2363,7 @@ mod tests {
                 assert_eq!(spec.protocol, "UDP");
                 assert_eq!(spec.schedule.interval, 1800);
             }
-            _ => panic!("Expected Traceroute command, got {:?}", cmd),
+            _ => panic!("Expected Traceroute command"),
         }
     }
 
@@ -2387,7 +2387,9 @@ mod tests {
     fn dns(line: &str) -> DnsSpec {
         match parse_command(line) {
             TelnetCommand::Dns(spec) => spec,
-            other => panic!("{line}: {other:?}"),
+            // Not `{other:?}`: printing the parsed command trips CodeQL's
+            // rust/cleartext-logging (an evsslgetcert line is sensitive).
+            _ => panic!("not a dns command: {line}"),
         }
     }
 
@@ -2568,7 +2570,7 @@ mod tests {
                 assert_eq!(spec.method, "GET");
                 assert_eq!(spec.af, 4);
             }
-            _ => panic!("Expected Http command, got {:?}", cmd),
+            _ => panic!("Expected Http command"),
         }
     }
 
@@ -2584,7 +2586,7 @@ mod tests {
                 assert_eq!(spec.port, 443);
                 assert_eq!(spec.af, 4);
             }
-            _ => panic!("Expected Tls command, got {:?}", cmd),
+            _ => panic!("Expected Tls command"),
         }
     }
 
@@ -2615,7 +2617,7 @@ mod tests {
                 assert_eq!(spec.packets, 5);
                 assert_eq!(spec.af, 4);
             }
-            _ => panic!("Expected Ntp command, got {:?}", cmd),
+            _ => panic!("Expected Ntp command"),
         }
     }
 
@@ -2629,7 +2631,7 @@ mod tests {
                 assert_eq!(spec.lowmem, Some(2048));
                 assert_eq!(spec.msm_id, None);
             }
-            _ => panic!("Expected HostTelemetry/Buddyinfo, got {:?}", cmd),
+            _ => panic!("Expected HostTelemetry/Buddyinfo"),
         }
     }
 
@@ -2644,7 +2646,7 @@ mod tests {
                 assert_eq!(spec.interval, 14400);
                 assert_eq!(spec.msm_id, Some(9104));
             }
-            _ => panic!("Expected HostTelemetry/Rptaddrs, got {:?}", cmd),
+            _ => panic!("Expected HostTelemetry/Rptaddrs"),
         }
     }
 
@@ -2725,7 +2727,7 @@ mod tests {
              http://127.0.0.1:8080/?PROBE_ID=1",
         );
         let TelnetCommand::Httppost(spec) = cmd else {
-            panic!("{cmd:?}");
+            panic!("not the expected command");
         };
         assert_eq!(spec.spread, 0);
         assert_eq!(spec.set_time, Some(3));
@@ -2740,10 +2742,10 @@ mod tests {
             r#"ONEOFF /home/atlas/crons/oneoff evping -6 -c 3 -s 48 -i 1000 -A "222024177" 2a06:fb00:1::1:1"#,
         );
         let TelnetCommand::Oneoff(inner) = cmd else {
-            panic!("{cmd:?}");
+            panic!("not the expected command");
         };
         let TelnetCommand::Ping(spec) = *inner else {
-            panic!("{inner:?}");
+            panic!("oneoff is not a ping");
         };
         assert_eq!(spec.msm_id, 222_024_177);
         assert_eq!(spec.schedule.interval, 0);
@@ -2752,9 +2754,12 @@ mod tests {
             r#"ONEOFF /home/atlas/crons/oneoff evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "222017431" google.com"#,
         );
         let TelnetCommand::Oneoff(inner) = cmd else {
-            panic!("{cmd:?}");
+            panic!("not the expected command");
         };
-        assert!(matches!(*inner, TelnetCommand::Traceroute(_)), "{inner:?}");
+        assert!(
+            matches!(*inner, TelnetCommand::Traceroute(_)),
+            "not a traceroute"
+        );
         // A recurring CRONLINE is not one.
         assert!(matches!(
             parse_command(

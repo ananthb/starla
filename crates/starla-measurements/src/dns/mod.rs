@@ -1347,6 +1347,8 @@ mod tests {
     /// reply arrived with, as `"ttl"` between the addresses and "proto"
     /// (printReply(), evtdig.c:3810), not in "result" where the
     /// documentation puts it. Without `--ttl`, or over TCP, there is none.
+    // The hop limit arrives via IP_RECVTTL/IPV6_RECVHOPLIMIT cmsg, Unix only.
+    #[cfg(unix)]
     #[tokio::test]
     async fn ttl_reports_the_hop_limit_of_the_reply() {
         for (bind, family) in [("127.0.0.1:0", 4u8), ("[::1]:0", 6)] {
@@ -1742,7 +1744,10 @@ mod tests {
 
     /// The same across real runs: a TCP server that answered and then went
     /// away is reported with the source of the run that reached it, and
-    /// `--ttl`'s TTL stays after a timeout.
+    /// `--ttl`'s TTL stays after a timeout. Unix only: the carry is the cmsg
+    /// hop limit, and the refused text `"Connection refused"` is Linux's (the
+    /// carry half also uses the Unix-only TTL path further down).
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_query_that_fails_early_reports_what_the_one_before_left() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
