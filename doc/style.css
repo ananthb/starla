@@ -718,7 +718,8 @@ hr.divider {
   background: radial-gradient(130% 130% at 30% -10%, var(--paper-2), var(--paper) 68%);
   box-shadow: var(--shadow);
 }
-.viz-stage { position: relative; height: 430px; }
+.viz-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: stretch; }
+.viz-stage { position: relative; height: 430px; min-width: 0; }
 .viz-canvas { position: absolute; inset: 0; }
 .viz-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
 
@@ -733,16 +734,12 @@ hr.divider {
 .viz-fallback text { fill: var(--ink); font-family: var(--mono); font-size: 11px; }
 .viz-fallback .fb-arrow { stroke: var(--rule-strong); stroke-width: 1.5; fill: none; }
 
-/* the dashboard: results arriving from the controller */
+/* the dashboard: results arriving from the controller, beside the globe */
 .viz-panel {
-  position: absolute; top: 14px; right: 14px;
-  width: min(300px, 46%);
-  border: 1px solid var(--rule-strong);
-  border-radius: 10px;
-  background: color-mix(in oklab, var(--paper) 88%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  overflow: hidden;
+  display: flex; flex-direction: column;
+  border-left: 1px solid var(--rule);
+  background: color-mix(in oklab, var(--paper) 92%, var(--paper-2));
+  min-width: 0;
   font-family: var(--mono);
   font-size: 12px;
 }
@@ -762,11 +759,11 @@ hr.divider {
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 .viz-panel-sub { margin-left: auto; }
-.viz-rows { list-style: none; margin: 0; padding: 5px 0; min-height: 116px; }
+.viz-rows { list-style: none; margin: 0; padding: 5px 0; flex: 1; min-height: 0; overflow: hidden; }
 .viz-row {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px;
-  align-items: baseline; padding: 5px 10px; color: var(--ink-2);
-  animation: vizRowIn .38s ease both;
+  align-items: baseline; padding: 6px 12px; color: var(--ink-2);
+  animation: vizRowIn .5s ease both;
 }
 .viz-row .id { color: var(--ink-mute); }
 .viz-row .place { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -774,8 +771,8 @@ hr.divider {
 @keyframes vizRowIn { from { opacity: 0; transform: translateY(-7px); } to { opacity: 1; transform: none; } }
 .viz-panel-foot { padding: 7px 10px; border-top: 1px solid var(--rule); color: var(--ink-mute); font-size: 10.5px; }
 
-/* narration over the globe */
-.viz-steps { position: absolute; left: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; font-family: var(--mono); font-size: 11px; }
+/* narration, a row under the globe */
+.viz-steps { display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 12px 16px; border-top: 1px solid var(--rule); font-family: var(--mono); font-size: 11px; }
 .viz-step { display: flex; align-items: center; gap: 8px; color: var(--ink-mute); transition: color .3s; }
 .viz-step b {
   display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 999px;
@@ -807,10 +804,15 @@ hr.divider {
 .lg-ctrl { background: #ffd27a; }
 .viz-caption { margin-top: 12px; color: var(--ink-mute); font-size: 13px; }
 
-@media (max-width: 720px) {
-  .viz-stage { height: 470px; }
-  .viz-panel { position: static; width: auto; margin: 12px; margin-bottom: 0; }
-  .viz-steps { position: static; flex-direction: row; flex-wrap: wrap; padding: 12px 14px 0; }
+@media (max-width: 760px) {
+  .viz-body { grid-template-columns: 1fr; }
+  .viz-stage { height: 300px; }
+  .viz-panel { border-left: none; border-top: 1px solid var(--rule); }
+  .viz-rows { flex: none; min-height: 132px; overflow: visible; }
+}
+@media (max-width: 520px) {
+  .viz-stage { height: 260px; }
+  .viz-steps { gap: 6px 14px; }
   .viz-legend { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
