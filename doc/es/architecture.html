@@ -124,7 +124,7 @@
       <h2 class="section"><span class="num">06</span>Result upload</h2>
       <p>The result handler periodically drains the queue and uploads batches via the <code>UploadTransport</code> trait. In production, this opens SSH <code>direct-tcpip</code> channels and writes raw HTTP/1.1:</p>
 
-      <pre><div class="pre-head"><span class="lang">http</span><span>POST · over SSH channel</span></div><div class="pre-body"><code>POST /?PROBE_ID=12345&amp;SESSION_ID=abc HTTP/1.1 Content-Type: application/x-www-form-urlencoded P_TO_C_REPORT RESULT { <span class="s">"id"</span>:<span class="s">"1001"</span>, <span class="s">"fw"</span>:5120, ... } RESULT { <span class="s">"id"</span>:<span class="s">"1002"</span>, <span class="s">"fw"</span>:5120, ... } SESSION_ID abc</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">http</span><span>POST · over SSH channel</span></div><div class="pre-body"><code>POST /?PROBE_ID=12345&amp;SESSION_ID=abc HTTP/1.1 Content-Type: application/x-www-form-urlencoded P_TO_C_REPORT RESULT { <span class="s">"id"</span>:<span class="s">"1001"</span>, <span class="s">"fw"</span>:5130, ... } RESULT { <span class="s">"id"</span>:<span class="s">"1002"</span>, <span class="s">"fw"</span>:5130, ... } SESSION_ID abc</code></div></pre>
 
       <p>Failed uploads are re-queued with exponential backoff. Results older than one hour or with more than five failed attempts are dropped.</p>
     </section>
