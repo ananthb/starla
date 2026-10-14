@@ -558,9 +558,23 @@ async fn main() -> Result<()> {
                     "ping",
                     "ping",
                     MeasurementSpec::Ping(PingJobSpec {
+                        // A redelivered line keeps what its runs left.
+                        kept: starla_scheduler::job::PingKept::for_line(
+                            starla_scheduler::job::PingLine {
+                                msm_id: spec.msm_id,
+                                target: spec.target.clone(),
+                                af: spec.af,
+                                packets: spec.packets,
+                                packet_interval: spec.packet_interval,
+                                size: spec.size,
+                                interval: spec.schedule.interval,
+                                start_time: spec.schedule.start_time,
+                            }
+                        ),
                         target: spec.target,
                         af: spec.af,
                         packets: spec.packets,
+                        packet_interval: spec.packet_interval,
                         size: spec.size,
                     })
                 ),
@@ -571,13 +585,18 @@ async fn main() -> Result<()> {
                     "traceroute",
                     "traceroute",
                     MeasurementSpec::Traceroute(TracerouteJobSpec {
+                        // A redelivered line keeps its slot and Paris id.
+                        instance: starla_scheduler::job::TracerouteInstance::for_line(
+                            spec.msm_id,
+                            &spec.target,
+                            spec.af,
+                            &spec.opts,
+                            spec.schedule.interval,
+                            spec.schedule.start_time,
+                        ),
                         target: spec.target,
                         af: spec.af,
-                        protocol: spec.protocol,
-                        paris: spec.paris.unwrap_or(0),
-                        first_hop: spec.first_hop,
-                        max_hops: spec.max_hops,
-                        size: spec.size,
+                        opts: spec.opts,
                     })
                 ),
                 TelnetCommand::Dns(spec) => dispatch_measurement!(

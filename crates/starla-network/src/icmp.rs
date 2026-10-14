@@ -2,17 +2,17 @@
 //!
 //! Provides utilities for constructing and parsing ICMPv4 and ICMPv6 packets.
 
-use pnet::packet::icmp::{
+use pnet_packet::icmp::{
     checksum, destination_unreachable::DestinationUnreachablePacket, echo_reply::EchoReplyPacket,
     echo_request::MutableEchoRequestPacket, time_exceeded::TimeExceededPacket, IcmpCode,
     IcmpPacket, IcmpTypes,
 };
-use pnet::packet::icmpv6::{
+use pnet_packet::icmpv6::{
     echo_reply::EchoReplyPacket as EchoReplyPacketV6,
     echo_request::MutableEchoRequestPacket as MutableEchoRequestPacketV6, Icmpv6Code, Icmpv6Packet,
     Icmpv6Types,
 };
-use pnet::packet::Packet;
+use pnet_packet::Packet;
 use std::io;
 
 /// Construct an ICMPv4 Echo Request packet
@@ -73,6 +73,21 @@ pub fn build_icmpv6_echo_request(
     // calculate it including the pseudo-header.
 
     Ok(packet.packet().len())
+}
+
+/// Write the ICMPv6 checksum of `packet`, an ICMPv6 message, into it: the
+/// one's complement sum over the message and the pseudo-header of the IPv6
+/// packet that carries it from `src` to `dst` (RFC 4443 2.3, RFC 8200 8.1).
+/// A unix kernel fills it in for its ICMPv6 sockets (RFC 3542 3.1); a
+/// Windows raw socket is given it, as Microsoft's raw ping sample computes
+/// it, so the requests leave with it whether the stack fills it in or not.
+pub fn set_icmpv6_checksum(packet: &mut [u8], src: std::net::Ipv6Addr, dst: std::net::Ipv6Addr) {
+    let Some(message) = Icmpv6Packet::new(packet) else {
+        return;
+    };
+    // the checksum word itself is skipped
+    let sum = pnet_packet::icmpv6::checksum(&message, &src, &dst);
+    packet[2..4].copy_from_slice(&sum.to_be_bytes());
 }
 
 /// Result of parsing an ICMP response
@@ -181,6 +196,42 @@ mod tests {
                 sequence: 1
             })
         );
+    }
+
+    /// The sum over the pseudo-header and the message, checksum included,
+    /// is all ones: the receiver's check (RFC 1071).
+    #[test]
+    fn icmpv6_checksums_verify() {
+        use std::net::Ipv6Addr;
+        let src: Ipv6Addr = "2001:db8::31".parse().unwrap();
+        let dst: Ipv6Addr = "2001:7fd::1".parse().unwrap();
+        let mut packet = [0u8; 40];
+        let len = build_icmpv6_echo_request(&mut packet, 0x1234, 7, &[0xa5; 32]).unwrap();
+        let packet = &mut packet[..len];
+        packet[2..4].copy_from_slice(&[0xde, 0xad]); // stale: overwritten
+        set_icmpv6_checksum(packet, src, dst);
+        let mut words: Vec<u8> = Vec::new();
+        words.extend_from_slice(&src.octets());
+        words.extend_from_slice(&dst.octets());
+        words.extend_from_slice(&(len as u32).to_be_bytes());
+        words.extend_from_slice(&[0, 0, 0, 58]);
+        words.extend_from_slice(packet);
+        let mut sum: u32 = words
+            .chunks(2)
+            .map(|w| u32::from(u16::from_be_bytes([w[0], *w.get(1).unwrap_or(&0)])))
+            .sum();
+        while sum > 0xffff {
+            sum = (sum & 0xffff) + (sum >> 16);
+        }
+        assert_eq!(sum, 0xffff);
+        // another source: another checksum
+        let mut other = packet.to_vec();
+        set_icmpv6_checksum(&mut other, "2001:db8::32".parse().unwrap(), dst);
+        assert_ne!(other[2..4], packet[2..4]);
+        // too short to be a message: left alone
+        let mut short = [1u8, 2, 3];
+        set_icmpv6_checksum(&mut short, src, dst);
+        assert_eq!(short, [1, 2, 3]);
     }
 
     #[test]

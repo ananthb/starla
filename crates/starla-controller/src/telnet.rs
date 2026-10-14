@@ -117,11 +117,8 @@ pub struct TracerouteSpec {
     pub msm_id: u64,
     pub target: String,
     pub af: u8,
-    pub protocol: String, // ICMP, UDP, TCP
-    pub paris: Option<u32>,
-    pub first_hop: u8,
-    pub max_hops: u8,
-    pub size: u16,
+    /// evtraceroute's options: -I/-U/-T, -c, -f, -m, -S, -a, -w, -z, …
+    pub opts: starla_common::TracerouteOptions,
     pub spread: Option<u32>,
     pub schedule: ScheduleSpec,
 }
@@ -248,7 +245,9 @@ pub struct TlsSpec {
     pub msm_id: u64,
     pub target: String,
     pub port: u16,
+    /// `-4`/`-6`; 0 for neither (evsslgetcert resolves either family)
     pub af: u8,
+    /// `-h`: the server_name to send; evsslgetcert sends none without it
     pub hostname: Option<String>,
     pub spread: Option<u32>,
     pub schedule: ScheduleSpec,
@@ -1182,13 +1181,26 @@ fn tokenize_cronline(cmd: &str) -> Vec<String> {
     tokens
 }
 
-/// Parse evping command arguments
+/// Parse evping command arguments as ping_init does (ping.c:1262-1281,
+/// 1347-1350). PING_OPT_STRING is "!46eprc:s:A:B:O:i:I:R:W:": -c, -s, -A,
+/// -B, -O, -i, -I, -R and -W take a value, -4, -6, -e, -p and -r do not.
+/// The family is IPv6 unless -4 is given, and -s is 0 without one: the
+/// least data, 32 bytes (see starla_measurements::ping::data_len).
 ///
-/// Usage: evping [-4|-6] [-c count] [-s size] [-A msm_id] [-O output] target
+/// -e is read and not followed: with it ping_init looks the name up once,
+/// with libc, and takes no measurement if that fails or the address is
+/// refused, and every line then has "ttr":0.000000 (ping.c:1352-1384).
+/// The controller sends no -e (none of the twin's evping lines of
+/// 2026-10-13 has it); only the probe's own SOS ping, msm 9017, does
+/// (bin/ripe-atlas.in), which belongs to registration.
+///
+/// Usage: evping [-4|-6] [-c count] [-s size] [-i interval] [-A msm_id] [-O
+/// output] target
 fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
-    let mut af: u8 = 4;
+    let mut v4 = false;
     let mut count: u32 = 3;
-    let mut size: u16 = 64;
+    let mut size: u16 = 0;
+    let mut packet_interval: u32 = 1000;
     let mut msm_id: u64 = 0;
     let mut target = String::new();
 
@@ -1196,40 +1208,20 @@ fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> T
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
-            "-4" => af = 4,
-            "-6" => af = 6,
-            "-c" => {
-                if i + 1 < args.len() {
-                    count = args[i + 1].parse().unwrap_or(3);
-                    i += 1;
+            "-4" => v4 = true,
+            "-6" | "-e" | "-p" | "-r" => {}
+            "-c" | "-s" | "-A" | "-i" | "-B" | "-O" | "-I" | "-R" | "-W" => {
+                let value = args.get(i + 1).map(String::as_str).unwrap_or("");
+                match arg.as_str() {
+                    "-c" => count = value.parse().unwrap_or(3),
+                    "-s" => size = value.parse().unwrap_or(0),
+                    "-A" => msm_id = value.parse().unwrap_or(0),
+                    "-i" => packet_interval = value.parse().unwrap_or(1000),
+                    // -B bundle, -O output file, -I interface, -R/-W
+                    // fuzzing files
+                    _ => {}
                 }
-            }
-            "-s" => {
-                if i + 1 < args.len() {
-                    size = args[i + 1].parse().unwrap_or(64);
-                    i += 1;
-                }
-            }
-            "-A" => {
-                if i + 1 < args.len() {
-                    msm_id = args[i + 1].parse().unwrap_or(0);
-                    i += 1;
-                }
-            }
-            "-O" => {
-                // Output path - skip it
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "-I" => {
-                // Interval between packets - skip for now
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "-R" => {
-                // Resolve flag - skip
+                i += 1;
             }
             _ if !arg.starts_with('-') => {
                 // This is the target
@@ -1241,6 +1233,8 @@ fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> T
         }
         i += 1;
     }
+    // ping.c:1347-1350: -4 wins, whatever else is given
+    let af: u8 = if v4 { 4 } else { 6 };
 
     if target.is_empty() {
         warn!("evping: no target specified");
@@ -1263,7 +1257,7 @@ fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> T
         af,
         packets: count,
         size,
-        packet_interval: 1000, // Default 1 second between packets
+        packet_interval,
         spread: Some(spread),
         schedule: ScheduleSpec {
             interval,
@@ -1273,106 +1267,156 @@ fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> T
     })
 }
 
-/// Parse evtraceroute command arguments
+/// Parse evtraceroute command arguments as traceroute_init does
+/// (probe-busybox/eperd/traceroute.c:4203-4466). TRACEROUTE_OPT_STRING is
+/// "!46IUFrTa:b:c:f:g:i:m:p:t:w:z:A:B:O:S:H:D:R:W:": -4 -6 -I -U -F -r -T
+/// are flags, the rest take a value, and getopt's rules hold (flags may be
+/// bundled, a value may be attached, options may follow the target).
+/// Exactly one target; -a -b -c -f -g -m -t -w -z -S -H -D are
+/// non-negative numbers ("+"), and -4 with -6, an unknown option, a bad
+/// number or -S over 4096 refuse the measurement, as traceroute_init
+/// returns NULL for them. The family is IPv4 unless -6 is given.
 ///
-/// Usage: evtraceroute [-4|-6] [-I|-U|-T] [-a attempts] [-c count] [-w timeout]
-/// [-f first_hop]        [-m max_hops] [-p paris] [-S size] [-A msm_id] [-O
-/// output] target
+/// Usage: evtraceroute [-4|-6] [-I|-U|-T] [-F] [-a paris_mod] [-b paris_base]
+/// [-c count] [-f first_hop] [-g gap_limit] [-i interface] [-m max_hops]
+/// [-p port] [-t tos] [-w timeout_ms] [-z dup_timeout_ms] [-A msm_id]
+/// [-B bundle] [-O output] [-S size] [-H hbh_size] [-D dest_size] target
+///
+/// -a is parismod, 16 without one, -b parisbase, 0 without one, and -p the
+/// destination port (traceroute.c:4247-4248, 4259-4262), not a Paris id:
+/// Starla read -p as the paris_id (RIPE stored "paris_id":80 for -p 80,
+/// starla-25603345.json) and dropped -a.
 fn parse_evtraceroute(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
-    let mut af: u8 = 4;
-    let mut protocol = "ICMP".to_string();
-    let mut first_hop: u8 = 1;
-    let mut max_hops: u8 = 32;
-    let mut paris: Option<u32> = None;
+    let refuse = |why: &str| {
+        warn!("evtraceroute: {}, not scheduled: {:?}", why, args);
+        TelnetCommand::Unknown(format!("evtraceroute {:?}", args))
+    };
+    let mut opts = starla_common::TracerouteOptions::default();
+    let (mut v4, mut v6, mut icmp, mut tcp) = (false, false, false, false);
     let mut msm_id: u64 = 0;
-    let mut target = String::new();
-    let mut size: u16 = 40;
+    let mut targets: Vec<&String> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
-        match arg.as_str() {
-            "-4" => af = 4,
-            "-6" => af = 6,
-            "-I" => protocol = "ICMP".to_string(),
-            "-U" => protocol = "UDP".to_string(),
-            "-T" => protocol = "TCP".to_string(),
-            "-a" => {
-                // Number of attempts per hop - skip for now
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "-c" => {
-                // Count/packets per hop - skip for now
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "-w" => {
-                // Timeout - skip for now
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            "-f" => {
-                if i + 1 < args.len() {
-                    first_hop = args[i + 1].parse().unwrap_or(1);
-                    i += 1;
-                }
-            }
-            "-m" => {
-                if i + 1 < args.len() {
-                    max_hops = args[i + 1].parse().unwrap_or(32);
-                    i += 1;
-                }
-            }
-            "-p" => {
-                if i + 1 < args.len() {
-                    paris = Some(args[i + 1].parse().unwrap_or(0));
-                    i += 1;
-                }
-            }
-            "-s" | "-S" => {
-                if i + 1 < args.len() {
-                    size = args[i + 1].parse().unwrap_or(40);
-                    i += 1;
-                }
-            }
-            "-A" => {
-                if i + 1 < args.len() {
-                    msm_id = args[i + 1].parse().unwrap_or(0);
-                    i += 1;
-                }
-            }
-            "-O" => {
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            _ if !arg.starts_with('-') => {
-                target = arg.clone();
+        i += 1;
+        let flags = match arg.strip_prefix('-') {
+            Some(f) if !f.is_empty() && arg != "--" => f,
+            _ if arg == "--" => {
+                targets.extend(&args[i..]);
+                break;
             }
             _ => {
-                debug!("evtraceroute: ignoring unknown option {}", arg);
+                targets.push(arg);
+                continue;
+            }
+        };
+        for (at, c) in flags.char_indices() {
+            match c {
+                '4' => v4 = true,
+                '6' => v6 = true,
+                'I' => icmp = true,
+                'T' => tcp = true,
+                'F' => opts.dont_fragment = true,
+                // -U is the default; -r (delayed name lookup) is always on.
+                'U' | 'r' => {}
+                'a' | 'b' | 'c' | 'f' | 'g' | 'i' | 'm' | 'p' | 't' | 'w' | 'z' | 'A' | 'B'
+                | 'O' | 'S' | 'H' | 'D' | 'R' | 'W' => {
+                    let rest = &flags[at + c.len_utf8()..];
+                    let value = if !rest.is_empty() {
+                        rest.to_string()
+                    } else if i < args.len() {
+                        i += 1;
+                        args[i - 1].clone()
+                    } else {
+                        return refuse(&format!("-{} without a value", c));
+                    };
+                    // getopt32's "+": xatoi_positive.
+                    let num = || value.parse::<u32>().ok().filter(|n| *n <= i32::MAX as u32);
+                    let Some(n) = (match c {
+                        'i' | 'p' | 'A' | 'B' | 'O' | 'R' | 'W' => Some(0),
+                        _ => num(),
+                    }) else {
+                        return refuse(&format!("bad number for -{}: {}", c, value));
+                    };
+                    // eperd keeps most of these in unsigned chars and
+                    // shorts: the same truncation.
+                    match c {
+                        'a' => opts.paris_mod = n as u8,
+                        'b' => opts.paris_base = n as u8,
+                        'c' => opts.count = n as u8,
+                        'f' => opts.first_hop = n as u8,
+                        'g' => opts.gap_limit = n as u8,
+                        'm' => opts.max_hops = n as u8,
+                        't' => opts.tos = n,
+                        'w' => opts.timeout_ms = n,
+                        'z' => opts.dup_timeout_ms = n,
+                        'S' => {
+                            if n > starla_common::TracerouteOptions::MAX_SIZE as u32 {
+                                return refuse("max. packet size too big");
+                            }
+                            opts.size = n as u16;
+                        }
+                        'H' => opts.hbh_opt_size = n as u16,
+                        'D' => opts.dest_opt_size = n as u16,
+                        'i' => opts.interface = Some(value),
+                        // traceroute_init keeps -p as a string (its own
+                        // check, 4349-4357, only runs without delayed name
+                        // lookup, which is always on: 4278-4280); the run
+                        // hands it to evdns_getaddrinfo as the service
+                        // (4971), where a number from 0 to 65535 is the
+                        // port, 0 included. Anything else would be a
+                        // service name from /etc/services or, failing
+                        // that, a "name resolution failed" result; the
+                        // controller only sends numbers, and Starla
+                        // refuses the rest here.
+                        'p' => match value.parse::<u16>() {
+                            Ok(port) => opts.dest_port = port,
+                            _ => return refuse(&format!("bad port {}", value)),
+                        },
+                        'A' => match value.parse() {
+                            Ok(id) => msm_id = id,
+                            Err(_) => return refuse(&format!("bad atlas ID '{}'", value)),
+                        },
+                        'B' => {
+                            if !value.bytes().all(|b| b.is_ascii_digit()) {
+                                return refuse(&format!("bad bundle ID '{}'", value));
+                            }
+                            opts.bundle = Some(value);
+                        }
+                        // -O output file, -R/-W fuzzing files
+                        _ => {}
+                    }
+                    break;
+                }
+                _ => return refuse(&format!("unknown option -{}", c)),
             }
         }
-        i += 1;
     }
 
-    if target.is_empty() {
-        warn!("evtraceroute: no target specified");
-        return TelnetCommand::Unknown(format!("evtraceroute {:?}", args));
+    if v4 && v6 {
+        return refuse("-4 and -6");
     }
+    // report() calls it ICMP if -I is given, else TCP if -T, else UDP.
+    opts.protocol = if icmp {
+        starla_common::TracerouteProtocol::ICMP
+    } else if tcp {
+        starla_common::TracerouteProtocol::TCP
+    } else {
+        starla_common::TracerouteProtocol::UDP
+    };
+    let target = match targets.as_slice() {
+        [t] => (*t).clone(),
+        _ => return refuse("not exactly one target"),
+    };
+    let af: u8 = if v6 { 6 } else { 4 };
 
     trace!(
-        "Parsed evtraceroute: msm_id={}, target={}, af={}, protocol={}, hops={}-{}, interval={}",
+        "Parsed evtraceroute: msm_id={}, target={}, af={}, opts={:?}, interval={}",
         msm_id,
         target,
         af,
-        protocol,
-        first_hop,
-        max_hops,
+        opts,
         interval
     );
 
@@ -1380,11 +1424,7 @@ fn parse_evtraceroute(args: &[String], interval: u64, end_time: i64, spread: u32
         msm_id,
         target,
         af,
-        protocol,
-        paris,
-        first_hop,
-        max_hops,
-        size,
+        opts,
         spread: Some(spread),
         schedule: ScheduleSpec {
             interval,
@@ -1845,16 +1885,22 @@ fn parse_evhttpget(args: &[String], interval: u64, end_time: i64, spread: u32) -
     })
 }
 
-/// Parse evsslgetcert command arguments
+/// Parse evsslgetcert command arguments as sslgetcert_init() does
+/// (probe-busybox/eperd/sslgetcert.c:816-867, getopt "A:B:h:O:R:V:W:i:p:46").
 ///
-/// Usage: evsslgetcert [-4|-6] [-p port] [-h hostname] [-A msm_id] [-O output]
-/// target
+/// Usage: evsslgetcert [-4|-6] [-p port] [-h server_name] [-A msm_id]
+/// [-O output] hostname
+///
+/// Neither -4 nor -6 is af 0: either family. The server_name is -h's alone —
+/// without it the reference sends none (state->sni is h_arg, :966), so the
+/// hostname is not a default. An unknown option or other than one hostname
+/// makes sslgetcert_init() refuse the line.
 fn parse_evsslgetcert(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
-    let mut af: u8 = 4;
+    let mut af: u8 = 0;
     let mut port: u16 = 443;
     let mut msm_id: u64 = 0;
-    let mut target = String::new();
     let mut hostname: Option<String> = None;
+    let mut targets: Vec<&String> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -1862,44 +1908,35 @@ fn parse_evsslgetcert(args: &[String], interval: u64, end_time: i64, spread: u32
         match arg.as_str() {
             "-4" => af = 4,
             "-6" => af = 6,
-            "-p" => {
-                if i + 1 < args.len() {
-                    port = args[i + 1].parse().unwrap_or(443);
-                    i += 1;
+            // -B bundle, -O output, -R/-W fuzzing files, -V protocol version
+            // (the controller sends none of them but -O), -i interface
+            "-p" | "-A" | "-h" | "-B" | "-O" | "-R" | "-V" | "-W" | "-i" => {
+                let Some(value) = args.get(i + 1) else {
+                    warn!("evsslgetcert: {} needs an argument", arg);
+                    return TelnetCommand::Unknown(format!("evsslgetcert {:?}", args));
+                };
+                match arg.as_str() {
+                    "-p" => port = value.parse().unwrap_or(443),
+                    "-A" => msm_id = value.parse().unwrap_or(0),
+                    "-h" => hostname = Some(value.clone()),
+                    _ => {}
                 }
+                i += 1;
             }
-            "-A" => {
-                if i + 1 < args.len() {
-                    msm_id = args[i + 1].parse().unwrap_or(0);
-                    i += 1;
-                }
-            }
-            "-O" => {
-                if i + 1 < args.len() {
-                    i += 1;
-                }
-            }
-            // Note: Atlas uses -h for hostname (SNI), not -H
-            "-h" | "-H" | "--hostname" => {
-                if i + 1 < args.len() {
-                    hostname = Some(args[i + 1].clone());
-                    i += 1;
-                }
-            }
-            _ if !arg.starts_with('-') => {
-                target = arg.clone();
-            }
+            _ if !arg.starts_with('-') => targets.push(arg),
             _ => {
-                debug!("evsslgetcert: ignoring unknown option {}", arg);
+                warn!("evsslgetcert: bad option {}", arg);
+                return TelnetCommand::Unknown(format!("evsslgetcert {:?}", args));
             }
         }
         i += 1;
     }
 
-    if target.is_empty() {
-        warn!("evsslgetcert: no target specified");
+    let [target] = targets[..] else {
+        warn!("evsslgetcert: exactly one hostname expected");
         return TelnetCommand::Unknown(format!("evsslgetcert {:?}", args));
-    }
+    };
+    let target = target.clone();
 
     trace!(
         "Parsed evsslgetcert: msm_id={}, target={}, hostname={:?}, port={}, af={}, interval={}",
@@ -1913,10 +1950,10 @@ fn parse_evsslgetcert(args: &[String], interval: u64, end_time: i64, spread: u32
 
     TelnetCommand::Tls(TlsSpec {
         msm_id,
-        target: target.clone(),
+        target,
         port,
         af,
-        hostname: hostname.or(Some(target)),
+        hostname,
         spread: Some(spread),
         schedule: ScheduleSpec {
             interval,
@@ -2077,22 +2114,34 @@ fn parse_json_command(spec: &serde_json::Value) -> TelnetCommand {
             schedule,
         }),
 
-        "traceroute" => TelnetCommand::Traceroute(TracerouteSpec {
-            msm_id,
-            target,
-            af,
-            protocol: spec
-                .get("protocol")
-                .and_then(|v| v.as_str())
-                .unwrap_or("ICMP")
-                .to_string(),
-            paris: spec.get("paris").and_then(|v| v.as_u64()).map(|v| v as u32),
-            first_hop: spec.get("first_hop").and_then(|v| v.as_u64()).unwrap_or(1) as u8,
-            max_hops: spec.get("max_hops").and_then(|v| v.as_u64()).unwrap_or(32) as u8,
-            size: spec.get("size").and_then(|v| v.as_u64()).unwrap_or(40) as u16,
-            spread,
-            schedule,
-        }),
+        "traceroute" => {
+            let defaults = starla_common::TracerouteOptions::default();
+            let num =
+                |key: &str, default: u64| spec.get(key).and_then(|v| v.as_u64()).unwrap_or(default);
+            TelnetCommand::Traceroute(TracerouteSpec {
+                msm_id,
+                target,
+                af,
+                opts: starla_common::TracerouteOptions {
+                    protocol: match spec.get("protocol").and_then(|v| v.as_str()) {
+                        Some(p) if p.eq_ignore_ascii_case("ICMP") => {
+                            starla_common::TracerouteProtocol::ICMP
+                        }
+                        Some(p) if p.eq_ignore_ascii_case("TCP") => {
+                            starla_common::TracerouteProtocol::TCP
+                        }
+                        _ => starla_common::TracerouteProtocol::UDP,
+                    },
+                    paris_mod: num("paris", defaults.paris_mod as u64) as u8,
+                    first_hop: num("first_hop", defaults.first_hop as u64) as u8,
+                    max_hops: num("max_hops", defaults.max_hops as u64) as u8,
+                    size: num("size", defaults.size as u64) as u16,
+                    ..defaults
+                },
+                spread,
+                schedule,
+            })
+        }
 
         "dns" => {
             let text = |key: &str, default: &str| {
@@ -2350,6 +2399,52 @@ mod tests {
         }
     }
 
+    /// The twin's evping lines (enodia's controller session of 2026-10-13):
+    /// a name target, the default size (0, sent as 32 data bytes), and
+    /// -i's value taken as the interval, not as a target.
+    #[test]
+    fn evping_reads_its_options_as_ping_init_does() {
+        let spec = |line: &str| match parse_command(line) {
+            TelnetCommand::Ping(spec) => spec,
+            _ => panic!("not a ping command"),
+        };
+        let s = spec(
+            r#"CRONLINE 21600 1384530082 1791883921 UNIFORM 14 evping -6 -c 16 -A "1040114" -O /home/atlas/data/new/7 bits.wikimedia.org"#,
+        );
+        assert_eq!(
+            (s.msm_id, s.target.as_str(), s.af, s.packets, s.size),
+            (1040114, "bits.wikimedia.org", 6, 16, 0)
+        );
+        let s = spec(
+            r#"CRONLINE 240 1737367695 1791883921 UNIFORM 14 evping -6 -c 3 -s 48 -i 1000 -A "86206978" -O /home/atlas/data/new/7 google.com"#,
+        );
+        assert_eq!(
+            (s.target.as_str(), s.size, s.packet_interval),
+            ("google.com", 48, 1000)
+        );
+        let s = spec(
+            r#"CRONLINE 28800 1393596000 1791883921 UNIFORM 14 evping -6 -c 5 -s 1460 -A "1517509" -O /home/atlas/data/new/7 2a01:4f8:110:3169::37:134"#,
+        );
+        assert_eq!((s.size, s.packets), (1460, 5));
+        // IPv6 unless -4 is given, and -4 wins
+        assert_eq!(
+            spec(r#"CRONLINE 240 1 2 UNIFORM 3 evping -c 3 -A "1" www.ripe.net"#).af,
+            6
+        );
+        assert_eq!(
+            spec(r#"CRONLINE 240 1 2 UNIFORM 3 evping -4 -6 -A "1" www.ripe.net"#).af,
+            4
+        );
+        // every value option skips its value
+        let s = spec(
+            r#"CRONLINE 240 1 2 UNIFORM 3 evping -4 -B 77 -I eth0 -R in -W out -i 500 -A "1" -O /home/atlas/data/new/7 193.0.14.129"#,
+        );
+        assert_eq!(
+            (s.target.as_str(), s.packet_interval),
+            ("193.0.14.129", 500)
+        );
+    }
+
     #[test]
     fn test_parse_cronline_evtraceroute_udp() {
         let cmd = parse_command(
@@ -2360,7 +2455,7 @@ mod tests {
                 assert_eq!(spec.msm_id, 5001);
                 assert_eq!(spec.target, "193.0.14.129");
                 assert_eq!(spec.af, 4);
-                assert_eq!(spec.protocol, "UDP");
+                assert_eq!(spec.opts.protocol, starla_common::TracerouteProtocol::UDP);
                 assert_eq!(spec.schedule.interval, 1800);
             }
             _ => panic!("Expected Traceroute command"),
@@ -2376,12 +2471,316 @@ mod tests {
             TelnetCommand::Traceroute(spec) => {
                 assert_eq!(spec.msm_id, 5002);
                 assert_eq!(spec.target, "8.8.8.8");
-                assert_eq!(spec.protocol, "ICMP");
-                assert_eq!(spec.first_hop, 1);
-                assert_eq!(spec.max_hops, 64);
+                assert_eq!(spec.opts.protocol, starla_common::TracerouteProtocol::ICMP);
+                assert_eq!(spec.opts.first_hop, 1);
+                assert_eq!(spec.opts.max_hops, 64);
             }
             _ => panic!("Expected Traceroute command"),
         }
+    }
+
+    fn evtraceroute(line: &str) -> TracerouteSpec {
+        match parse_command(line) {
+            TelnetCommand::Traceroute(spec) => spec,
+            // A ONEOFF arrives wrapped, so its result can be posted on its
+            // own (&SRC=oneoff).
+            TelnetCommand::Oneoff(inner) => match *inner {
+                TelnetCommand::Traceroute(spec) => spec,
+                _ => panic!("oneoff is not a traceroute: {line}"),
+            },
+            _ => panic!("not a traceroute command: {line}"),
+        }
+    }
+
+    /// -a is parismod (16 without one), -b parisbase (0 without one) and
+    /// -p the destination port (traceroute.c:4247-4248, 4259-4262). RIPE's
+    /// built-in 6152 has none of them; its user-defined lines give
+    /// `-a 16 … -p 80` (the twin's 25603345), which Starla reported as
+    /// "paris_id":80 (starla-25603345.json).
+    #[test]
+    fn evtraceroute_paris_is_a_and_b_not_p() {
+        let paris = |line: &str| match parse_command(line) {
+            TelnetCommand::Traceroute(s) => {
+                (s.opts.paris_mod, s.opts.paris_base, s.target, s.opts.size)
+            }
+            _ => panic!("not a traceroute command: {line}"),
+        };
+        assert_eq!(
+            paris(
+                r#"CRONLINE 900 2833 1794447121 UNIFORM 3 evtraceroute -6 -I -c 3 -w 4000 -A "6152" -O /home/atlas/data/new/7 topology6.dyndns.atlas.ripe.net"#
+            ),
+            (16, 0, "topology6.dyndns.atlas.ripe.net".into(), 40)
+        );
+        assert_eq!(
+            paris(
+                r#"CRONLINE 900 1 2000000000 UNIFORM 3 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603345" -O /home/atlas/data/new/7 dyna.wikimedia.org"#
+            ),
+            (16, 0, "dyna.wikimedia.org".into(), 48)
+        );
+        assert_eq!(
+            paris(
+                r#"CRONLINE 900 1 2000000000 UNIFORM 3 evtraceroute -4 -T -a 0 -b 3 -p 443 -A "7" 192.0.2.1"#
+            ),
+            (0, 3, "192.0.2.1".into(), 40)
+        );
+    }
+
+    /// Every evtraceroute the controller gave enodia on 2026-10-13 (the
+    /// twin's scenario enodia-2026-10-13T0131.json), one line per shape,
+    /// read as traceroute_init reads them.
+    #[test]
+    fn evtraceroute_reads_the_controllers_lines_as_traceroute_init_does() {
+        use starla_common::TracerouteProtocol::{ICMP, UDP};
+        let defaults = starla_common::TracerouteOptions::default();
+
+        // The root-server UDP set (6001-6016) and topology6 (6052).
+        let s = evtraceroute(
+            r#"CRONLINE 1800 2634 1949621521 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6001" -O /home/atlas/data/new/7 2001:7fd::1"#,
+        );
+        assert_eq!(
+            (s.msm_id, s.target.as_str(), s.af),
+            (6001, "2001:7fd::1", 6)
+        );
+        assert_eq!(
+            s.opts,
+            starla_common::TracerouteOptions {
+                protocol: UDP,
+                count: 3,
+                timeout_ms: 4000,
+                ..defaults.clone()
+            }
+        );
+        assert_eq!(s.opts.paris_mod, 16, "Paris by default");
+        assert_eq!(s.opts.size, 40);
+        assert_eq!((s.opts.gap_limit, s.opts.dup_timeout_ms), (5, 10));
+        let s = evtraceroute(
+            r#"CRONLINE 900 3292 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6052" -O /home/atlas/data/new/7 topology6.dyndns.atlas.ripe.net"#,
+        );
+        assert_eq!(s.target, "topology6.dyndns.atlas.ripe.net");
+        // 6152: the same over ICMP.
+        let s = evtraceroute(
+            r#"CRONLINE 900 2833 1794447121 UNIFORM 3 evtraceroute -6 -I -c 3 -w 4000 -A "6152" -O /home/atlas/data/new/7 topology6.dyndns.atlas.ripe.net"#,
+        );
+        assert_eq!((s.msm_id, s.opts.protocol), (6152, ICMP));
+
+        // The user-defined sets: -p is the TCP port, not a Paris id (it
+        // was read as paris_id 80); -a is the Paris modulus.
+        let full = starla_common::TracerouteOptions {
+            protocol: ICMP,
+            paris_mod: 16,
+            count: 3,
+            first_hop: 1,
+            max_hops: 32,
+            timeout_ms: 4000,
+            dup_timeout_ms: 10,
+            size: 48,
+            dest_port: 80,
+            dest_opt_size: 0,
+            hbh_opt_size: 0,
+            ..defaults.clone()
+        };
+        let s = evtraceroute(
+            r#"CRONLINE 900 1780657137 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "177421605" -O /home/atlas/data/new/7 www.office.com"#,
+        );
+        assert_eq!(
+            (s.msm_id, s.target.as_str(), s.af),
+            (177421605, "www.office.com", 6)
+        );
+        assert_eq!(s.opts, full);
+        let s = evtraceroute(
+            r#"ONEOFF /home/atlas/crons/oneoff evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "222027444" google.com"#,
+        );
+        assert_eq!((s.msm_id, s.target.as_str()), (222027444, "google.com"));
+        assert_eq!(s.opts, full);
+        let s = evtraceroute(
+            r#"CRONLINE 900 1738762905 1791883921 UNIFORM 14 evtraceroute -6 -U -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "86691235" -O /home/atlas/data/new/7 google.com"#,
+        );
+        assert_eq!(
+            s.opts,
+            starla_common::TracerouteOptions {
+                protocol: UDP,
+                ..full.clone()
+            }
+        );
+        // -a 1: a modulus of one, paris_id 0 every time.
+        let s = evtraceroute(
+            r#"CRONLINE 7200 1591171760 1791883921 UNIFORM 14 evtraceroute -6 -I -a 1 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603532" -O /home/atlas/data/new/7 text-lb.eqsin.wikimedia.org"#,
+        );
+        assert_eq!(s.opts.paris_mod, 1);
+        assert_eq!(s.opts.paris_id(1), Some(0));
+        // The oldest: no -c, -w or -z, -S 40.
+        let s = evtraceroute(
+            r#"CRONLINE 900 1354179265 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -f 1 -m 32 -S 40 -A "1004732" -O /home/atlas/data/new/7 www.google.com"#,
+        );
+        assert_eq!(
+            s.opts,
+            starla_common::TracerouteOptions {
+                protocol: ICMP,
+                ..defaults.clone()
+            }
+        );
+    }
+
+    /// All 38 evtraceroute lines of the twin's scenario
+    /// (enodia-2026-10-13T0131.json), each against its own tokens: nothing
+    /// refused, no value taken for the target, and every option where
+    /// traceroute_init puts it.
+    #[test]
+    fn every_scenario_evtraceroute_line_parses() {
+        const LINES: &[&str] = &[
+            r#"CRONLINE 1800 2634 1949621521 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6001" -O /home/atlas/data/new/7 2001:7fd::1"#,
+            r#"CRONLINE 1800 2717 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6004" -O /home/atlas/data/new/7 2001:500:2f::f"#,
+            r#"CRONLINE 1800 2758 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6005" -O /home/atlas/data/new/7 2001:7fe::53"#,
+            r#"CRONLINE 1800 2795 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6006" -O /home/atlas/data/new/7 2001:dc3::35"#,
+            r#"CRONLINE 1800 2865 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6008" -O /home/atlas/data/new/7 2001:500:9f::42"#,
+            r#"CRONLINE 1800 2906 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6009" -O /home/atlas/data/new/7 2001:503:ba3e::2:30"#,
+            r#"CRONLINE 1800 2922 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6010" -O /home/atlas/data/new/7 2801:1b8:10::b"#,
+            r#"CRONLINE 1800 2921 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6011" -O /home/atlas/data/new/7 2001:500:2::c"#,
+            r#"CRONLINE 1800 2960 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6012" -O /home/atlas/data/new/7 2001:500:2d::d"#,
+            r#"CRONLINE 1800 2959 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6013" -O /home/atlas/data/new/7 2001:500:a8::e"#,
+            r#"CRONLINE 1800 2966 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6014" -O /home/atlas/data/new/7 2001:500:12::d0d"#,
+            r#"CRONLINE 1800 3005 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6015" -O /home/atlas/data/new/7 2001:500:1::53"#,
+            r#"CRONLINE 1800 3044 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6016" -O /home/atlas/data/new/7 2001:503:c27::2:30"#,
+            r#"CRONLINE 900 3292 1794447121 UNIFORM 3 evtraceroute -6 -U -c 3 -w 4000 -A "6052" -O /home/atlas/data/new/7 topology6.dyndns.atlas.ripe.net"#,
+            r#"CRONLINE 900 2833 1794447121 UNIFORM 3 evtraceroute -6 -I -c 3 -w 4000 -A "6152" -O /home/atlas/data/new/7 topology6.dyndns.atlas.ripe.net"#,
+            r#"CRONLINE 900 1354179265 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -f 1 -m 32 -S 40 -A "1004732" -O /home/atlas/data/new/7 www.google.com"#,
+            r#"CRONLINE 7200 1591170214 1791883921 UNIFORM 14 evtraceroute -6 -I -a 1 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603345" -O /home/atlas/data/new/7 dyna.wikimedia.org"#,
+            r#"CRONLINE 7200 1591170560 1791883921 UNIFORM 14 evtraceroute -6 -I -a 1 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603435" -O /home/atlas/data/new/7 dyna.wikimedia.org"#,
+            r#"CRONLINE 7200 1591170800 1791883921 UNIFORM 14 evtraceroute -6 -I -a 1 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603439" -O /home/atlas/data/new/7 text-lb.eqiad.wikimedia.org"#,
+            r#"CRONLINE 7200 1591171040 1791883921 UNIFORM 14 evtraceroute -6 -I -a 1 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603450" -O /home/atlas/data/new/7 text-lb.codfw.wikimedia.org"#,
+            r#"CRONLINE 7200 1591171280 1791883921 UNIFORM 14 evtraceroute -6 -I -a 1 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603477" -O /home/atlas/data/new/7 text-lb.esams.wikimedia.org"#,
+            r#"CRONLINE 7200 1591171520 1791883921 UNIFORM 14 evtraceroute -6 -I -a 1 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603503" -O /home/atlas/data/new/7 text-lb.ulsfo.wikimedia.org"#,
+            r#"CRONLINE 7200 1591171760 1791883921 UNIFORM 14 evtraceroute -6 -I -a 1 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "25603532" -O /home/atlas/data/new/7 text-lb.eqsin.wikimedia.org"#,
+            r#"CRONLINE 900 1738762905 1791883921 UNIFORM 14 evtraceroute -6 -U -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "86691235" -O /home/atlas/data/new/7 google.com"#,
+            r#"CRONLINE 900 1738832482 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "86710304" -O /home/atlas/data/new/7 wikipedia.org"#,
+            r#"CRONLINE 900 1738832540 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "86710364" -O /home/atlas/data/new/7 facebook.com"#,
+            r#"CRONLINE 900 1780485734 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "176517312" -O /home/atlas/data/new/7 youtube.com"#,
+            r#"CRONLINE 900 1780485740 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "176517343" -O /home/atlas/data/new/7 assets.nflxext.com"#,
+            r#"CRONLINE 900 1780485744 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "176517367" -O /home/atlas/data/new/7 instagram.com"#,
+            r#"CRONLINE 900 1780558237 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "176906963" -O /home/atlas/data/new/7 reddit.com"#,
+            r#"CRONLINE 900 1780558244 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "176906974" -O /home/atlas/data/new/7 linkedin.com"#,
+            r#"CRONLINE 900 1780558252 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "176906985" -O /home/atlas/data/new/7 cloudflare.com"#,
+            r#"CRONLINE 900 1780651312 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "177401200" -O /home/atlas/data/new/7 d1.awsstatic.com"#,
+            r#"CRONLINE 900 1780651319 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "177401232" -O /home/atlas/data/new/7 akamai.com"#,
+            r#"CRONLINE 900 1780651327 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "177401263" -O /home/atlas/data/new/7 fastly.com"#,
+            r#"CRONLINE 900 1780657137 1791883921 UNIFORM 14 evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "177421605" -O /home/atlas/data/new/7 www.office.com"#,
+            r#"ONEOFF /home/atlas/crons/oneoff evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "222017431" google.com"#,
+            r#"ONEOFF /home/atlas/crons/oneoff evtraceroute -6 -I -a 16 -c 3 -f 1 -m 32 -w 4000 -z 10 -S 48 -p 80 -D 0 -H 0 -A "222027444" google.com"#,
+        ];
+        assert_eq!(LINES.len(), 38);
+        for line in LINES {
+            let toks = tokenize_cronline(line);
+            let val = |opt: &str| {
+                toks.iter()
+                    .position(|t| t == opt)
+                    .map(|i| toks[i + 1].parse::<u32>().unwrap())
+            };
+            let s = evtraceroute(line);
+            assert_eq!(s.target, *toks.last().unwrap(), "{line}");
+            assert_eq!(s.msm_id, val("-A").unwrap() as u64, "{line}");
+            assert_eq!(s.af, 6, "{line}");
+            let protocol = if toks.iter().any(|t| t == "-I") {
+                starla_common::TracerouteProtocol::ICMP
+            } else {
+                starla_common::TracerouteProtocol::UDP
+            };
+            let o = &s.opts;
+            assert_eq!(o.protocol, protocol, "{line}");
+            assert_eq!(o.paris_mod as u32, val("-a").unwrap_or(16), "{line}");
+            assert_eq!(o.count as u32, val("-c").unwrap_or(3), "{line}");
+            assert_eq!(o.first_hop as u32, val("-f").unwrap_or(1), "{line}");
+            assert_eq!(o.max_hops as u32, val("-m").unwrap_or(32), "{line}");
+            assert_eq!(o.timeout_ms, val("-w").unwrap_or(1000), "{line}");
+            assert_eq!(o.dup_timeout_ms, val("-z").unwrap_or(10), "{line}");
+            assert_eq!(o.size as u32, val("-S").unwrap_or(40), "{line}");
+            assert_eq!(o.dest_port as u32, val("-p").unwrap_or(80), "{line}");
+            assert_eq!(o.hbh_opt_size as u32, val("-H").unwrap_or(0), "{line}");
+            assert_eq!(o.dest_opt_size as u32, val("-D").unwrap_or(0), "{line}");
+            assert_eq!(o.paris_base, 0, "{line}");
+            assert_eq!(o.gap_limit, 5, "{line}");
+            assert_eq!((o.tos, o.dont_fragment), (0, false), "{line}");
+        }
+    }
+
+    #[test]
+    fn evtraceroute_option_forms_and_refusals() {
+        let refused = |line: &str| {
+            assert!(
+                matches!(parse_command(line), TelnetCommand::Unknown(_)),
+                "{line}"
+            )
+        };
+        // getopt: bundled flags, attached values, options after the target.
+        let s = evtraceroute(
+            r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -6TF -c5 -p 443 example.net -A 7"#,
+        );
+        assert_eq!(s.af, 6);
+        assert_eq!(s.opts.protocol, starla_common::TracerouteProtocol::TCP);
+        assert!(s.opts.dont_fragment);
+        assert_eq!((s.opts.count, s.opts.dest_port, s.msm_id), (5, 443, 7));
+        // IPv4 unless -6; every other value option takes its value.
+        let s = evtraceroute(
+            r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -a 0 -b 3 -g 2 -t 32 -i eth0 -B 12 -R x -W y -r 192.0.2.1"#,
+        );
+        assert_eq!((s.af, s.target.as_str()), (4, "192.0.2.1"));
+        assert_eq!(
+            (
+                s.opts.paris_mod,
+                s.opts.paris_base,
+                s.opts.gap_limit,
+                s.opts.tos
+            ),
+            (0, 3, 2, 32)
+        );
+        assert_eq!(s.opts.interface.as_deref(), Some("eth0"));
+        assert_eq!(s.opts.bundle.as_deref(), Some("12"));
+        assert_eq!(s.opts.paris_id(1), None);
+        // Refused as traceroute_init refuses them.
+        refused(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -4 -6 192.0.2.1"#);
+        refused(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -S 4097 192.0.2.1"#);
+        refused(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -c three 192.0.2.1"#);
+        refused(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -x 192.0.2.1"#);
+        refused(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -A 5"#);
+        refused(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute 192.0.2.1 192.0.2.2"#);
+        refused(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -w"#);
+        assert_eq!(
+            evtraceroute(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -S 4096 192.0.2.1"#)
+                .opts
+                .size,
+            4096
+        );
+        // -p is the service evdns_getaddrinfo resolves: any number from 0
+        // (a trace to port 0) to 65535.
+        for (p, port) in [("0", 0), ("65535", 65535), ("+80", 80)] {
+            let line = format!("CRONLINE 60 0 0 UNIFORM 1 evtraceroute -T -p {p} 192.0.2.1");
+            assert_eq!(evtraceroute(&line).opts.dest_port, port, "{line}");
+        }
+        refused(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -T -p 65536 192.0.2.1"#);
+        refused(r#"CRONLINE 60 0 0 UNIFORM 1 evtraceroute -T -p http 192.0.2.1"#);
+    }
+
+    /// The same CRONLINE delivered twice gives the scheduler the same
+    /// measurement: every part TracerouteInstance::for_line keys on (eperd's
+    /// Insert(): interval, start time, command) is equal, so the second
+    /// delivery keeps the first one's slot and Paris id.
+    #[test]
+    fn evtraceroute_redelivered_line_is_the_same_line() {
+        let line =
+            r#"CRONLINE 900 0 0 UNIFORM 450 evtraceroute -6 -U -c 3 -w 4000 -A 6001 2001:7fd::1"#;
+        let (a, b) = (evtraceroute(line), evtraceroute(line));
+        assert_eq!(
+            (a.msm_id, &a.target, a.af, &a.opts),
+            (b.msm_id, &b.target, b.af, &b.opts)
+        );
+        assert_eq!(
+            (a.schedule.interval, a.schedule.start_time),
+            (b.schedule.interval, b.schedule.start_time)
+        );
+        assert_eq!(a.schedule.interval, 900);
+        let changed = evtraceroute(
+            r#"CRONLINE 900 0 0 UNIFORM 450 evtraceroute -6 -U -c 3 -w 3000 -A 6001 2001:7fd::1"#,
+        );
+        assert_ne!(changed.opts, a.opts);
     }
 
     fn dns(line: &str) -> DnsSpec {
@@ -2604,6 +3003,58 @@ mod tests {
             }
             _ => panic!("Expected Tls command"),
         }
+    }
+
+    /// The twin scenario's line (enodia-2026-10-13T0131): -h is the
+    /// server_name, the hostname is what is resolved and reported.
+    #[test]
+    fn evsslgetcert_takes_the_server_name_from_h_only() {
+        let cmd = parse_command(
+            r#"CRONLINE 43200 6472 1794447121 UNIFORM 3 evsslgetcert -6 -h www.ripe.net -A "15001" -O /home/atlas/data/new/7 www.ripe.net"#,
+        );
+        let TelnetCommand::Tls(spec) = cmd else {
+            panic!("Expected Tls command");
+        };
+        assert_eq!(spec.msm_id, 15001);
+        assert_eq!(spec.target, "www.ripe.net");
+        assert_eq!(spec.hostname.as_deref(), Some("www.ripe.net"));
+        assert_eq!(spec.port, 443);
+        assert_eq!(spec.af, 6);
+
+        // Without -h no server_name, and without -4/-6 either family
+        let cmd = parse_command(
+            r#"CRONLINE 43200 0 0 UNIFORM 3 evsslgetcert -A "15003" -O /home/atlas/data/new/7 www.ripe.net"#,
+        );
+        let TelnetCommand::Tls(spec) = cmd else {
+            panic!("Expected Tls command");
+        };
+        assert_eq!(spec.hostname, None);
+        assert_eq!(spec.af, 0);
+        assert_eq!(spec.target, "www.ripe.net");
+    }
+
+    /// sslgetcert_init() refuses a line without exactly one hostname or
+    /// with an option it does not know.
+    #[test]
+    fn evsslgetcert_refuses_what_sslgetcert_init_refuses() {
+        for line in [
+            r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -6 -A "1" a.example b.example"#,
+            r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -6 -A "1""#,
+            r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -6 -H x -A "1" a.example"#,
+            r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -6 -A "1" a.example -p"#,
+        ] {
+            assert!(
+                matches!(parse_command(line), TelnetCommand::Unknown(_)),
+                "{line}"
+            );
+        }
+        // -V's argument is not taken for the hostname
+        let cmd =
+            parse_command(r#"CRONLINE 900 0 0 UNIFORM 5 evsslgetcert -V TLS1.2 -A "1" a.example"#);
+        assert!(
+            matches!(cmd, TelnetCommand::Tls(ref s) if s.target == "a.example"),
+            "not a tls command"
+        );
     }
 
     #[test]

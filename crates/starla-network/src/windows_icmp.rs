@@ -1,7 +1,8 @@
 //! Windows ICMP Helper API wrapper
 //!
 //! Uses IcmpSendEcho2/Icmp6SendEcho2 from iphlpapi.dll for ping and traceroute
-//! without requiring administrator privileges.
+//! without requiring administrator privileges. Icmp6SendEcho2's reply has
+//! no hop limit, so an elevated ping over IPv6 uses [`RawIcmp6Socket`].
 
 use std::io;
 use std::mem;
@@ -383,5 +384,229 @@ pub async fn icmp_ping(
         }
     })
     .await
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+    .map_err(io::Error::other)?
+}
+
+/// GUID, as WSAIoctl's SIO_GET_EXTENSION_FUNCTION_POINTER takes one
+#[repr(C)]
+struct Guid {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [u8; 8],
+}
+
+/// WSAID_WSARECVMSG (mswsock.h)
+const WSAID_WSARECVMSG: Guid = Guid {
+    data1: 0xf689_d7c8,
+    data2: 0x6f1f,
+    data3: 0x436b,
+    data4: [0x8a, 0x53, 0xe5, 0x4f, 0xe3, 0x51, 0xc3, 0x22],
+};
+
+/// SIO_GET_EXTENSION_FUNCTION_POINTER: _WSAIORW(IOC_WS2, 6) (ws2def.h)
+const SIO_GET_EXTENSION_FUNCTION_POINTER: u32 = 0xc800_0006;
+const SOCKET_ERROR: i32 = -1;
+/// POLLRDNORM (winsock2.h)
+const POLLRDNORM: i16 = 0x0100;
+
+#[repr(C)]
+struct WsaBuf {
+    len: u32,
+    buf: *mut u8,
+}
+
+#[repr(C)]
+struct WsaMsg {
+    name: *mut std::ffi::c_void,
+    namelen: i32,
+    buffers: *mut WsaBuf,
+    buffer_count: u32,
+    control: WsaBuf,
+    flags: u32,
+}
+
+#[repr(C)]
+struct WsaPollFd {
+    fd: usize,
+    events: i16,
+    revents: i16,
+}
+
+/// LPFN_WSARECVMSG (mswsock.h)
+type WsaRecvMsg = unsafe extern "system" fn(
+    s: usize,
+    msg: *mut WsaMsg,
+    received: *mut u32,
+    overlapped: *mut std::ffi::c_void,
+    completion: *const std::ffi::c_void,
+) -> i32;
+
+#[link(name = "ws2_32")]
+extern "system" {
+    fn WSAIoctl(
+        s: usize,
+        code: u32,
+        in_buf: *const std::ffi::c_void,
+        in_len: u32,
+        out_buf: *mut std::ffi::c_void,
+        out_len: u32,
+        returned: *mut u32,
+        overlapped: *mut std::ffi::c_void,
+        completion: *const std::ffi::c_void,
+    ) -> i32;
+    fn WSAPoll(fds: *mut WsaPollFd, nfds: u32, timeout: i32) -> i32;
+    fn setsockopt(s: usize, level: i32, name: i32, value: *const u8, len: i32) -> i32;
+    fn WSAGetLastError() -> i32;
+}
+
+fn wsa_error() -> io::Error {
+    // SAFETY: no arguments; reads the calling thread's last Winsock error.
+    io::Error::from_raw_os_error(unsafe { WSAGetLastError() })
+}
+
+/// A raw ICMPv6 socket, as ping.c opens one (ping.c:1514-1537), with the
+/// replies' hop limit and destination from WSARecvMsg's control data, as
+/// ping.c has them from IPV6_HOPLIMIT and IPV6_PKTINFO (ping.c:1531-1537,
+/// 1150-1162): the doc's "ttl" for an IPv6 ping is the replies' hop
+/// limit, which Icmp6SendEcho2 does not tell. Windows gives raw sockets
+/// to elevated processes only; [`RawIcmp6Socket::open`] fails with
+/// WSAEACCES otherwise. Blocking: run it off the async runtime.
+pub struct RawIcmp6Socket {
+    socket: socket2::Socket,
+    recv_msg: WsaRecvMsg,
+}
+
+impl RawIcmp6Socket {
+    /// The socket, asking for each packet's hop limit and destination.
+    pub fn open() -> io::Result<Self> {
+        use socket2::{Domain, Protocol, Socket, Type};
+        use std::os::windows::io::AsRawSocket;
+
+        let socket = Socket::new(Domain::IPV6, Type::RAW, Some(Protocol::ICMPV6))?;
+        let s = socket.as_raw_socket() as usize;
+        let on: i32 = 1;
+        for name in [crate::wsacmsg::IPV6_HOPLIMIT, crate::wsacmsg::IPV6_PKTINFO] {
+            // SAFETY: `on` is an INT that outlives the call, as long as
+            // the length given.
+            let r = unsafe {
+                setsockopt(
+                    s,
+                    crate::wsacmsg::IPPROTO_IPV6,
+                    name,
+                    (&on as *const i32).cast(),
+                    mem::size_of::<i32>() as i32,
+                )
+            };
+            if r == SOCKET_ERROR {
+                return Err(wsa_error());
+            }
+        }
+        // WSARecvMsg is an extension function: its address comes from the
+        // provider (mswsock.h).
+        let mut recv_msg: Option<WsaRecvMsg> = None;
+        let mut returned = 0u32;
+        // SAFETY: the GUID and the function pointer slot are live and as
+        // long as the lengths given; no overlapped I/O.
+        let r = unsafe {
+            WSAIoctl(
+                s,
+                SIO_GET_EXTENSION_FUNCTION_POINTER,
+                (&WSAID_WSARECVMSG as *const Guid).cast(),
+                mem::size_of::<Guid>() as u32,
+                (&mut recv_msg as *mut Option<WsaRecvMsg>).cast(),
+                mem::size_of::<Option<WsaRecvMsg>>() as u32,
+                &mut returned,
+                ptr::null_mut(),
+                ptr::null(),
+            )
+        };
+        if r == SOCKET_ERROR {
+            return Err(wsa_error());
+        }
+        let recv_msg = recv_msg.ok_or_else(|| io::Error::other("no WSARecvMsg"))?;
+        Ok(Self { socket, recv_msg })
+    }
+
+    /// The hop limit the requests leave with.
+    pub fn set_hop_limit(&self, hops: u32) -> io::Result<()> {
+        self.socket.set_unicast_hops_v6(hops)
+    }
+
+    /// Bind to `local` and connect to `target`: the requests leave from
+    /// `local`, which their checksum's pseudo-header names, and only
+    /// `target`'s packets come up.
+    pub fn bind_connect(&self, local: Ipv6Addr, target: Ipv6Addr) -> io::Result<()> {
+        use std::net::SocketAddr;
+        self.socket
+            .bind(&SocketAddr::new(IpAddr::V6(local), 0).into())?;
+        self.socket
+            .connect(&SocketAddr::new(IpAddr::V6(target), 0).into())
+    }
+
+    /// Send an ICMPv6 message, its checksum filled in, to the target.
+    pub fn send(&self, packet: &[u8]) -> io::Result<usize> {
+        self.socket.send(packet)
+    }
+
+    /// Wait up to `timeout` for a packet: the ICMPv6 message (Windows
+    /// gives no IPv6 header on a raw socket) and its hop limit and
+    /// destination; None when none came in that time.
+    pub fn recv_meta(
+        &self,
+        buf: &mut [u8],
+        timeout: std::time::Duration,
+    ) -> io::Result<Option<(usize, crate::RecvMeta)>> {
+        use std::os::windows::io::AsRawSocket;
+
+        let s = self.socket.as_raw_socket() as usize;
+        let mut fd = WsaPollFd {
+            fd: s,
+            events: POLLRDNORM,
+            revents: 0,
+        };
+        // whole milliseconds, rounded up so the wait is never cut short
+        let ms = i32::try_from(timeout.as_micros().div_ceil(1000)).unwrap_or(i32::MAX);
+        // SAFETY: one live WSAPOLLFD.
+        let ready = unsafe { WSAPoll(&mut fd, 1, ms) };
+        if ready == SOCKET_ERROR {
+            return Err(wsa_error());
+        }
+        if ready == 0 {
+            return Ok(None);
+        }
+        // u64s, so the buffers are aligned for the SOCKADDR and WSACMSGHDR
+        let mut name = [0u64; 16];
+        let mut control = [0u64; 32];
+        let mut data = WsaBuf {
+            len: u32::try_from(buf.len()).unwrap_or(u32::MAX),
+            buf: buf.as_mut_ptr(),
+        };
+        let mut msg = WsaMsg {
+            name: name.as_mut_ptr().cast(),
+            namelen: mem::size_of_val(&name) as i32,
+            buffers: &mut data,
+            buffer_count: 1,
+            control: WsaBuf {
+                len: mem::size_of_val(&control) as u32,
+                buf: control.as_mut_ptr().cast(),
+            },
+            flags: 0,
+        };
+        let mut received = 0u32;
+        // SAFETY: msg points at `name`, `data` (over `buf`) and `control`,
+        // all live and as long as their lengths say; no overlapped I/O.
+        let r =
+            unsafe { (self.recv_msg)(s, &mut msg, &mut received, ptr::null_mut(), ptr::null()) };
+        if r == SOCKET_ERROR {
+            return Err(wsa_error());
+        }
+        let len = (msg.control.len as usize).min(mem::size_of_val(&control));
+        // SAFETY: `control` is live, and `len` is within it.
+        let control = unsafe { std::slice::from_raw_parts(control.as_ptr().cast::<u8>(), len) };
+        Ok(Some((
+            received as usize,
+            crate::wsacmsg::recv_meta(control),
+        )))
+    }
 }

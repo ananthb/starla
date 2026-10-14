@@ -125,7 +125,9 @@ mod tests {
                 target: "193.0.14.129".into(),
                 af: 4,
                 packets: 3,
+                packet_interval: 1000,
                 size: 48,
+                kept: Default::default(),
             }),
         }
     }
