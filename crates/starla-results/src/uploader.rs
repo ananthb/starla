@@ -7,6 +7,7 @@ use super::format::AtlasResult;
 use super::host_telemetry::HostTelemetry;
 use super::queue::QueuedResult;
 use super::system_status;
+use super::time_sync::TimeSyncTracker;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -50,10 +51,10 @@ impl Default for UploaderConfig {
 pub struct ResultUploader {
     transport: Box<dyn UploadTransport>,
     config: UploaderConfig,
-    /// Process start time (unix timestamp) for uptime reporting
-    start_time: u64,
     /// Host telemetry registry; pending lines are drained per upload batch.
     host_telemetry: Arc<HostTelemetry>,
+    /// Marked synced when an accepted upload's Date agrees with our clock.
+    time_sync: Arc<TimeSyncTracker>,
     metrics: starla_metrics::MetricsRegistry,
 }
 
@@ -64,16 +65,13 @@ impl ResultUploader {
         config: UploaderConfig,
         metrics: starla_metrics::MetricsRegistry,
         host_telemetry: Arc<HostTelemetry>,
+        time_sync: Arc<TimeSyncTracker>,
     ) -> Self {
-        let start_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
         Self {
             transport,
             config,
-            start_time,
             host_telemetry,
+            time_sync,
             metrics,
         }
     }
@@ -104,13 +102,10 @@ impl ResultUploader {
     pub async fn upload_batch(
         &self,
         results: &[QueuedResult],
-        lts: i64,
         session_id: Option<&str>,
     ) -> anyhow::Result<()> {
-        if results.is_empty() {
-            return Ok(());
-        }
-
+        // An empty batch is still posted (header, telemetry, footer), as the
+        // reference probe's minutely httppost is with an empty data/out.
         if !self.has_endpoint() {
             anyhow::bail!("No upload endpoint configured");
         }
@@ -122,11 +117,6 @@ impl ResultUploader {
         let mut body = Vec::new();
         body.extend_from_slice(b"P_TO_C_REPORT\n");
 
-        // System status results (disk, uptime, interfaces, ongoing status)
-        // The controller expects these alongside measurement results
-        let status = system_status::system_status_lines(lts, self.start_time);
-        body.extend_from_slice(status.as_bytes());
-
         // Host telemetry RESULT lines (buddyinfo, rptaddrs) accumulated since
         // the last upload. Pushed by HostTelemetry's periodic reporters, and
         // put back if this upload fails (below).
@@ -137,8 +127,11 @@ impl ResultUploader {
 
         for queued in results {
             let atlas_result =
-                AtlasResult::from_measurement(queued.result.clone(), None).with_lts(lts);
+                AtlasResult::from_measurement(queued.result.clone(), None).with_lts(queued.lts);
             body.extend_from_slice(atlas_result.to_result_line().as_bytes());
+        }
+        if !results.is_empty() {
+            body.extend_from_slice(system_status::results_marker().as_bytes());
         }
 
         if let Some(sid) = session_id {
@@ -155,7 +148,8 @@ impl ResultUploader {
         );
         trace!("Upload body:\n{}", String::from_utf8_lossy(&body));
 
-        let sent = self.post(&body, results.len(), start_time).await;
+        let path = self.config.endpoint_path.clone();
+        let sent = self.post(&path, &body, results.len(), start_time).await;
         if sent.is_err() {
             // The caller requeues this batch's results (`requeue_failed`); its
             // telemetry lines go back too, or a failed upload loses them.
@@ -164,10 +158,66 @@ impl ResultUploader {
         sent
     }
 
+    /// The controller's 900 s `httppost … &SRC=timesync` line: header and
+    /// footer only, so the clock is judged even when nothing else is posted.
+    pub async fn post_timesync(&self, session_id: Option<&str>) -> anyhow::Result<()> {
+        if !self.has_endpoint() {
+            anyhow::bail!("No upload endpoint configured");
+        }
+        let mut body = b"P_TO_C_REPORT\n".to_vec();
+        if let Some(sid) = session_id {
+            body.extend_from_slice(format!("\nSESSION_ID {sid}\n").as_bytes());
+        }
+        let path = format!("{}&SRC=timesync", self.config.endpoint_path);
+        self.post(&path, &body, 0, std::time::Instant::now()).await
+    }
+
+    /// httppost --set-time 2: compare the answer's Date with our clock. In
+    /// step and answered within a second: a time sync (lts restarts from 0).
+    /// Otherwise a RESULT 9015 line, uploaded with the next batch, as
+    /// httppost's stdout goes to data/new/main. Starla never sets the clock.
+    async fn judge_clock(&self, response: &str, rtt: Duration) {
+        let Some(server) = response
+            .lines()
+            .take_while(|l| !l.is_empty())
+            .find_map(|l| l.strip_prefix("Date:").or_else(|| l.strip_prefix("date:")))
+            .and_then(parse_http_date)
+        else {
+            return;
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        match clock_verdict(now, server, rtt.as_secs_f64(), SET_TIME_TOLERANCE_SECS) {
+            ClockVerdict::InSync => self.time_sync.mark_synced(),
+            ClockVerdict::NotInSync => {
+                warn!("Clock not in sync with the controller: local {now}, remote {server}");
+                self.host_telemetry
+                    .push(format!(
+                        "RESULT 9015 ongoing {now} httppost not in sync, local {now}, remote \
+                         {server}\n{}",
+                        system_status::main_marker()
+                    ))
+                    .await;
+            }
+            ClockVerdict::SlowAnswer => {
+                self.host_telemetry
+                    .push(format!(
+                        "RESULT 9015 ongoing {now} httppost rtt {} ms\n{}",
+                        format_g(rtt.as_secs_f64() * 1000.0),
+                        system_status::main_marker()
+                    ))
+                    .await;
+            }
+        }
+    }
+
     /// POST one built body over a fresh transport stream and judge the
     /// controller's answer. Any error is the whole batch's failure.
     async fn post(
         &self,
+        path: &str,
         body: &[u8],
         count: usize,
         start_time: std::time::Instant,
@@ -184,7 +234,7 @@ impl ResultUploader {
             "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: \
              application/x-www-form-urlencoded\r\nUser-Agent: httppost for \
              atlas.ripe.net\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
-            self.config.endpoint_path,
+            path,
             body.len(),
         );
 
@@ -246,6 +296,7 @@ impl ResultUploader {
                         debug!("Batch upload successful: {} results", count);
                         self.metrics
                             .record_upload_duration(start_time.elapsed().as_secs_f64());
+                        self.judge_clock(&response_str, start_time.elapsed()).await;
                         return Ok(());
                     } else {
                         debug!("Upload rejected: {:?}", resp_body);
@@ -256,6 +307,7 @@ impl ResultUploader {
                 debug!("Batch upload successful (no body): {} results", count);
                 self.metrics
                     .record_upload_duration(start_time.elapsed().as_secs_f64());
+                self.judge_clock(&response_str, start_time.elapsed()).await;
                 return Ok(());
             } else {
                 anyhow::bail!("Upload failed: {}", status_line);
@@ -263,6 +315,53 @@ impl ResultUploader {
         }
 
         anyhow::bail!("Empty response from controller")
+    }
+}
+
+/// The controller's crontab runs httppost with `--set-time 2`.
+const SET_TIME_TOLERANCE_SECS: i64 = 2;
+
+#[derive(Debug, PartialEq)]
+enum ClockVerdict {
+    InSync,
+    NotInSync,
+    SlowAnswer,
+}
+
+/// httppost's test: out of step if `now` is outside
+/// `server ± (tolerance + rtt)`; in step and `rtt <= 1 s` is a sync.
+fn clock_verdict(now: i64, server: i64, rtt: f64, tolerance: i64) -> ClockVerdict {
+    let (now, server, tol) = (now as f64, server as f64, tolerance as f64);
+    if now < server - tol - rtt || now > server + tol + rtt {
+        ClockVerdict::NotInSync
+    } else if rtt <= 1.0 {
+        ClockVerdict::InSync
+    } else {
+        ClockVerdict::SlowAnswer
+    }
+}
+
+/// An HTTP Date (`Mon, 12 Oct 2026 20:20:51 GMT`) as unix seconds.
+fn parse_http_date(value: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc2822(value.trim())
+        .ok()
+        .map(|t| t.timestamp())
+}
+
+/// C's `%g` for the positive values httppost prints: six significant
+/// digits, trailing zeros dropped.
+fn format_g(x: f64) -> String {
+    let int_digits = if x >= 1.0 {
+        x.log10().floor() as i32 + 1
+    } else {
+        1
+    };
+    let decimals = (6 - int_digits).max(0) as usize;
+    let s = format!("{x:.decimals$}");
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
     }
 }
 
@@ -339,6 +438,7 @@ mod tests {
             UploaderConfig::default(),
             starla_metrics::MetricsRegistry::new().unwrap(),
             Arc::clone(&telemetry),
+            Arc::new(TimeSyncTracker::new()),
         );
         u.set_endpoint_path("/?PROBE_ID=1".into()).unwrap();
         (u, telemetry, rx)
@@ -364,6 +464,7 @@ mod tests {
             queued_at: 0,
             attempts: 0,
             last_attempt_at: None,
+            lts: -1,
         }]
     }
 
@@ -375,7 +476,7 @@ mod tests {
     async fn a_rate_limited_upload_keeps_its_telemetry() {
         let (u, telemetry, mut seen) = uploader("HTTP/1.1 429 Too Many Requests\r\n\r\n");
         telemetry.push(REPORT.into()).await;
-        let err = u.upload_batch(&one_result(), 0, None).await.unwrap_err();
+        let err = u.upload_batch(&one_result(), None).await.unwrap_err();
         assert!(err.to_string().contains("rate limited"), "{err}");
         assert!(
             seen.recv().await.unwrap().contains(REPORT),
@@ -388,8 +489,117 @@ mod tests {
     async fn an_accepted_upload_consumes_its_telemetry() {
         let (u, telemetry, mut seen) = uploader("HTTP/1.1 200 OK\r\n\r\nOK");
         telemetry.push(REPORT.into()).await;
-        u.upload_batch(&one_result(), 0, None).await.unwrap();
+        u.upload_batch(&one_result(), None).await.unwrap();
         assert!(seen.recv().await.unwrap().contains(REPORT));
         assert!(telemetry.drain().await.is_empty());
+    }
+
+    #[test]
+    fn the_clock_is_judged_as_httppost_judges_it() {
+        let t = 1_791_836_451;
+        assert_eq!(clock_verdict(t, t + 1, 0.2, 2), ClockVerdict::InSync);
+        // Tolerance widens by the round trip.
+        assert_eq!(clock_verdict(t, t + 2, 0.6, 2), ClockVerdict::InSync);
+        assert_eq!(clock_verdict(t, t + 5, 0.2, 2), ClockVerdict::NotInSync);
+        assert_eq!(clock_verdict(t, t - 5, 0.2, 2), ClockVerdict::NotInSync);
+        assert_eq!(clock_verdict(t, t, 1.5, 2), ClockVerdict::SlowAnswer);
+    }
+
+    #[test]
+    fn http_dates_and_g_format() {
+        // RIPE's own header, 2026-10-12.
+        assert_eq!(
+            parse_http_date(" Mon, 12 Oct 2026 20:20:51 GMT"),
+            Some(1_791_836_451)
+        );
+        assert_eq!(parse_http_date("yesterday"), None);
+        assert_eq!(format_g(1523.456789), "1523.46");
+        assert_eq!(format_g(60000.0), "60000");
+        assert_eq!(format_g(2000.5), "2000.5");
+    }
+
+    fn reply_dated(offset_secs: i64) -> &'static str {
+        let date = (chrono::Utc::now() + chrono::Duration::seconds(offset_secs))
+            .format("%a, %d %b %Y %H:%M:%S GMT");
+        Box::leak(
+            format!(
+                "HTTP/1.1 200 \r\nContent-Length: 3\r\nDate: {date}\r\nConnection: \
+                 close\r\n\r\nOK\n"
+            )
+            .into_boxed_str(),
+        )
+    }
+
+    fn with_time_sync(
+        reply: &'static str,
+    ) -> (ResultUploader, Arc<HostTelemetry>, Arc<TimeSyncTracker>) {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let telemetry = HostTelemetry::new();
+        let sync = Arc::new(TimeSyncTracker::new());
+        let mut u = ResultUploader::new(
+            Box::new(FakeController { reply, seen: tx }),
+            UploaderConfig::default(),
+            starla_metrics::MetricsRegistry::new().unwrap(),
+            Arc::clone(&telemetry),
+            Arc::clone(&sync),
+        );
+        u.set_endpoint_path("/?PROBE_ID=1".into()).unwrap();
+        (u, telemetry, sync)
+    }
+
+    #[tokio::test]
+    async fn an_accepted_upload_in_step_is_a_time_sync() {
+        let (u, telemetry, sync) = with_time_sync(reply_dated(0));
+        assert_eq!(sync.lts(), -1);
+        u.upload_batch(&[], Some("s")).await.unwrap();
+        assert!((0..2).contains(&sync.lts()), "{}", sync.lts());
+        assert!(telemetry.drain().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_answer_an_hour_off_is_reported_not_trusted() {
+        let (u, telemetry, sync) = with_time_sync(reply_dated(3600));
+        u.upload_batch(&[], Some("s")).await.unwrap();
+        assert_eq!(sync.lts(), -1);
+        let lines = telemetry.drain().await;
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].starts_with("RESULT 9015 ongoing ")
+                && lines[0].contains(" httppost not in sync, local "),
+            "{}",
+            lines[0]
+        );
+        // condmv's marker for data/new/main follows httppost's own line.
+        assert!(
+            lines[0].contains("\nRESULT 9901 ongoing ")
+                && lines[0].ends_with(" /home/atlas/data/new/main\n"),
+            "{}",
+            lines[0]
+        );
+    }
+
+    /// The reference sends status lines from its 180 s loop, not with every
+    /// upload, and marks eperd's results with condmv's 9907 line.
+    #[tokio::test]
+    async fn an_upload_carries_results_and_their_marker_only() {
+        let (u, _telemetry, mut seen) = uploader("HTTP/1.1 200 \r\n\r\nOK\n");
+        u.upload_batch(&one_result(), Some("s")).await.unwrap();
+        let req = seen.recv().await.unwrap();
+        let body = &req[req.find("\r\n\r\n").unwrap() + 4..];
+        let lines: Vec<&str> = body.lines().collect();
+        assert_eq!(lines[0], "P_TO_C_REPORT");
+        assert!(lines[1].contains("\"1001\""), "{body}");
+        assert!(
+            lines[2].starts_with("RESULT 9907 ongoing ")
+                && lines[2].ends_with(" /home/atlas/data/new/7"),
+            "{body}"
+        );
+        for gone in ["\"7001\"", "\"9018\"", "\"9002\"", "starla"] {
+            assert!(!body.contains(gone), "{gone} in {body}");
+        }
+
+        u.upload_batch(&[], Some("s")).await.unwrap();
+        let req = seen.recv().await.unwrap();
+        assert!(!req.contains("9907"), "no results, no marker: {req}");
     }
 }

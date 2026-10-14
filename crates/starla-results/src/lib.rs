@@ -39,6 +39,9 @@ pub struct ResultHandlerConfig {
     pub cleanup_interval: Duration,
     /// Maximum number of results in queue
     pub max_queue_size: usize,
+    /// Send interface counters (9002) with the 180 s status lines, as the
+    /// reference probe does only with RXTXRPT=yes.
+    pub rxtxrpt: bool,
 }
 
 impl Default for ResultHandlerConfig {
@@ -49,6 +52,7 @@ impl Default for ResultHandlerConfig {
             max_attempts: 5,
             cleanup_interval: Duration::from_secs(300), // 5 minutes
             max_queue_size: 10000,
+            rxtxrpt: false,
         }
     }
 }
@@ -74,18 +78,20 @@ impl ResultHandler {
     ) -> Self {
         let queue = ResultQueue::new(config.max_queue_size);
         let host_telemetry = HostTelemetry::new();
+        let time_sync = Arc::new(TimeSyncTracker::new());
         let uploader = ResultUploader::new(
             transport,
             uploader_config,
             metrics.clone(),
             Arc::clone(&host_telemetry),
+            Arc::clone(&time_sync),
         );
 
         Self {
             queue: Arc::new(Mutex::new(queue)),
             uploader: Arc::new(Mutex::new(uploader)),
             config,
-            time_sync: Arc::new(TimeSyncTracker::new()),
+            time_sync,
             session_id: Arc::new(Mutex::new(None)),
             host_telemetry,
             metrics,
@@ -139,7 +145,7 @@ impl ResultHandler {
     pub async fn submit(&self, result: MeasurementResult) {
         let mut queue = self.queue.lock().await;
         let before = queue.stats().count;
-        queue.enqueue(result);
+        queue.enqueue_measured(result, self.time_sync.lts());
         let after = queue.stats().count;
 
         if after <= before && before > 0 {
@@ -172,10 +178,6 @@ impl ResultHandler {
             res
         };
 
-        if results.is_empty() {
-            return Ok(0);
-        }
-
         let (uploadable, failed): (Vec<_>, Vec<_>) = results
             .into_iter()
             .partition(|r| r.attempts < self.config.max_attempts);
@@ -190,22 +192,21 @@ impl ResultHandler {
             }
         }
 
-        if uploadable.is_empty() {
-            return Ok(0);
+        // Nothing queued is still an upload: the reference probe posts every
+        // minute whatever data/out holds, and each accepted post is a chance
+        // to confirm the clock.
+        let count = uploadable.len();
+        if count > 0 {
+            info!("Uploading {} results", count);
+        } else {
+            debug!("Uploading no results (status and clock check)");
         }
 
-        let count = uploadable.len();
-        info!("Uploading {} results", count);
-
-        let lts = self.time_sync.lts();
         let session_id = self.session_id.lock().await;
         let session_id_ref = session_id.as_deref();
 
         let uploader = self.uploader.lock().await;
-        match uploader
-            .upload_batch(&uploadable, lts, session_id_ref)
-            .await
-        {
+        match uploader.upload_batch(&uploadable, session_id_ref).await {
             Ok(()) => {
                 info!("Successfully uploaded {} results", count);
                 self.metrics.record_upload_success();
@@ -226,6 +227,13 @@ impl ResultHandler {
                 Err(e)
             }
         }
+    }
+
+    /// The 900 s clock-check post (`httppost … &SRC=timesync`).
+    pub async fn post_timesync(&self) -> anyhow::Result<()> {
+        let session_id = self.session_id.lock().await.clone();
+        let uploader = self.uploader.lock().await;
+        uploader.post_timesync(session_id.as_deref()).await
     }
 
     /// Run cleanup to remove expired and failed results
@@ -249,6 +257,14 @@ impl ResultHandler {
 
         let mut upload_interval = tokio::time::interval(self.config.upload_interval);
         let mut cleanup_interval = tokio::time::interval(self.config.cleanup_interval);
+        // The reference main loop's status lines: first pass at start.
+        let mut status_interval =
+            tokio::time::interval(Duration::from_secs(system_status::STATUS_INTERVAL_SECS));
+        let data_dir = starla_common::state_dir();
+        let mut timesync_interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + TIMESYNC_INTERVAL,
+            TIMESYNC_INTERVAL,
+        );
 
         let mut consecutive_failures = 0u32;
         let mut rate_limited = 0u32;
@@ -271,12 +287,11 @@ impl ResultHandler {
                         continue;
                     }
                     match self.upload_pending().await {
-                        Ok(count) if count > 0 => {
+                        Ok(_) => {
                             consecutive_failures = 0;
                             rate_limited = 0;
                             backoff = Duration::from_secs(1);
                         }
-                        Ok(_) => {}
                         Err(e) => {
                             consecutive_failures += 1;
                             let err_msg = e.to_string();
@@ -308,6 +323,24 @@ impl ResultHandler {
                 _ = cleanup_interval.tick() => {
                     self.run_cleanup().await;
                 }
+
+                _ = status_interval.tick() => {
+                    let lts = self.time_sync.lts();
+                    for line in system_status::status_lines(lts, &data_dir, self.config.rxtxrpt) {
+                        self.host_telemetry.push(line).await;
+                    }
+                }
+
+                tick = timesync_interval.tick() => {
+                    // Not while a 429 hold is on: it would be one more refused
+                    // request.
+                    if hold_until.is_some_and(|t| tick < t) {
+                        continue;
+                    }
+                    if let Err(e) = self.post_timesync().await {
+                        debug!("Timesync post failed: {}", e);
+                    }
+                }
             }
         }
 
@@ -319,6 +352,9 @@ impl ResultHandler {
 fn is_rate_limited(e: &anyhow::Error) -> bool {
     e.to_string().starts_with("rate limited")
 }
+
+/// The controller's crontab posts `&SRC=timesync` every 900 s.
+const TIMESYNC_INTERVAL: Duration = Duration::from_secs(900);
 
 const RATE_LIMIT_FIRST_HOLD: Duration = Duration::from_secs(60);
 const RATE_LIMIT_MAX_HOLD: Duration = Duration::from_secs(30 * 60);
@@ -421,8 +457,11 @@ mod tests {
     }
 
     /// A controller that answers every POST with 429, no Retry-After, as
-    /// RIPE's did on 2026-10-12, and notes when each request arrived.
-    struct RateLimitingController(tokio::sync::mpsc::UnboundedSender<tokio::time::Instant>);
+    /// RIPE's did on 2026-10-12, and notes when each request arrived and
+    /// what it said.
+    struct RateLimitingController(
+        tokio::sync::mpsc::UnboundedSender<(tokio::time::Instant, String)>,
+    );
 
     impl UploadTransport for RateLimitingController {
         fn open(
@@ -457,7 +496,10 @@ mod tests {
                         }
                     }
                 }
-                let _ = seen.send(tokio::time::Instant::now());
+                let _ = seen.send((
+                    tokio::time::Instant::now(),
+                    String::from_utf8_lossy(&req).into_owned(),
+                ));
                 let _ = ctrl
                     .write_all(
                         b"HTTP/1.1 429 \r\nContent-Length: 3\r\nConnection: close\r\n\r\nOK\n",
@@ -528,8 +570,10 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(3 * 3600)).await;
 
         let mut at = Vec::new();
-        while let Ok(t) = seen.try_recv() {
-            at.push(t);
+        while let Ok((t, req)) = seen.try_recv() {
+            if !req.contains("SRC=timesync") {
+                at.push(t);
+            }
         }
         let gaps: Vec<u64> = at.windows(2).map(|w| (w[1] - w[0]).as_secs()).collect();
         assert_eq!(gaps, [60, 120, 240, 480, 960, 1800, 1800, 1800, 1800]);
@@ -540,5 +584,76 @@ mod tests {
         cancel.cancel();
         run.await.unwrap().unwrap();
         assert_eq!(tokio::time::Instant::now(), stopped_at);
+    }
+
+    fn handler_against_429() -> (
+        ResultHandler,
+        tokio::sync::mpsc::UnboundedReceiver<(tokio::time::Instant, String)>,
+    ) {
+        let (tx, seen) = tokio::sync::mpsc::unbounded_channel();
+        let handler = ResultHandler::new(
+            Box::new(RateLimitingController(tx)),
+            UploaderConfig::default(),
+            ResultHandlerConfig::default(),
+            starla_metrics::MetricsRegistry::new().unwrap(),
+        );
+        (handler, seen)
+    }
+
+    /// The reference probe posts every minute whatever data/out holds.
+    #[tokio::test]
+    async fn an_empty_queue_still_posts() {
+        let (handler, mut seen) = handler_against_429();
+        handler
+            .set_endpoint_path("/?PROBE_ID=1&SESSION_ID=s".into())
+            .await
+            .unwrap();
+        handler.set_session_id("s".into()).await;
+        assert!(handler.upload_pending().await.is_err(), "posted, got 429");
+        let (_, req) = seen.try_recv().expect("a post went out");
+        let body = &req[req.find("\r\n\r\n").unwrap() + 4..];
+        assert!(body.starts_with("P_TO_C_REPORT\n"), "{body}");
+        assert!(body.ends_with("\nSESSION_ID s\n"), "{body}");
+        assert!(!body.contains("\"af\""), "no measurement results: {body}");
+    }
+
+    /// The reference writes get_timesync() into a result when it is
+    /// produced; a later sync must not rewrite it.
+    #[tokio::test]
+    async fn a_result_keeps_the_lts_it_was_measured_at() {
+        let (handler, mut seen) = handler_against_429();
+        handler
+            .set_endpoint_path("/?PROBE_ID=1".into())
+            .await
+            .unwrap();
+        handler.submit(make_result(1001)).await;
+        handler.mark_time_synced();
+        let _ = handler.upload_pending().await;
+        let (_, req) = seen.try_recv().unwrap();
+        let line = req
+            .lines()
+            .find(|l| l.contains("\"1001\""))
+            .expect("the result line");
+        assert!(line.contains("\"lts\":-1"), "{line}");
+    }
+
+    #[tokio::test]
+    async fn the_timesync_post_carries_only_header_and_footer() {
+        let (handler, mut seen) = handler_against_429();
+        handler
+            .set_endpoint_path("/?PROBE_ID=1&SESSION_ID=s".into())
+            .await
+            .unwrap();
+        handler.set_session_id("s".into()).await;
+        handler.submit(make_result(1001)).await;
+        let _ = handler.post_timesync().await;
+        let (_, req) = seen.try_recv().unwrap();
+        assert!(
+            req.starts_with("POST /?PROBE_ID=1&SESSION_ID=s&SRC=timesync HTTP/1.1\r\n"),
+            "{req}"
+        );
+        let body = &req[req.find("\r\n\r\n").unwrap() + 4..];
+        assert_eq!(body, "P_TO_C_REPORT\n\nSESSION_ID s\n");
+        assert_eq!(handler.queue_stats().await.count, 1, "results stay queued");
     }
 }

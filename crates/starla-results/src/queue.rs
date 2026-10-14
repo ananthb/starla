@@ -19,6 +19,9 @@ pub struct QueuedResult {
     pub attempts: u32,
     /// Timestamp of last upload attempt
     pub last_attempt_at: Option<i64>,
+    /// `lts` when the result was measured: the reference probe writes
+    /// get_timesync() into each result as it is produced, not at upload.
+    pub lts: i64,
 }
 
 /// Queue statistics
@@ -48,6 +51,11 @@ impl ResultQueue {
 
     /// Add a result to the queue. Drops oldest if at capacity.
     pub fn enqueue(&mut self, result: MeasurementResult) {
+        self.enqueue_measured(result, -1);
+    }
+
+    /// Add a result with the `lts` it was measured at.
+    pub fn enqueue_measured(&mut self, result: MeasurementResult, lts: i64) {
         if self.items.len() >= self.max_capacity {
             if let Some(d) = self.items.pop_front() {
                 warn!(
@@ -67,6 +75,7 @@ impl ResultQueue {
             queued_at: now,
             attempts: 0,
             last_attempt_at: None,
+            lts,
         });
     }
 

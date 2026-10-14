@@ -6,6 +6,8 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const NEVER: i64 = i64::MIN;
+
 /// Tracks time synchronization status for calculating `lts` values
 ///
 /// The `lts` (local time sync) field in measurement results shows how many
@@ -24,15 +26,14 @@ impl Default for TimeSyncTracker {
 }
 
 impl TimeSyncTracker {
-    /// Create a new tracker, assuming we're synced now
+    /// Create a tracker that has never synced: `lts` is -1 until the first
+    /// upload whose answer shows our clock agrees with the controller's, as
+    /// the reference probe's get_timesync() is -1 without a timesync file.
+    /// (Starla assumed a sync at start and never marked one, so its lts was
+    /// its uptime: 12,336 s in probe 1018212's uploads on 2026-10-12.)
     pub fn new() -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-
         Self {
-            last_sync: AtomicI64::new(now),
+            last_sync: AtomicI64::new(NEVER),
         }
     }
 
@@ -62,13 +63,16 @@ impl TimeSyncTracker {
         self.last_sync.load(Ordering::SeqCst)
     }
 
-    /// Calculate current lts value (seconds since last sync)
+    /// Calculate current lts value (seconds since last sync, -1 if never)
     pub fn lts(&self) -> i64 {
+        let last = self.last_sync.load(Ordering::SeqCst);
+        if last == NEVER {
+            return -1;
+        }
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let last = self.last_sync.load(Ordering::SeqCst);
 
         // Ensure non-negative (in case of clock issues)
         (now - last).max(0)
@@ -82,15 +86,17 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn test_new_tracker() {
+    fn a_new_tracker_has_never_synced() {
         let tracker = TimeSyncTracker::new();
-        // Should be very close to 0 since we just created it
-        assert!(tracker.lts() < 2);
+        assert_eq!(tracker.lts(), -1);
+        tracker.mark_synced();
+        assert!((0..2).contains(&tracker.lts()));
     }
 
     #[test]
     fn test_lts_increases() {
         let tracker = TimeSyncTracker::new();
+        tracker.mark_synced();
         let lts1 = tracker.lts();
 
         sleep(Duration::from_millis(100));
