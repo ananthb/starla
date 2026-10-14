@@ -73,7 +73,7 @@
       <p>On startup, the probe SSHes to a registration server (e.g. <code>reg-05.prod.atlas.ripe.net:443</code>) and runs <code>INIT</code> with probe identification on stdin:</p>
 
       <pre><div class="pre-head"><span class="lang">stdin</span><span>P_TO_R_INIT</span></div><div class="pre-body"><code>P_TO_R_INIT
-TOKEN_SPECS fluffy 1000 5120 debian/13/x86_64/starla/0.4.0
+TOKEN_SPECS fluffy 1000 5130 debian/13/x86_64/starla/1.0.0
 REASON_FOR_REGISTRATION NEW</code></div></pre>
 
       <p>The server responds with a controller assignment:</p>
@@ -119,16 +119,16 @@ Atlas probe, see http://atlas.ripe.net/
 
 Probe 1015186 (hostname) login: </code></div></pre>
 
-      <p>The controller sends <code>C_TO_P_TEST_V1</code> as the login, then the <code>SESSION_ID</code> as the password. On success: <code>OK\r\n\r\n</code>. On failure: <code>BAD_PASSWORD\r\n\r\n</code> and disconnect.</p>
+      <p>The controller sends <code>C_TO_P_TEST_V1</code> as the login, then the <code>SESSION_ID</code> as the password. On success: <code>OK\r\n\r\n</code>. On failure: <code>BAD_PASSWORD\r\n\r\n</code>; the connection stays open for another try, as the reference's telnetd does.</p>
 
       <h3>CRONLINE — recurring</h3>
-      <pre><div class="pre-head"><span class="lang">grammar</span><span>cronline</span></div><div class="pre-body"><code>CRONLINE &lt;interval&gt; &lt;offset&gt; &lt;end_time&gt; &lt;spread_type&gt; &lt;spread&gt; &lt;command&gt; [args...]</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">grammar</span><span>cronline</span></div><div class="pre-body"><code>CRONLINE &lt;interval&gt; &lt;start_time&gt; &lt;end_time&gt; &lt;spread_type&gt; &lt;spread&gt; &lt;command&gt; [args...]</code></div></pre>
 
       <table>
         <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
         <tbody>
           <tr><td>interval</td><td>u64</td><td>Seconds between executions (0 = one-shot)</td></tr>
-          <tr><td>offset</td><td>u64</td><td>Initial delay offset (ignored by starla)</td></tr>
+          <tr><td>start_time</td><td>i64</td><td>The cycle's phase: cycle k runs at <code>start_time + k·interval</code>, moved by a uniform offset in ±<code>spread/2</code> each cycle</td></tr>
           <tr><td>end_time</td><td>i64</td><td>Unix timestamp to stop (0 = never)</td></tr>
           <tr><td>spread_type</td><td>string</td><td>Usually <code>UNIFORM</code></td></tr>
           <tr><td>spread</td><td>u32</td><td>Random spread in seconds</td></tr>
@@ -161,7 +161,7 @@ Probe 1015186 (hostname) login: </code></div></pre>
       <table>
         <thead><tr><th>Command</th><th>What the embedded probe does with it</th><th>Why starla ignores it</th></tr></thead>
         <tbody>
-          <tr><td><code>CRONTAB</code></td><td>Names which on-disk cron directory the following CRONLINEs belong to.</td><td>starla doesn't persist schedules to a filesystem cron layout; jobs live in memory keyed by <code>msm_id</code>.</td></tr>
+          <tr><td><code>CRONTAB</code></td><td>Names which on-disk cron directory the following CRONLINEs belong to.</td><td>starla keeps each file's lines in memory rather than on disk; a later <code>CRONTAB</code> for a file replaces that file's lines and keeps the unchanged ones' slots.</td></tr>
           <tr><td><code>httppost</code></td><td>POSTs queued result files to the RIPE backend over the SSH tunnel.</td><td>starla uploads natively from <code>starla-results::uploader</code>; this CRONLINE is a redundant trigger.</td></tr>
           <tr><td><code>condmv</code> / <code>dfrm</code></td><td>Rotates result files between <code>data/new/ → data/out/ → data/storage/</code> and clears stale spool when disk is low.</td><td>starla queues results in a bounded in-memory queue; no on-disk spool to manage.</td></tr>
           <tr><td><code>conntrack</code></td><td>Reports kernel <code>nf_conntrack</code> table fullness (self-watchdog for the probe's tiny kernel).</td><td>The applet isn't present in our vendored reference busybox tree at <code>reference/probe-busybox/</code>, so the canonical <code>RESULT</code> format is unknown. Held rather than guessed; revisit if a reference impl surfaces.</td></tr>
@@ -185,7 +185,7 @@ Probe 1015186 (hostname) login: </code></div></pre>
         </tbody>
       </table>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · PreFormatted array</span></div><div class="pre-body"><code>RESULT { "id":"1001", "fw":5120, "mver": "2.6.4", "lts":10,
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · PreFormatted array</span></div><div class="pre-body"><code>RESULT { "id":"1001", "fw":5130, "mver": "2.6.4", "lts":10,
   "time":1700000000, "dst_name":"193.0.14.129", "af":4,
   "dst_addr":"193.0.14.129", "src_addr":"10.0.0.1",
   "proto":"ICMP", "ttl":56, "size":64,
@@ -208,7 +208,7 @@ Probe 1015186 (hostname) login: </code></div></pre>
         </tbody>
       </table>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"5001", "fw":5120, "mver": "2.6.4", "lts":0,
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"5001", "fw":5130, "mver": "2.6.4", "lts":0,
   "time":1700000000, "endtime":1700000030,
   "dst_name":"192.112.36.4", "dst_addr":"192.112.36.4",
   "src_addr":"10.0.0.1", "proto":"UDP", "af": 4,
@@ -282,7 +282,7 @@ Probe 1015186 (hostname) login: </code></div></pre>
       <h3>HTTP &mdash; <code>evhttpget</code></h3>
       <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evhttpget [-4|-6] [-A msm_id] [-O output] [-M max_body] &lt;url&gt;</code></div></pre>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result</span></div><div class="pre-body"><code>RESULT { "id":"12023", "fw":5120, "mver": "2.6.4", "lts":19,
+      <pre><div class="pre-head"><span class="lang">json</span><span>result</span></div><div class="pre-body"><code>RESULT { "id":"12023", "fw":5130, "mver": "2.6.4", "lts":19,
   "time":1775317966, "dst_name":"example.com", "af":4,
   "dst_addr":"93.184.216.34", "proto":"TCP",
   "result": [ { "method":"GET", "af": 6,
@@ -293,7 +293,7 @@ Probe 1015186 (hostname) login: </code></div></pre>
       <h3>TLS &mdash; <code>evsslgetcert</code></h3>
       <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evsslgetcert [-4|-6] [-p port] [-h hostname] [-A msm_id] [-O output] &lt;target&gt;</code></div></pre>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"14002", "fw":5120, "mver": "2.6.4", "lts":0,
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"14002", "fw":5130, "mver": "2.6.4", "lts":0,
   "time":1775325499, "dst_name":"atlas.ripe.net", "dst_port":"443",
   "ttr":0.390310, "method":"TLS", "ver":"1.3",
   "dst_addr":"193.0.11.37", "af": 4, "src_addr":"10.0.0.1",
@@ -306,7 +306,7 @@ Probe 1015186 (hostname) login: </code></div></pre>
       <h3>NTP &mdash; <code>evntp</code></h3>
       <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evntp [-4|-6] [-c count] [-A msm_id] [-O output] &lt;target&gt;</code></div></pre>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · 3 samples</span></div><div class="pre-body"><code>RESULT { "id":"99998", "fw":5120, "mver": "2.6.4", "lts":12,
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · 3 samples</span></div><div class="pre-body"><code>RESULT { "id":"99998", "fw":5130, "mver": "2.6.4", "lts":12,
   "time":1775323252, "dst_addr":"213.239.234.28",
   "src_addr":"204.168.188.81", "proto":"UDP", "af": 4,
   "li":"no", "version":4, "mode":"server", "stratum":2,
@@ -344,12 +344,12 @@ Connection: close
 Content-Length: 1234
 
 P_TO_C_REPORT
-RESULT { "id":"9018", "fw":5120, ... disk stats ... }
-RESULT { "id": "7001", "fw":5120, ... uptime ... }
-RESULT { "id": "9002", "fw":5120, ... interface stats ... }
+RESULT { "id":"9018", "fw":5130, ... disk stats ... }
+RESULT { "id": "7001", "fw":5130, ... uptime ... }
+RESULT { "id": "9002", "fw":5130, ... interface stats ... }
 RESULT 9901 ongoing 1775483034 starla
-RESULT { "id":"1001", "fw":5120, ... measurement result ... }
-RESULT { "id":"1002", "fw":5120, ... measurement result ... }
+RESULT { "id":"1001", "fw":5130, ... measurement result ... }
+RESULT { "id":"1002", "fw":5130, ... measurement result ... }
 
 SESSION_ID fa0b28e5...</code></div></pre>
 
@@ -387,7 +387,7 @@ SESSION_ID fa0b28e5...</code></div></pre>
         <li><strong>Field order</strong> &mdash; id, fw, mver, lts, time, [bundle], [dst_name], af, [dst_addr], [dst_port], [src_addr], proto, [ttl], [size], [endtime], [paris_id], result.</li>
         <li><strong>Array spacing</strong> &mdash; <code>[ { "rtt":10.5 }, { "rtt":11.2 } ]</code> with spaces inside brackets and braces.</li>
         <li><strong>prb_id</strong> &mdash; NOT in the RESULT line; controller reads it from the URL query.</li>
-        <li><strong>fw</strong> &mdash; must be <code>5120</code> (or a real deployed version). Arbitrary values may be rejected.</li>
+        <li><strong>fw</strong> &mdash; must be <code>5130</code> (or a real deployed version). Arbitrary values may be rejected.</li>
         <li><strong>FullLine bypass</strong> &mdash; TLS, NTP, traceroute use the FullLine variant; the complete body sits between <code>RESULT { </code> and <code> }</code>, bypassing the standard envelope formatter.</li>
       </ul>
     </section>
@@ -431,7 +431,7 @@ SESSION_ID fa0b28e5...</code></div></pre>
         <dt>Login</dt><dd>C_TO_P_TEST_V1</dd>
         <dt>Upload</dt><dd>127.0.0.1:8080</dd>
         <dt>Cadence</dt><dd>60s</dd>
-        <dt>fw</dt><dd>5120</dd>
+        <dt>fw</dt><dd>5130</dd>
         <dt>mver</dt><dd>2.6.4</dd>
       </dl>
     </div>

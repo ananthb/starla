@@ -707,3 +707,113 @@ hr.divider {
   border-top: 1px dashed var(--rule);
   margin: 40px 0;
 }
+
+/* ————— how it works: three.js globe ————— */
+.viz-section { margin: 6px 0 44px; }
+.viz {
+  position: relative;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  overflow: hidden;
+  background: radial-gradient(130% 130% at 30% -10%, var(--paper-2), var(--paper) 68%);
+  box-shadow: var(--shadow);
+}
+.viz-stage { position: relative; height: 430px; }
+.viz-canvas { position: absolute; inset: 0; }
+.viz-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
+
+/* static fallback, shown when WebGL or three.js is unavailable */
+.viz-fallback { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; }
+.viz-stage.viz-failed .viz-canvas { display: none; }
+.viz-stage.viz-failed .viz-fallback { display: flex; }
+.viz-fallback svg { width: min(540px, 84%); height: auto; color: var(--rule-strong); }
+.viz-fallback .fb-box { fill: var(--paper-2); stroke: var(--rule-strong); }
+.viz-fallback .fb-probe { fill: var(--accent); }
+.viz-fallback .fb-ctrl { fill: var(--highlight); }
+.viz-fallback text { fill: var(--ink); font-family: var(--mono); font-size: 11px; }
+.viz-fallback .fb-arrow { stroke: var(--rule-strong); stroke-width: 1.5; fill: none; }
+
+/* the dashboard: results arriving from the controller */
+.viz-panel {
+  position: absolute; top: 14px; right: 14px;
+  width: min(300px, 46%);
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--paper) 88%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.viz-panel-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid var(--rule);
+  text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; color: var(--ink-mute);
+}
+.viz-panel-head .dot {
+  width: 7px; height: 7px; border-radius: 999px; background: var(--accent);
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 60%, transparent);
+  animation: vizPulse 2s infinite;
+}
+@keyframes vizPulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.viz-panel-sub { margin-left: auto; }
+.viz-rows { list-style: none; margin: 0; padding: 5px 0; min-height: 116px; }
+.viz-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px;
+  align-items: baseline; padding: 5px 10px; color: var(--ink-2);
+  animation: vizRowIn .38s ease both;
+}
+.viz-row .id { color: var(--ink-mute); }
+.viz-row .place { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viz-row .ms { color: var(--accent); }
+@keyframes vizRowIn { from { opacity: 0; transform: translateY(-7px); } to { opacity: 1; transform: none; } }
+.viz-panel-foot { padding: 7px 10px; border-top: 1px solid var(--rule); color: var(--ink-mute); font-size: 10.5px; }
+
+/* narration over the globe */
+.viz-steps { position: absolute; left: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; font-family: var(--mono); font-size: 11px; }
+.viz-step { display: flex; align-items: center; gap: 8px; color: var(--ink-mute); transition: color .3s; }
+.viz-step b {
+  display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 999px;
+  border: 1px solid var(--rule-strong); font-weight: 500; font-size: 10px; color: var(--ink-2); background: var(--paper);
+  transition: background .3s, border-color .3s, color .3s;
+}
+.viz-step.on { color: var(--ink); }
+.viz-step.on b { border-color: var(--accent); color: var(--paper); background: var(--accent); }
+
+/* controls */
+.viz-controls { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--rule); font-family: var(--mono); font-size: 11px; color: var(--ink-mute); flex-wrap: wrap; }
+.viz-play {
+  display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px;
+  border: 1px solid var(--rule-strong); border-radius: 999px; background: var(--paper); color: var(--ink);
+  cursor: pointer; font: inherit;
+}
+.viz-play:hover { border-color: var(--accent); color: var(--accent); }
+.viz-play-icon { width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 9px; border-color: transparent transparent transparent currentColor; }
+.viz-play[aria-pressed="true"] .viz-play-icon {
+  width: 9px; height: 10px; border: none;
+  background:
+    linear-gradient(currentColor, currentColor) left center / 3px 100% no-repeat,
+    linear-gradient(currentColor, currentColor) right center / 3px 100% no-repeat;
+}
+.viz-status { min-width: 60px; }
+.viz-legend { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; }
+.viz-legend .lg { display: inline-block; width: 8px; height: 8px; border-radius: 999px; margin-right: 4px; vertical-align: middle; }
+.lg-probe { background: #8ab4ff; }
+.lg-ctrl { background: #ffd27a; }
+.viz-caption { margin-top: 12px; color: var(--ink-mute); font-size: 13px; }
+
+@media (max-width: 720px) {
+  .viz-stage { height: 470px; }
+  .viz-panel { position: static; width: auto; margin: 12px; margin-bottom: 0; }
+  .viz-steps { position: static; flex-direction: row; flex-wrap: wrap; padding: 12px 14px 0; }
+  .viz-legend { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .viz-panel-head .dot { animation: none; }
+}
+

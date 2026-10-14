@@ -4,41 +4,45 @@ Result management and upload for Starla.
 
 ## Features
 
-- **Persistent Queue**: SQLite-backed queue survives restarts
-- **Batch Upload**: Efficient batching of multiple results
-- **Retry Logic**: Exponential backoff for failed uploads
-- **Compression**: Gzip compression with auto-negotiation
-- **Format Compatibility**: Results match RIPE Atlas JSON schema
+- **Bounded in-memory queue**: configurable capacity; the oldest results are dropped when the buffer is full
+- **Batch upload**: the queue is drained and posted in one request, on the controller's own `httppost` slots
+- **Retry and backoff**: a failed upload is re-queued, and a `429` holds uploads with an increasing backoff
+- **RIPE Atlas format**: results are formatted to match the official C probe exactly — field order, spacing, numeric precision
+- **Clock sync (`lts`)**: tracks the last agreement with the controller, persisted across restarts
 
 ## Usage
 
 ```rust
 use starla_results::{ResultHandler, ResultHandlerConfig, UploaderConfig};
-
-let config = ResultHandlerConfig {
-    batch_size: 10,
-    upload_interval: Duration::from_secs(10),
-    max_result_age_secs: 3600,
-    max_attempts: 5,
-    cleanup_interval: Duration::from_secs(300),
-};
+use std::time::Duration;
 
 let handler = ResultHandler::new(
-    "results_queue.db",
+    transport, // Box<dyn UploadTransport>
     UploaderConfig::default(),
-    config,
-).await?;
+    ResultHandlerConfig {
+        upload_interval: Duration::from_secs(60),
+        max_result_age_secs: 3600,
+        max_attempts: 5,
+        cleanup_interval: Duration::from_secs(300),
+        max_queue_size: 10_000,
+        ..Default::default()
+    },
+    metrics, // starla_metrics::MetricsRegistry
+);
 
-// Queue a result for upload
-handler.queue_result(measurement_result).await?;
+// Once the controller assigns a session, point uploads at its endpoint.
+handler
+    .set_endpoint_path("/?PROBE_ID=12345&SESSION_ID=…".into())
+    .await?;
 
-// Run the upload loop
-handler.run(cancel_token).await?;
+// Queue a result for the next upload.
+handler.submit(measurement_result).await;
 ```
 
 ## Components
 
-- **PersistentResultQueue**: Durable storage for pending results
-- **ResultUploader**: HTTP client for uploading to controller
-- **TimeSyncTracker**: Tracks time synchronization for `lts` field
-- **AtlasResult**: RIPE Atlas result format wrapper
+- **`ResultQueue`**: the in-memory queue (a `VecDeque`, bounded by `max_queue_size`); no on-disk storage
+- **`ResultUploader`**: builds and sends the raw HTTP/1.1 `POST` over the `UploadTransport`
+- **`TimeSyncTracker`**: the last clock sync, for the `lts` field
+- **`HostTelemetry`**: the 7001/9018/9002 status lines and the rptaddrs report
+- **`AtlasResult`**: RIPE Atlas result formatting

@@ -38,15 +38,17 @@ let msm_id = MeasurementId(5678);
 
 ## Path Resolution
 
-Configuration directory priority:
+`config_dir()` priority:
 1. `$CONFIGURATION_DIRECTORY` (systemd)
-2. `$XDG_CONFIG_HOME/starla`
-3. `~/.config/starla`
+2. Container: `/config`
+3. `$XDG_CONFIG_HOME/starla`
+4. Root: `/etc/starla`, otherwise `~/.config/starla`
 
-State directory priority:
+`state_dir()` priority:
 1. `$STATE_DIRECTORY` (systemd)
-2. `$XDG_STATE_HOME/starla`
-3. `~/.local/state/starla`
+2. Container: `/state`
+3. `$XDG_STATE_HOME/starla`
+4. Root: `/var/lib/starla`, otherwise `~/.local/state/starla`
 
 ## Cargo Features
 
