@@ -816,4 +816,3 @@ hr.divider {
 @media (prefers-reduced-motion: reduce) {
   .viz-panel-head .dot { animation: none; }
 }
-
