@@ -107,7 +107,7 @@
       <h2 class="section"><span class="num">C</span>Debian · Ubuntu</h2>
       <p>The <code>.deb</code> package configures the apt repository for future updates automatically.</p>
 
-      <pre><div class="pre-head"><span class="lang">shell</span><span>apt</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_amd64.deb sudo dpkg -i starla_*.deb sudo apt update <span class="c"># arm64: download starla_arm64.deb instead</span> sudo systemctl enable --now starla</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>apt</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla_1.0.0_amd64.deb sudo dpkg -i starla_*.deb sudo apt update <span class="c"># the filename carries the version; arm64: starla_1.0.0_arm64.deb</span> sudo systemctl enable --now starla</code></div></pre>
 
       <p>Future updates arrive via <code>sudo apt upgrade starla</code>.</p>
     </section>
@@ -116,7 +116,7 @@
       <h2 class="section"><span class="num">D</span>Fedora · RHEL</h2>
       <p>The <code>.rpm</code> package configures the dnf repository for future updates automatically.</p>
 
-      <pre><div class="pre-head"><span class="lang">shell</span><span>dnf</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla.x86_64.rpm sudo dnf install ./starla*.rpm <span class="c"># aarch64: download starla.aarch64.rpm instead</span> sudo systemctl enable --now starla</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">shell</span><span>dnf</span></div><div class="pre-body"><code>curl -LO https://github.com/ananthb/starla/releases/latest/download/starla-1.0.0-1.x86_64.rpm sudo dnf install ./starla*.rpm <span class="c"># the filename carries the version; aarch64: starla-1.0.0-1.aarch64.rpm</span> sudo systemctl enable --now starla</code></div></pre>
 
       <p>Future updates arrive via <code>sudo dnf upgrade starla</code>.</p>
     </section>
