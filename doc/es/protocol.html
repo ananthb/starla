@@ -69,7 +69,7 @@
       <h3>Registration</h3>
       <p>On startup, the probe SSHes to a registration server (e.g. <code>reg-05.prod.atlas.ripe.net:443</code>) and runs <code>INIT</code> with probe identification on stdin:</p>
 
-      <pre><div class="pre-head"><span class="lang">stdin</span><span>P_TO_R_INIT</span></div><div class="pre-body"><code>P_TO_R_INIT TOKEN_SPECS fluffy 1000 5120 debian/13/x86_64/starla/0.4.0 REASON_FOR_REGISTRATION NEW</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">stdin</span><span>P_TO_R_INIT</span></div><div class="pre-body"><code>P_TO_R_INIT TOKEN_SPECS fluffy 1000 5130 debian/13/x86_64/starla/1.0.0 REASON_FOR_REGISTRATION NEW</code></div></pre>
 
       <p>The server responds with a controller assignment:</p>
 
@@ -102,16 +102,16 @@
 
       <pre><div class="pre-head"><span class="lang">telnet</span><span>banner + login</span></div><div class="pre-body"><code>IAC DO ECHO IAC DO NAWS IAC WILL ECHO IAC WILL SGA Atlas probe, see http://atlas.ripe.net/ Probe 1015186 (hostname) login: </code></div></pre>
 
-      <p>The controller sends <code>C_TO_P_TEST_V1</code> as the login, then the <code>SESSION_ID</code> as the password. On success: <code>OK\r\n\r\n</code>. On failure: <code>BAD_PASSWORD\r\n\r\n</code> and disconnect.</p>
+      <p>The controller sends <code>C_TO_P_TEST_V1</code> as the login, then the <code>SESSION_ID</code> as the password. On success: <code>OK\r\n\r\n</code>. On failure: <code>BAD_PASSWORD\r\n\r\n</code>; the connection stays open for another try, as the reference's telnetd does.</p>
 
       <h3>CRONLINE — recurring</h3>
-      <pre><div class="pre-head"><span class="lang">grammar</span><span>cronline</span></div><div class="pre-body"><code>CRONLINE &lt;interval&gt; &lt;offset&gt; &lt;end_time&gt; &lt;spread_type&gt; &lt;spread&gt; &lt;command&gt; [args...]</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">grammar</span><span>cronline</span></div><div class="pre-body"><code>CRONLINE &lt;interval&gt; &lt;start_time&gt; &lt;end_time&gt; &lt;spread_type&gt; &lt;spread&gt; &lt;command&gt; [args...]</code></div></pre>
 
       <table>
         <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
         <tbody>
           <tr><td>interval</td><td>u64</td><td>Seconds between executions (0 = one-shot)</td></tr>
-          <tr><td>offset</td><td>u64</td><td>Initial delay offset (ignored by starla)</td></tr>
+          <tr><td>start_time</td><td>i64</td><td>The cycle's phase: cycle k runs at <code>start_time + k·interval</code>, moved by a uniform offset in ±<code>spread/2</code> each cycle</td></tr>
           <tr><td>end_time</td><td>i64</td><td>Unix timestamp to stop (0 = never)</td></tr>
           <tr><td>spread_type</td><td>string</td><td>Usually <code>UNIFORM</code></td></tr>
           <tr><td>spread</td><td>u32</td><td>Random spread in seconds</td></tr>
@@ -144,7 +144,7 @@
       <table>
         <thead><tr><th>Command</th><th>What the embedded probe does with it</th><th>Why starla ignores it</th></tr></thead>
         <tbody>
-          <tr><td><code>CRONTAB</code></td><td>Names which on-disk cron directory the following CRONLINEs belong to.</td><td>starla doesn't persist schedules to a filesystem cron layout; jobs live in memory keyed by <code>msm_id</code>.</td></tr>
+          <tr><td><code>CRONTAB</code></td><td>Names which on-disk cron directory the following CRONLINEs belong to.</td><td>starla keeps each file's lines in memory rather than on disk; a later <code>CRONTAB</code> for a file replaces that file's lines and keeps the unchanged ones' slots.</td></tr>
           <tr><td><code>httppost</code></td><td>POSTs queued result files to the RIPE backend over the SSH tunnel.</td><td>starla uploads natively from <code>starla-results::uploader</code>; this CRONLINE is a redundant trigger.</td></tr>
           <tr><td><code>condmv</code> / <code>dfrm</code></td><td>Rotates result files between <code>data/new/ → data/out/ → data/storage/</code> and clears stale spool when disk is low.</td><td>starla queues results in a bounded in-memory queue; no on-disk spool to manage.</td></tr>
           <tr><td><code>conntrack</code></td><td>Reports kernel <code>nf_conntrack</code> table fullness (self-watchdog for the probe's tiny kernel).</td><td>The applet isn't present in our vendored reference busybox tree at <code>reference/probe-busybox/</code>, so the canonical <code>RESULT</code> format is unknown. Held rather than guessed; revisit if a reference impl surfaces.</td></tr>
@@ -168,7 +168,7 @@
         </tbody>
       </table>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · PreFormatted array</span></div><div class="pre-body"><code>RESULT { "id":"1001", "fw":5120, "mver": "2.6.4", "lts":10, "time":1700000000, "dst_name":"193.0.14.129", "af":4, "dst_addr":"193.0.14.129", "src_addr":"10.0.0.1", "proto":"ICMP", "ttl":56, "size":64, "result": [ { "rtt":10.500000 }, { "rtt":11.200000 }, { "rtt":10.800000 } ] }</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · PreFormatted array</span></div><div class="pre-body"><code>RESULT { "id":"1001", "fw":5130, "mver": "2.6.4", "lts":10, "time":1700000000, "dst_name":"193.0.14.129", "af":4, "dst_addr":"193.0.14.129", "src_addr":"10.0.0.1", "proto":"ICMP", "ttl":56, "size":64, "result": [ { "rtt":10.500000 }, { "rtt":11.200000 }, { "rtt":10.800000 } ] }</code></div></pre>
 
       <p>Timeouts: <code>{ "x":"*" }</code>. RTT has 6 decimals. <code>ttl</code> is omitted if all packets timed out. Requires <code>CAP_NET_RAW</code>.</p>
 
@@ -186,7 +186,7 @@
         </tbody>
       </table>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"5001", "fw":5120, "mver": "2.6.4", "lts":0, "time":1700000000, "endtime":1700000030, "dst_name":"192.112.36.4", "dst_addr":"192.112.36.4", "src_addr":"10.0.0.1", "proto":"UDP", "af": 4, "size":40, "paris_id":5, "result": [ { "hop":1, "result": [ { "from":"10.0.0.1", "ttl":255, "size":76, "rtt":3.723 } ] }, { "hop":2, "result": [ { "x":"*" }, { "x":"*" }, { "x":"*" } ] }, { "hop":13, "result": [ { "from":"192.112.36.4", "ttl":54, "rtt":31.981, "size":88 } ] } ] }</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"5001", "fw":5130, "mver": "2.6.4", "lts":0, "time":1700000000, "endtime":1700000030, "dst_name":"192.112.36.4", "dst_addr":"192.112.36.4", "src_addr":"10.0.0.1", "proto":"UDP", "af": 4, "size":40, "paris_id":5, "result": [ { "hop":1, "result": [ { "from":"10.0.0.1", "ttl":255, "size":76, "rtt":3.723 } ] }, { "hop":2, "result": [ { "x":"*" }, { "x":"*" }, { "x":"*" } ] }, { "hop":13, "result": [ { "from":"192.112.36.4", "ttl":54, "rtt":31.981, "size":88 } ] } ] }</code></div></pre>
 
       <p>RTT 3 decimals. 3 probes per hop. Requires <code>CAP_NET_RAW</code>.</p>
 
@@ -244,19 +244,19 @@
       <h3>HTTP — <code>evhttpget</code></h3>
       <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evhttpget [-4|-6] [-A msm_id] [-O output] [-M max_body] &lt;url&gt;</code></div></pre>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result</span></div><div class="pre-body"><code>RESULT { "id":"12023", "fw":5120, "mver": "2.6.4", "lts":19, "time":1775317966, "dst_name":"example.com", "af":4, "dst_addr":"93.184.216.34", "proto":"TCP", "result": [ { "method":"GET", "af": 6, "dst_addr":"2600:140f:3::17df:2fba", "src_addr":"10.0.0.1", "rt":106.612889, "res":200, "ver":"1.1", "hsize":296, "bsize":0 } ] }</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">json</span><span>result</span></div><div class="pre-body"><code>RESULT { "id":"12023", "fw":5130, "mver": "2.6.4", "lts":19, "time":1775317966, "dst_name":"example.com", "af":4, "dst_addr":"93.184.216.34", "proto":"TCP", "result": [ { "method":"GET", "af": 6, "dst_addr":"2600:140f:3::17df:2fba", "src_addr":"10.0.0.1", "rt":106.612889, "res":200, "ver":"1.1", "hsize":296, "bsize":0 } ] }</code></div></pre>
 
       <h3>TLS — <code>evsslgetcert</code></h3>
       <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evsslgetcert [-4|-6] [-p port] [-h hostname] [-A msm_id] [-O output] &lt;target&gt;</code></div></pre>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"14002", "fw":5120, "mver": "2.6.4", "lts":0, "time":1775325499, "dst_name":"atlas.ripe.net", "dst_port":"443", "ttr":0.390310, "method":"TLS", "ver":"1.3", "dst_addr":"193.0.11.37", "af": 4, "src_addr":"10.0.0.1", "ttc":0.191244, "rt":0.390310, "server_cipher":"0x1302", "cert":[ "-----BEGIN CERTIFICATE-----\nMIIG...\n-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----\nMIIF...\n-----END CERTIFICATE-----" ] }</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine</span></div><div class="pre-body"><code>RESULT { "id":"14002", "fw":5130, "mver": "2.6.4", "lts":0, "time":1775325499, "dst_name":"atlas.ripe.net", "dst_port":"443", "ttr":0.390310, "method":"TLS", "ver":"1.3", "dst_addr":"193.0.11.37", "af": 4, "src_addr":"10.0.0.1", "ttc":0.191244, "rt":0.390310, "server_cipher":"0x1302", "cert":[ "-----BEGIN CERTIFICATE-----\nMIIG...\n-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----\nMIIF...\n-----END CERTIFICATE-----" ] }</code></div></pre>
 
       <p>Times (<code>ttr</code>, <code>ttc</code>, <code>rt</code>) in seconds. <code>ver</code> is <code>"1.2"</code> or <code>"1.3"</code> (not <code>"Tls12"</code>). <code>server_cipher</code> is hex (<code>"0xc030"</code>). Certificates are full PEM with escaped newlines.</p>
 
       <h3>NTP — <code>evntp</code></h3>
       <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evntp [-4|-6] [-c count] [-A msm_id] [-O output] &lt;target&gt;</code></div></pre>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · 3 samples</span></div><div class="pre-body"><code>RESULT { "id":"99998", "fw":5120, "mver": "2.6.4", "lts":12, "time":1775323252, "dst_addr":"213.239.234.28", "src_addr":"204.168.188.81", "proto":"UDP", "af": 4, "li":"no", "version":4, "mode":"server", "stratum":2, "poll":8, "precision":5.96046e-08, "root-delay":0.00956726, "root-dispersion":0.0142212, "ref-id":"7cd8a40e", "ref-ts":3984311600.292619705, "result": [ { "origin-ts":3984312052.977718830, "receive-ts":3984312052.989268303, "transmit-ts":3984312052.989336491, "final-ts":3984312053.002320766, "rtt":0.024534, "offset":0.011981 }, ... ] }</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · 3 samples</span></div><div class="pre-body"><code>RESULT { "id":"99998", "fw":5130, "mver": "2.6.4", "lts":12, "time":1775323252, "dst_addr":"213.239.234.28", "src_addr":"204.168.188.81", "proto":"UDP", "af": 4, "li":"no", "version":4, "mode":"server", "stratum":2, "poll":8, "precision":5.96046e-08, "root-delay":0.00956726, "root-dispersion":0.0142212, "ref-id":"7cd8a40e", "ref-ts":3984311600.292619705, "result": [ { "origin-ts":3984312052.977718830, "receive-ts":3984312052.989268303, "transmit-ts":3984312052.989336491, "final-ts":3984312053.002320766, "rtt":0.024534, "offset":0.011981 }, ... ] }</code></div></pre>
 
       <table>
         <thead><tr><th>Field</th><th>Format</th></tr></thead>
@@ -274,7 +274,7 @@
       <h2 class="section"><span class="num">4</span>Result upload protocol</h2>
       <p>Results are uploaded via HTTP POST through SSH direct-tcpip channels to <code>127.0.0.1:8080</code> on the controller side.</p>
 
-      <pre><div class="pre-head"><span class="lang">http</span><span>POST · over SSH channel</span></div><div class="pre-body"><code>POST /?PROBE_ID=1015186&amp;SESSION_ID=fa0b28e5... HTTP/1.1 Host: 127.0.0.1 Content-Type: application/x-www-form-urlencoded User-Agent: httppost for atlas.ripe.net Connection: close Content-Length: 1234 P_TO_C_REPORT RESULT { "id":"9018", "fw":5120, ... disk stats ... } RESULT { "id": "7001", "fw":5120, ... uptime ... } RESULT { "id": "9002", "fw":5120, ... interface stats ... } RESULT 9901 ongoing 1775483034 starla RESULT { "id":"1001", "fw":5120, ... measurement result ... } RESULT { "id":"1002", "fw":5120, ... measurement result ... } SESSION_ID fa0b28e5...</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">http</span><span>POST · over SSH channel</span></div><div class="pre-body"><code>POST /?PROBE_ID=1015186&amp;SESSION_ID=fa0b28e5... HTTP/1.1 Host: 127.0.0.1 Content-Type: application/x-www-form-urlencoded User-Agent: httppost for atlas.ripe.net Connection: close Content-Length: 1234 P_TO_C_REPORT RESULT { "id":"9018", "fw":5130, ... disk stats ... } RESULT { "id": "7001", "fw":5130, ... uptime ... } RESULT { "id": "9002", "fw":5130, ... interface stats ... } RESULT 9901 ongoing 1775483034 starla RESULT { "id":"1001", "fw":5130, ... measurement result ... } RESULT { "id":"1002", "fw":5130, ... measurement result ... } SESSION_ID fa0b28e5...</code></div></pre>
 
       <p>The controller responds <code>200 OK</code> with body <code>OK\n</code> on success. <code>429</code> means rate limiting; honor the <code>Retry-After</code> header. The official <code>httppost</code> uploads once per 60 seconds.</p>
 
@@ -310,7 +310,7 @@
         <li><strong>Field order</strong> — id, fw, mver, lts, time, [bundle], [dst_name], af, [dst_addr], [dst_port], [src_addr], proto, [ttl], [size], [endtime], [paris_id], result.</li>
         <li><strong>Array spacing</strong> — <code>[ { "rtt":10.5 }, { "rtt":11.2 } ]</code> with spaces inside brackets and braces.</li>
         <li><strong>prb_id</strong> — NOT in the RESULT line; controller reads it from the URL query.</li>
-        <li><strong>fw</strong> — must be <code>5120</code> (or a real deployed version). Arbitrary values may be rejected.</li>
+        <li><strong>fw</strong> — must be <code>5130</code> (or a real deployed version). Arbitrary values may be rejected.</li>
         <li><strong>FullLine bypass</strong> — TLS, NTP, traceroute use the FullLine variant; the complete body sits between <code>RESULT { </code> and <code> }</code>, bypassing the standard envelope formatter.</li>
       </ul>
     </section>
@@ -354,7 +354,7 @@
         <dt>Login</dt><dd>C_TO_P_TEST_V1</dd>
         <dt>Upload</dt><dd>127.0.0.1:8080</dd>
         <dt>Cadence</dt><dd>60s</dd>
-        <dt>fw</dt><dd>5120</dd>
+        <dt>fw</dt><dd>5130</dd>
         <dt>mver</dt><dd>2.6.4</dd>
       </dl>
     </div>
