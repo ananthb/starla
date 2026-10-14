@@ -197,7 +197,9 @@ pub const ICMP_HEADER_LEN: usize = 8;
 /// runs on, and it is why a ping without `-s` reports "size":32.
 pub const MIN_DATA_LEN: usize = 32;
 
-/// The most: MAX_DATA_SIZE less the ICMP header (ping.c:50, 545, 623).
+/// The most: MAX_DATA_SIZE (4096 less IPHDR) less the ICMP header
+/// (ping.c:51,545,623). Both families cap the data here (ICMP_MINLEN and
+/// ICMP6_HDRSIZE are both 8), so the value is the same for each.
 pub const MAX_DATA_LEN: usize = 4096 - 20 - ICMP_HEADER_LEN;
 
 /// The data bytes an echo request carries for `-s size`. The reference

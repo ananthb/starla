@@ -183,6 +183,12 @@ pub async fn fetch(
                 break;
             }
             buf.extend_from_slice(&chunk[..n]);
+            // Stop once the body is complete by Content-Length or a chunked
+            // terminator, so a server that ignores `Connection: close` does
+            // not make the whole-read timeout discard a complete response.
+            if response_complete(&buf) {
+                break;
+            }
         }
         Ok::<_, std::io::Error>(buf)
     };
@@ -220,6 +226,31 @@ pub struct ParsedResponse {
     pub hsize: usize,
     pub bsize: usize,
     pub header: Option<Vec<String>>,
+}
+
+/// Whether `buf` holds a response the read loop can stop at: headers done and
+/// the body complete by Content-Length or a chunked terminator. A response
+/// with neither is read until the server closes the connection.
+fn response_complete(buf: &[u8]) -> bool {
+    let Some(header_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+        return false;
+    };
+    let headers = String::from_utf8_lossy(&buf[..header_end]).to_ascii_lowercase();
+    let body = &buf[header_end + 4..];
+    if let Some(len) = headers
+        .lines()
+        .find_map(|l| l.strip_prefix("content-length:"))
+        .and_then(|v| v.trim().parse::<usize>().ok())
+    {
+        return body.len() >= len;
+    }
+    if headers
+        .lines()
+        .any(|l| l.trim_start().starts_with("transfer-encoding:") && l.contains("chunked"))
+    {
+        return body.ends_with(b"0\r\n\r\n");
+    }
+    false
 }
 
 /// Parse a complete response the way httpget's read loop does: the status

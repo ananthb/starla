@@ -979,11 +979,19 @@ async fn main() -> Result<()> {
         .collect();
 
     // What the registration server last told us, kept across restarts like
-    // the reference probe's con_init_conf.txt (registration.rs).
-    let reg_path = state_dir.join("con_init_conf.txt");
+    // the reference probe's con_init_conf.txt (registration.rs). Under the
+    // runtime dir, as the reference keeps @atlas_rundir@ on tmpfs, so a reboot
+    // re-registers but a process restart does not.
+    let reg_path = runtime_dir.join("con_init_conf.txt");
     // The controller session to reuse across restarts, the reference probe's
     // con_keep_conf.txt (registration.rs).
-    let con_keep_path = state_dir.join("con_keep_conf.txt");
+    let con_keep_path = runtime_dir.join("con_keep_conf.txt");
+    if generated_key {
+        // A new key is a new probe identity: the cached controller (and its
+        // reverse port) would not accept it, so drop them and register fresh.
+        let _ = std::fs::remove_file(&reg_path);
+        let _ = std::fs::remove_file(&con_keep_path);
+    }
 
     // Registration loop: retries indefinitely with backoff
     let mut reg_delay = Duration::from_secs(5);
@@ -1321,8 +1329,9 @@ async fn main() -> Result<()> {
                                 ctrl_retry!('register_and_connect);
                             }
                             Ok(InitResponse::Refused { reason }) => {
-                                // atlasinit: the controller's REFUSED forces a new
-                                // registration after ATLAS_DEFAULT_WAIT.
+                                // atlasinit's REFUSED branch only writes
+                                // force_reg.sh; the wait before re-registering is
+                                // Starla's own, so a refusal does not spin.
                                 warn!(
                                     "Controller refused us ({}); registering again in {}s",
                                     reason, DEFAULT_WAIT_SECS

@@ -33,12 +33,9 @@ webpki-roots = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 base64 = { workspace = true }
-# evtdig --ttl: IP_RECVTTL / IPV6_RECVHOPLIMIT and recvmsg()'s control messages
-libc = { workspace = true }
-
-# Traceroute's raw sockets: recvmsg ancillary data (IPv6 hop limit and
-# traffic class), CLOCK_MONOTONIC and the IPv6 socket options.
-[target.'cfg(unix)'.dependencies]
+# recvmsg() control messages and raw-socket options: evtdig --ttl
+# (IP_RECVTTL / IPV6_RECVHOPLIMIT) and traceroute's raw sockets (IPv6 hop
+# limit and traffic class, CLOCK_MONOTONIC). Every use is cfg(unix)/cfg(linux).
 libc = { workspace = true }
 
 # Scamper-backed measurement backends. The rscamper crate FFI-links against

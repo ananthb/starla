@@ -125,8 +125,6 @@ pub struct NtpResult {
     pub header: Option<NtpHeader>,
     /// One per request sent; None for a timeout (`{ "x":"*" }`)
     pub samples: Vec<Option<NtpSample>>,
-    /// Total time for all samples in seconds
-    pub ttr: f64,
 }
 
 /// Perform a single NTP exchange, returning the sample and the raw reply
@@ -196,7 +194,6 @@ pub async fn execute_ntp_query(config: &NtpConfig) -> anyhow::Result<NtpResult> 
     let timeout_dur = Duration::from_millis(config.timeout_ms);
     let gap = Duration::from_millis(config.gap_ms);
 
-    let start = Instant::now();
     let mut samples = Vec::new();
     let mut header = None;
 
@@ -219,11 +216,7 @@ pub async fn execute_ntp_query(config: &NtpConfig) -> anyhow::Result<NtpResult> 
         }
     }
 
-    Ok(NtpResult {
-        header,
-        samples,
-        ttr: start.elapsed().as_secs_f64(),
-    })
+    Ok(NtpResult { header, samples })
 }
 
 fn parse_header(raw: &[u8; 48]) -> NtpHeader {

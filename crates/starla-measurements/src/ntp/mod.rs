@@ -75,8 +75,8 @@ fn result_body(
             let precision_val = 2.0_f64.powi(h.precision as i32);
             format!(
                 ", \"li\":\"{}\", \"version\":{}, \"mode\":\"{}\", \"stratum\":{}, \"poll\":{}, \
-                 \"precision\":{:e}, \"root-delay\":{}, \"root-dispersion\":{}, \
-                 \"ref-id\":\"{}\", \"ref-ts\":{:.9}",
+                 \"precision\":{:e}, \"root-delay\":{}, \"root-dispersion\":{}, \"ref-id\":{}, \
+                 \"ref-ts\":{:.9}",
                 li_str,
                 h.version,
                 mode_str,
@@ -85,7 +85,9 @@ fn result_body(
                 precision_val,
                 h.root_delay,
                 h.root_dispersion,
-                h.ref_id,
+                // The server controls ref-id: quote it so a \" cannot break
+                // the RESULT line.
+                crate::http::raw::quoted(&h.ref_id),
                 h.ref_ts,
             )
         }
@@ -95,13 +97,14 @@ fn result_body(
     // "lts":0 is a placeholder the results crate replaces with the lts
     // the result was queued at.
     format!(
-        "\"id\":\"{}\", \"fw\":{}, \"mver\": \"2.6.4\", \"lts\":0, \"time\":{}, \
-         \"dst_name\":\"{}\", \"dst_addr\":\"{}\", \"src_addr\":\"{}\", \"proto\":\"UDP\", \
-         \"af\": {}{}, \"result\": [ {} ]",
+        "\"id\":\"{}\", \"fw\":{}, \"mver\": \"2.6.4\", \"lts\":0, \"time\":{}, \"dst_name\":{}, \
+         \"dst_addr\":\"{}\", \"src_addr\":\"{}\", \"proto\":\"UDP\", \"af\": {}{}, \"result\": [ \
+         {} ]",
         msm_id,
         starla_common::FIRMWARE_VERSION,
         timestamp,
-        config.dst_name,
+        // The controller names the target: quote it for the same reason.
+        crate::http::raw::quoted(&config.dst_name),
         config.target,
         src_str,
         af,
@@ -178,7 +181,6 @@ mod tests {
         let results = client::NtpResult {
             header: None,
             samples: vec![None, None, None],
-            ttr: 3.0,
         };
         let body = result_body(13023, &config(), "199.184.91.28", 4, 1, &results);
         assert!(
@@ -221,7 +223,6 @@ mod tests {
                 ref_ts: 1.0,
             }),
             samples: vec![Some(sample.clone()), None, Some(sample)],
-            ttr: 8.0,
         };
         let body = result_body(13023, &config(), "199.184.91.28", 4, 1, &results);
         assert!(

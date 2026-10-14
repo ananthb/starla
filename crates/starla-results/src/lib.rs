@@ -19,7 +19,9 @@ pub use host_telemetry::{HostTelemetry, HostTelemetryKind};
 pub use post_schedule::PostSchedule;
 pub use queue::{QueueStats, QueuedResult, ResultQueue};
 pub use time_sync::TimeSyncTracker;
-pub use uploader::{PostTarget, ResultUploader, UploadStream, UploadTransport, UploaderConfig};
+pub use uploader::{
+    PostTarget, RateLimited, ResultUploader, UploadStream, UploadTransport, UploaderConfig,
+};
 
 use post_schedule::Slots;
 use starla_common::MeasurementResult;
@@ -724,12 +726,11 @@ impl UploadGate {
         };
         self.consecutive_failures += 1;
         if is_rate_limited(&e) {
+            // A 429 is a refusal, not a plain failure: it steps its own
+            // backoff and does not inflate `consecutive_failures`, which
+            // would otherwise trip the generic `> 3` backoff early.
             self.rate_limited += 1;
-            // Parse "rate limited N" for Retry-After seconds
-            let retry_after = e
-                .to_string()
-                .strip_prefix("rate limited ")
-                .and_then(|s| s.parse::<u64>().ok());
+            let retry_after = e.downcast_ref::<RateLimited>().and_then(|r| r.retry_after);
             let hold = rate_limit_hold(self.rate_limited, retry_after);
             warn!(
                 "Rate limited ({} in a row), next upload in {}s",
@@ -751,9 +752,9 @@ impl UploadGate {
     }
 }
 
-/// The uploader's 429 ("rate limited" or "rate limited <Retry-After>").
+/// The uploader's 429, told apart from any other failure by type.
 fn is_rate_limited(e: &anyhow::Error) -> bool {
-    e.to_string().starts_with("rate limited")
+    e.downcast_ref::<RateLimited>().is_some()
 }
 
 /// The controller's crontab posts `&SRC=timesync` every 900 s.

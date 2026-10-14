@@ -290,7 +290,8 @@ pub struct HttpSpec {
     /// (the ip-echo built-ins ask for 1024; RIPE reads X-Client-IP there)
     #[serde(default)]
     pub store_headers: u32,
-    /// `-0`: HTTP/1.0 (evhttpget's default, and `-1`, is HTTP/1.1)
+    /// `-0`: send HTTP/1.0. `-1`, and the default, sends HTTP/1.1
+    /// (httpget.c:436,1831-1834).
     #[serde(default)]
     pub http10: bool,
     /// `--timeout N`: ms to wait, as evhttpget's read/connect timeout. None
@@ -447,6 +448,9 @@ const DO: u8 = 253;
 const DONT: u8 = 254;
 const SB: u8 = 250; // Subnegotiation Begin
 const SE: u8 = 240; // Subnegotiation End
+
+/// eperd's MAX_INTERVAL (eperd.c:83): no crontab interval over two years.
+const MAX_INTERVAL: u64 = 2 * 366 * 24 * 3600;
 
 // Telnet options
 const TELOPT_ECHO: u8 = 1;
@@ -730,9 +734,16 @@ fn take_over(
     let mut sessions = ATLAS_SESSIONS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
+    // Drop entries whose session is gone (its receiver was dropped); the map
+    // is keyed by an Arc address, so a freed session's key would otherwise
+    // leak forever.
+    sessions.retain(|_, tx| tx.receiver_count() > 0);
     let tx = sessions
         .entry(key)
         .or_insert_with(|| tokio::sync::watch::channel(()).0);
+    // Bump, then subscribe: the returned receiver must not treat this
+    // session's own bump as a newer session taking over, so it is created
+    // after the change.
     tx.send_replace(());
     tx.subscribe()
 }
@@ -1105,18 +1116,39 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
 
     // Parse CRONLINE header fields
     // tokens[0] = "CRONLINE"
+    // eperd rejects a line whose interval is over MAX_INTERVAL or any numeric
+    // field does not fully parse (eperd.c:569-580). Interval 0 is allowed:
+    // Starla's ONEOFF rebuilds a `CRONLINE 0 …` for its one-shot.
     let interval: u64 = match tokens[1].parse() {
-        Ok(v) => v,
-        Err(_) => {
+        Ok(v) if v <= MAX_INTERVAL => v,
+        _ => {
             warn!("CRONLINE invalid interval '{}': {}", tokens[1], cmd);
             return TelnetCommand::Unknown(cmd.to_string());
         }
     };
     // The cycle's phase: eperd runs cycle k at start_time + k * interval.
-    let start_time: i64 = tokens[2].parse().unwrap_or(0);
-    let end_time: i64 = tokens[3].parse().unwrap_or(0);
-    let _spread_type = &tokens[4]; // UNIFORM, etc.
-    let spread: u32 = tokens[5].parse().unwrap_or(0);
+    let Ok(start_time) = tokens[2].parse::<i64>() else {
+        warn!("CRONLINE invalid start time '{}': {}", tokens[2], cmd);
+        return TelnetCommand::Unknown(cmd.to_string());
+    };
+    let Ok(end_time) = tokens[3].parse::<i64>() else {
+        warn!("CRONLINE invalid end time '{}': {}", tokens[3], cmd);
+        return TelnetCommand::Unknown(cmd.to_string());
+    };
+    // Only UNIFORM reads the parameter (do_distr, eperd.c:584-602): NONE and
+    // an unknown distribution mean no offset.
+    let _spread_type = &tokens[4];
+    let spread: u32 = if tokens[4] == "UNIFORM" {
+        match tokens[5].parse() {
+            Ok(v) => v,
+            Err(_) => {
+                warn!("CRONLINE invalid spread '{}': {}", tokens[5], cmd);
+                return TelnetCommand::Unknown(cmd.to_string());
+            }
+        }
+    } else {
+        0
+    };
 
     // The rest is the measurement command
     let measurement_cmd = &tokens[6];

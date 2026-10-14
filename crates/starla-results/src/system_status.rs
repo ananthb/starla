@@ -1,23 +1,19 @@
 //! Status RESULT lines, on the reference probe's cadence
 //!
 //! The reference's main loop (bin/ripe-atlas.in) writes, every 180 s, an
-//! uptime report (`rptuptime`, 7001) and, once the host has been up 10 min,
-//! a disk report (`dfrm -A 9018 $ATLAS_DATA`), plus interface counters
-//! (`rxtxrpt -A 9002`) only when RXTXRPT=yes, which it is not by default.
-//! condmv then appends a marker when it moves a spool file to data/out: 9907
-//! after eperd's results (data/new/7), 9901 after httppost's own lines
-//! (data/new/main). Starla sent 9018, 7001, 9002 and a `9901 ... starla`
-//! line in every upload instead.
+//! uptime report (`rptuptime`, 7001) and a disk report (`dfrm -A 9018
+//! $ATLAS_DATA 600 …`, whose 600 is the minimum free KB, not an uptime gate),
+//! plus interface counters (`rxtxrpt -A 9002`) only when RXTXRPT=yes, which it
+//! is not by default. condmv then appends a marker when it moves a spool file
+//! to data/out: 9907 after eperd's results (data/new/7), 9901 after httppost's
+//! own lines (data/new/main). Starla sent 9018, 7001, 9002 and a `9901 ...
+//! starla` line in every upload instead.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The reference's main-loop period (`sleepkick 180`).
 pub const STATUS_INTERVAL_SECS: u64 = 180;
-
-/// dfrm runs only once reboot-count.txt has been moved away, after 600 s of
-/// uptime.
-const DFRM_AFTER_UPTIME_SECS: u64 = 600;
 
 /// atlas_get_version_json_str(): `"fw":<firmware>, "mver": "2.6.4"`.
 fn version_json() -> String {
@@ -34,14 +30,11 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
-/// One main-loop pass: 7001, then 9018 once the host has been up 10 min,
-/// then 9002 if asked for.
+/// One main-loop pass: 7001, then 9018, then 9002 if asked for.
 pub fn status_lines(lts: i64, data_dir: &Path, rxtxrpt: bool) -> Vec<String> {
     let uptime = system_uptime();
     let mut lines = vec![uptime_line(lts, uptime)];
-    if uptime > DFRM_AFTER_UPTIME_SECS {
-        lines.extend(disk_line(data_dir));
-    }
+    lines.extend(disk_line(data_dir));
     if rxtxrpt {
         lines.extend(rxtxrpt_line(lts));
     }
@@ -125,7 +118,8 @@ fn spool_path(name: &str) -> String {
         .to_string()
 }
 
-/// The host's uptime in seconds (sysinfo on Linux, as rptuptime).
+/// The host's uptime in seconds (sysinfo on Linux, kern.boottime on macOS,
+/// as rptuptime).
 fn system_uptime() -> u64 {
     #[cfg(target_os = "linux")]
     {
@@ -133,11 +127,41 @@ fn system_uptime() -> u64 {
         if unsafe { libc::sysinfo(&mut info) } == 0 {
             return info.uptime.max(0) as u64;
         }
+        if let Ok(s) = std::fs::read_to_string("/proc/uptime") {
+            if let Some(n) = s.split('.').next().and_then(|n| n.parse().ok()) {
+                return n;
+            }
+        }
+        0
     }
-    std::fs::read_to_string("/proc/uptime")
-        .ok()
-        .and_then(|s| s.split('.').next().and_then(|n| n.parse().ok()))
-        .unwrap_or(0)
+    #[cfg(target_os = "macos")]
+    {
+        let mut boot: libc::timeval = unsafe { std::mem::zeroed() };
+        let mut len = std::mem::size_of::<libc::timeval>();
+        let mut mib = [libc::CTL_KERN, libc::KERN_BOOTTIME];
+        let ok = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                mib.len() as u32,
+                &mut boot as *mut _ as *mut libc::c_void,
+                &mut len,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if ok == 0 {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            return (now - boot.tv_sec as i64).max(0) as u64;
+        }
+        0
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        0
+    }
 }
 
 struct DiskStats {
@@ -160,7 +184,7 @@ fn disk_stats(dir: &Path) -> Option<DiskStats> {
                     block_size: stat.f_bsize as u64,
                     blocks: stat.f_blocks as u64,
                     blocks_free: stat.f_bfree as u64,
-                    free: stat.f_bfree as u64 * stat.f_bsize as u64 / 1024,
+                    free: stat.f_bfree as u64 * (stat.f_bsize as u64 / 1024),
                 });
             }
         }

@@ -19,6 +19,23 @@ use tracing::{debug, trace, warn};
 pub trait UploadStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
 impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> UploadStream for T {}
 
+/// The controller answered 429: the batch is refused, not failed, and the
+/// caller holds uploads before re-posting it (lib.rs). A typed error rather
+/// than a message string, so classification cannot drift. `retry_after` is the
+/// header's seconds, when it sent one.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("rate limited")]
+pub struct RateLimited {
+    pub retry_after: Option<u64>,
+}
+
+/// The numeric HTTP status code from a response's status line, e.g. 429 from
+/// `HTTP/1.1 429 Too Many Requests`. Substring matching treated a body that
+/// happened to contain "429" as a refusal.
+fn status_code(status_line: &str) -> Option<u16> {
+    status_line.split_whitespace().nth(1)?.parse().ok()
+}
+
 /// A transport that opens streams to the controller's result endpoint
 /// (127.0.0.1:8080 on the remote side of the SSH tunnel).
 pub trait UploadTransport: Send + Sync {
@@ -168,7 +185,9 @@ impl ResultUploader {
     pub fn default_target(&self, src: Option<&str>) -> PostTarget {
         let mut path = self.config.endpoint_path.clone();
         if let Some(src) = src {
-            path.push_str("&SRC=");
+            // `?SRC=…` on an endpoint with no query yet, `&SRC=…` otherwise.
+            path.push(if path.contains('?') { '&' } else { '?' });
+            path.push_str("SRC=");
             path.push_str(src);
         }
         PostTarget {
@@ -412,49 +431,50 @@ impl ResultUploader {
 
         // Parse HTTP status
         if let Some(status_line) = response_str.lines().next() {
-            if status_line.contains("429") {
-                // Parse Retry-After header if present
-                let retry_after = response_str
-                    .lines()
-                    .find(|l| l.to_lowercase().starts_with("retry-after:"))
-                    .and_then(|l| l.split(':').nth(1))
-                    .and_then(|v| v.trim().parse::<u64>().ok());
-                if let Some(secs) = retry_after {
-                    warn!("Rate limited (429), Retry-After: {}s", secs);
-                    anyhow::bail!("rate limited {}", secs);
-                } else {
-                    warn!("Rate limited (429)");
-                    anyhow::bail!("rate limited");
-                }
-            } else if status_line.contains("200") {
-                // Check body for OK/ERR
-                if let Some(body_start) = response_str.find("\r\n\r\n") {
-                    let resp_body = response_str[body_start + 4..].trim();
-                    if resp_body == "OK" {
-                        debug!("Batch upload successful: {} results", count);
-                        self.metrics
-                            .record_upload_duration(start_time.elapsed().as_secs_f64());
-                        if let Some(tolerance) = target.set_time {
-                            self.judge_clock(&response_str, start_time.elapsed(), tolerance)
-                                .await;
-                        }
-                        return Ok(());
+            match status_code(status_line) {
+                Some(429) => {
+                    // Parse Retry-After header if present
+                    let retry_after = response_str
+                        .lines()
+                        .find(|l| l.to_lowercase().starts_with("retry-after:"))
+                        .and_then(|l| l.split(':').nth(1))
+                        .and_then(|v| v.trim().parse::<u64>().ok());
+                    if let Some(secs) = retry_after {
+                        warn!("Rate limited (429), Retry-After: {}s", secs);
                     } else {
-                        debug!("Upload rejected: {:?}", resp_body);
-                        anyhow::bail!("Upload rejected: {}", resp_body);
+                        warn!("Rate limited (429)");
                     }
+                    return Err(RateLimited { retry_after }.into());
                 }
-                // No body separator found but status was 200: treat as success
-                debug!("Batch upload successful (no body): {} results", count);
-                self.metrics
-                    .record_upload_duration(start_time.elapsed().as_secs_f64());
-                if let Some(tolerance) = target.set_time {
-                    self.judge_clock(&response_str, start_time.elapsed(), tolerance)
-                        .await;
+                Some(200) => {
+                    // Check body for OK/ERR
+                    if let Some(body_start) = response_str.find("\r\n\r\n") {
+                        let resp_body = response_str[body_start + 4..].trim();
+                        if resp_body == "OK" {
+                            debug!("Batch upload successful: {} results", count);
+                            self.metrics
+                                .record_upload_duration(start_time.elapsed().as_secs_f64());
+                            if let Some(tolerance) = target.set_time {
+                                self.judge_clock(&response_str, start_time.elapsed(), tolerance)
+                                    .await;
+                            }
+                            return Ok(());
+                        } else {
+                            debug!("Upload rejected: {:?}", resp_body);
+                            anyhow::bail!("Upload rejected: {}", resp_body);
+                        }
+                    }
+                    // No body separator found but status was 200: treat as success
+                    debug!("Batch upload successful (no body): {} results", count);
+                    self.metrics
+                        .record_upload_duration(start_time.elapsed().as_secs_f64());
+                    if let Some(tolerance) = target.set_time {
+                        self.judge_clock(&response_str, start_time.elapsed(), tolerance)
+                            .await;
+                    }
+                    return Ok(());
                 }
-                return Ok(());
-            } else {
-                anyhow::bail!("Upload failed: {}", status_line);
+                _ => anyhow::bail!("Upload failed: {}", status_line),
             }
         }
 
