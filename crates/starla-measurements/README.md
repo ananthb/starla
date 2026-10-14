@@ -9,25 +9,33 @@ Network measurement implementations compatible with the RIPE Atlas result format
 | **Ping** | ICMP echo request/reply with RTT measurement |
 | **Traceroute** | Path discovery via ICMP, UDP, or TCP |
 | **DNS** | DNS queries with timing and response capture |
-| **HTTP** | HTTP/HTTPS requests with timing breakdown |
-| **TLS** | TLS certificate retrieval and validation |
+| **HTTP** | HTTP requests with timing breakdown |
+| **TLS** | TLS certificate retrieval |
 | **NTP** | NTP time synchronization measurement |
 
 ## Usage
 
-All measurements implement the `Measurement` trait:
+Every measurement implements the `Measurement` trait. A measurement is built
+by the scheduler, which resolves the target and fills `dst_name`:
 
 ```rust
-use starla_measurements::{Ping, PingConfig, Measurement};
+use starla_measurements::{Measurement, Ping, PingConfig};
 
-let config = PingConfig {
-    target: "8.8.8.8".parse()?,
-    packets: 3,
-    size: 64,
-    ..Default::default()
+let ping = Ping {
+    config: PingConfig {
+        target: "8.8.8.8".parse()?,
+        count: 3,
+        size: 64,
+        ttl: 64,
+        interval_ms: 1000,
+        backend: Default::default(),
+        kept: Default::default(),
+    },
+    probe_id,
+    msm_id,
+    dst_name, // how the result names the target (starla_measurements::target)
 };
 
-let ping = Ping::new(config);
 let result = ping.execute().await?;
 ```
 
