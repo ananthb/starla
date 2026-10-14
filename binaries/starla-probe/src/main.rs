@@ -398,6 +398,8 @@ async fn main() -> Result<()> {
             // [network] rxtxrpt: the reference only sends the 9002 interface
             // counters when RXTXRPT=yes. This was always left at the default.
             rxtxrpt: config.network.rxtxrpt,
+            // Persist the last clock sync so lts survives a restart.
+            timesync_path: Some(state_dir.join("timesync")),
             ..ResultHandlerConfig::default()
         },
         metrics_for_results,
