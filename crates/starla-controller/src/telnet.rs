@@ -648,7 +648,8 @@ pub async fn handle_connection(
                             });
                         }
                         Some(crontab) => debug!(
-                            "Telnet: crontab {} has {} lines already, the most its cron daemon reads; line not taken",
+                            "Telnet: crontab {} has {} lines already, the most its cron daemon \
+                             reads; line not taken",
                             crontab.dir, CRONTAB_MAX_LINES
                         ),
                         None => {}

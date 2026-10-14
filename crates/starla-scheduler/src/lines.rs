@@ -322,7 +322,8 @@ mod tests {
                 let start_time = 1_791_854_199 + 600 * i as i64;
                 CrontabLine {
                     command: format!(
-                        "evtdig -4 --resolv --qbuf --type 1 --class 1 --query {name} -A \"30002\" -O /home/atlas/data/new/7"
+                        "evtdig -4 --resolv --qbuf --type 1 --class 1 --query {name} -A \"30002\" \
+                         -O /home/atlas/data/new/7"
                     ),
                     job: MeasurementJob {
                         msm_id: 30002,
