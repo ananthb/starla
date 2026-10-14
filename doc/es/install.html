@@ -84,7 +84,7 @@
 
       <pre><div class="pre-head"><span class="lang">shell</span><span>key-from-env</span></div><div class="pre-body"><code><span class="c"># generate a key locally</span> ssh-keygen -t ed25519 -f starla-key -N <span class="s">""</span> <span class="c"># run with key in env (no persistent state)</span> docker run -d --name starla \ -e STARLA_SSH_KEY=<span class="s">"$(cat starla-key)"</span> \ --cap-add NET_RAW \ ghcr.io/ananthb/starla:latest</code></div></pre>
 
-      <p>Register the public key (<code>starla-key.pub</code>) at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>. The key can be stored as a Kubernetes Secret and mounted as an env var.</p>
+      <p>Register the public key (<code>starla-key.pub</code>) at <a href="https://atlas.ripe.net/register/swprobe/">atlas.ripe.net/register/swprobe</a>. The key can be stored as a Kubernetes Secret and mounted as an env var.</p>
 
       <h3>Inspect</h3>
       <pre><div class="pre-head"><span class="lang">shell</span><span>logs &amp; pubkey</span></div><div class="pre-body"><code>docker logs -f starla docker exec starla cat /state/probe_key.pub</code></div></pre>
@@ -97,7 +97,7 @@
       <ol>
         <li>Open <strong>Settings → Add-ons → Add-on Store → ⋮ → Repositories</strong> and add <code>https://github.com/ananthb/hass-addons</code>.</li>
         <li>Install and start the <strong>Starla</strong> add-on.</li>
-        <li>Copy the probe public key from the add-on log and register it at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.</li>
+        <li>Copy the probe public key from the add-on log and register it at <a href="https://atlas.ripe.net/register/swprobe/">atlas.ripe.net/register/swprobe</a>.</li>
       </ol>
 
       <p>The add-on runs with host networking and <code>CAP_NET_RAW</code>, keeps the probe key across updates and restarts, and exposes log level, interface traffic reports, and Prometheus metrics as configuration options.</p>
@@ -137,7 +137,7 @@
           <tr><td><code>sshKeyFile</code></td><td><code>null</code></td><td>Path to SSH private key file (for agenix / sops-nix)</td></tr>
           <tr><td><code>logLevel</code></td><td><code>"info"</code></td><td>trace · debug · info · warn · error</td></tr>
           <tr><td><code>reportInterfaceStats</code></td><td><code>false</code></td><td>Send network interface traffic statistics</td></tr>
-          <tr><td><code>controller.registrationServers</code></td><td>reg03, reg04</td><td>RIPE Atlas registration servers</td></tr>
+          <tr><td><code>controller.registrationServers</code></td><td>reg-05, reg-06 (<code>.prod.atlas.ripe.net</code>)</td><td>RIPE Atlas registration servers</td></tr>
           <tr><td><code>controller.sshTimeout</code></td><td><code>30</code></td><td>SSH connection timeout (s)</td></tr>
           <tr><td><code>controller.keepaliveInterval</code></td><td><code>60</code></td><td>SSH keepalive interval (s)</td></tr>
           <tr><td><code>storage.maxQueueSize</code></td><td><code>10000</code></td><td>Max results in upload queue</td></tr>
@@ -218,7 +218,7 @@
       <ol>
         <li>Start starla. On first run it generates an SSH key and logs the public key.</li>
         <li>Copy the public key from the log output (also saved to <code>probe_key.pub</code> in the state directory).</li>
-        <li>Register at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.</li>
+        <li>Register at <a href="https://atlas.ripe.net/register/swprobe/">atlas.ripe.net/register/swprobe</a>.</li>
         <li>starla retries automatically; once approved it connects and begins running measurements.</li>
       </ol>
     </section>
@@ -271,7 +271,7 @@
     <div class="rail-block">
       <div class="rail-label">After install</div>
       <ul class="toc">
-        <li><a href="https://atlas.ripe.net/apply/swprobe/">Apply ↗</a></li>
+        <li><a href="https://atlas.ripe.net/register/swprobe/">Register ↗</a></li>
         <li><a href="verify.html">Verify downloads</a></li>
         <li><a href="architecture.html">Architecture</a></li>
       </ul>

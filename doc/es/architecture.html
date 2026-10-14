@@ -66,14 +66,14 @@
       <h2 class="section"><span class="num">01</span>Overview</h2>
       <p>One probe, one outbound SSH connection, one in-memory queue, one upload channel per batch.</p>
 
-      <div class="ascii">RIPE Atlas Infrastructure starla Probe ======================== ============ Registration Server +---------------------------------+ (reg03/reg04:443) | | | | +----------+ +-----------+ | | 1. SSH INIT | | Telnet | | Scheduler | | | (get controller) | | Parser |--->| (tokio) | | v | +----^-----+ +-----+-----+ | | | | | Controller | | +-----v-----+ | (ctr-*.atlas:443) | | | Measure- | | | | | | ments | | | 2. SSH INIT | | | ping,dns, | | | (get session) | | | trace,... | | | | | +-----+-----+ | | 3. SSH KEEP | | | | | (long-lived) | | +-----v-----+ | | | | | Result | | +--[ reverse tunnel ]------------|-------+ | Queue | | | forwarded-tcpip | | in memory | | | (measurement commands) | +-----+-----+ | | | | | +--[ direct-tcpip ]&lt;-------------|------------------------+ | channel per upload | HTTP POST over SSH channel | (result uploads) | | +---------------------------------+</div>
+      <div class="ascii">RIPE Atlas Infrastructure starla Probe ======================== ============ Registration Server +---------------------------------+ (reg-05/reg-06.prod:443) | | | | +----------+ +-----------+ | | 1. SSH INIT | | Telnet | | Scheduler | | | (get controller) | | Parser |--->| (tokio) | | v | +----^-----+ +-----+-----+ | | | | | Controller | | +-----v-----+ | (ctr-*.atlas:443) | | | Measure- | | | | | | ments | | | 2. SSH INIT | | | ping,dns, | | | (get session) | | | trace,... | | | | | +-----+-----+ | | 3. SSH KEEP | | | | | (long-lived) | | +-----v-----+ | | | | | Result | | +--[ reverse tunnel ]------------|-------+ | Queue | | | forwarded-tcpip | | in memory | | | (measurement commands) | +-----+-----+ | | | | | +--[ direct-tcpip ]&lt;-------------|------------------------+ | channel per upload | HTTP POST over SSH channel | (result uploads) | | +---------------------------------+</div>
     </section>
 
     <section id="flow">
       <h2 class="section"><span class="num">02</span>Connection flow</h2>
 
       <ol>
-        <li><strong>Registration.</strong> starla SSHes to a registration server (e.g. <code>reg03.atlas.ripe.net:443</code>), runs <code>INIT</code> with probe identity on stdin, and receives a controller assignment.</li>
+        <li><strong>Registration.</strong> starla SSHes to a registration server (e.g. <code>reg-05.prod.atlas.ripe.net:443</code>), runs <code>INIT</code> with probe identity on stdin, and receives a controller assignment.</li>
         <li><strong>Controller INIT.</strong> Connects to the assigned controller via SSH, sends another <code>INIT</code> (no stdin), and receives a <code>SESSION_ID</code> + <code>REMOTE_PORT</code>.</li>
         <li><strong>KEEP session.</strong> Opens a long-lived SSH connection running the <code>KEEP</code> command. This connection carries both measurement commands (inbound) and result uploads (outbound).</li>
       </ol>
