@@ -677,7 +677,11 @@ mod tests {
     fn a_dns_line_gets_the_lts_of_each_query() {
         let mut result = make_dns_result();
         result.data = MeasurementData::FullLine(
-            "\"id\" : \"30001\" , \"fw\":5130, \"mver\": \"2.6.4\", \"time\" : 1791871302 , \"lts\" : \u{1}1\u{1} , \"resultset\" : [ {\"time\" : 1791871302 , \"lts\" : \u{1}1\u{1} , \"subid\" : 1 , \"submax\" : 2 , \"proto\" : \"UDP\" },{\"time\" : 1791871303 , \"lts\" : \u{1}0\u{1} , \"subid\" : 2 , \"submax\" : 2 , \"proto\" : \"UDP\" }]"
+            "\"id\" : \"30001\" , \"fw\":5130, \"mver\": \"2.6.4\", \"time\" : 1791871302 , \
+             \"lts\" : \u{1}1\u{1} , \"resultset\" : [ {\"time\" : 1791871302 , \"lts\" : \
+             \u{1}1\u{1} , \"subid\" : 1 , \"submax\" : 2 , \"proto\" : \"UDP\" },{\"time\" : \
+             1791871303 , \"lts\" : \u{1}0\u{1} , \"subid\" : 2 , \"submax\" : 2 , \"proto\" : \
+             \"UDP\" }]"
                 .to_string(),
         );
         let line = AtlasResult::from_measurement(result.clone(), None)
@@ -685,7 +689,10 @@ mod tests {
             .to_result_line();
         assert_eq!(
             line,
-            "RESULT { \"id\" : \"30001\" , \"fw\":5130, \"mver\": \"2.6.4\", \"time\" : 1791871302 , \"lts\" : 19 , \"resultset\" : [ {\"time\" : 1791871302 , \"lts\" : 19 , \"subid\" : 1 , \"submax\" : 2 , \"proto\" : \"UDP\" },{\"time\" : 1791871303 , \"lts\" : 20 , \"subid\" : 2 , \"submax\" : 2 , \"proto\" : \"UDP\" }] }\n"
+            "RESULT { \"id\" : \"30001\" , \"fw\":5130, \"mver\": \"2.6.4\", \"time\" : \
+             1791871302 , \"lts\" : 19 , \"resultset\" : [ {\"time\" : 1791871302 , \"lts\" : 19 \
+             , \"subid\" : 1 , \"submax\" : 2 , \"proto\" : \"UDP\" },{\"time\" : 1791871303 , \
+             \"lts\" : 20 , \"subid\" : 2 , \"submax\" : 2 , \"proto\" : \"UDP\" }] }\n"
         );
         let line = AtlasResult::from_measurement(result.clone(), None)
             .with_lts(-1)

@@ -388,8 +388,7 @@ fn inet_addresses(out: &mut String, inet: &[(String, Ipv4Addr, Ipv4Addr)]) {
     for (i, (name, addr, mask)) in inet.iter().enumerate() {
         let _ = write!(
             out,
-            "{}{{ \"inet-addr\": \"{addr}\", \"netmask\": \"{mask}\", \
-             \"interface\": \"{name}\" }}",
+            "{}{{ \"inet-addr\": \"{addr}\", \"netmask\": \"{mask}\", \"interface\": \"{name}\" }}",
             if i == 0 { "" } else { ", " }
         );
     }
@@ -776,14 +775,22 @@ fe80000000000000387cedfffe5e33a2 8d 40 20 80     eth0
 00000000000000000000000000000001 01 80 10 80       lo
 ";
 
-    const TWIN_IPV6_ROUTE: &str = "\
-20010db877696e000000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0
-fe800000000000000000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0
-00000000000000000000000000000001 80 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000003 00000000 80200001       lo
-20010db877696e000000000000000031 80 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000002 00000000 80200001     eth0
-fe80000000000000387cedfffe5e33a2 80 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000002 00000000 80200001     eth0
-ff000000000000000000000000000000 08 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000002 00000000 00000001     eth0
-00000000000000000000000000000000 00 00000000000000000000000000000000 00 00000000000000000000000000000000 ffffffff 00000001 00000000 00200200       lo
+    const TWIN_IPV6_ROUTE: &str =
+        "\
+20010db877696e000000000000000000 40 00000000000000000000000000000000 00 \
+         00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0
+fe800000000000000000000000000000 40 00000000000000000000000000000000 00 \
+         00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0
+00000000000000000000000000000001 80 00000000000000000000000000000000 00 \
+         00000000000000000000000000000000 00000000 00000003 00000000 80200001       lo
+20010db877696e000000000000000031 80 00000000000000000000000000000000 00 \
+         00000000000000000000000000000000 00000000 00000002 00000000 80200001     eth0
+fe80000000000000387cedfffe5e33a2 80 00000000000000000000000000000000 00 \
+         00000000000000000000000000000000 00000000 00000002 00000000 80200001     eth0
+ff000000000000000000000000000000 08 00000000000000000000000000000000 00 \
+         00000000000000000000000000000000 00000100 00000002 00000000 00000001     eth0
+00000000000000000000000000000000 00 00000000000000000000000000000000 00 \
+         00000000000000000000000000000000 ffffffff 00000001 00000000 00200200       lo
 ";
 
     /// The twin's run/resolv.conf, mounted into both probes.
@@ -795,20 +802,22 @@ nameserver 2001:db8:7769:6e00::20
 
     /// The reference probe's 9104 line in the twin run of 2026-10-13
     /// (wire-ctrl.jsonl, its upload's body), verbatim.
-    const TWIN_REFERENCE_LINE: &str = "RESULT { \"id\" : \"9104\" , \"time\" : 1791871112 , \
-\"inet-addresses\": [ { \"inet-addr\": \"127.0.0.1\", \"netmask\": \"255.0.0.0\", \"interface\": \"lo\" }, \
-{ \"inet-addr\": \"172.30.74.31\", \"netmask\": \"255.255.255.0\", \"interface\": \"eth0\" } ], \
-\"inet-routes\": [ { \"destination\": \"172.30.74.0\", \"netmask\": \"255.255.255.0\", \
-\"next-hop\": \"0.0.0.0\", \"interface\": \"eth0\" } ], \"inet-dhcp\": true, \
-\"inet6-addresses\" : [ {\"inet6-addr\" : \"2001:db8:7769:6e00::31\", \"prefix-length\" : 64,\
-\"scope\" : \"Global\", \"interface\" : \"eth0\"} , {\"inet6-addr\" : \"fe80::387c:edff:fe5e:33a2\", \
-\"prefix-length\" : 64,\"scope\" : \"Link\", \"interface\" : \"eth0\"} , {\"inet6-addr\" : \"::1\", \
-\"prefix-length\" : 128,\"scope\" : \"Host\", \"interface\" : \"lo\"}], \"inet6-routes\" : [ \
-{\"destination\" : \"2001:db8:7769:6e00::\", \"prefix-length\" : 64,\"next-hop\" : \"::\", \
-\"flags\" : \"\", \"metric\" : 256 , \"interface\" : \"eth0\"} , {\"destination\" : \"fe80::\", \
-\"prefix-length\" : 64,\"next-hop\" : \"::\", \"flags\" : \"\", \"metric\" : 256 , \
-\"interface\" : \"eth0\"}], \"dns\": [ { \"nameserver\": \"172.30.74.20\" }, \
-{ \"nameserver\": \"2001:db8:7769:6e00::20\" } ]}\n";
+    const TWIN_REFERENCE_LINE: &str =
+        "RESULT { \"id\" : \"9104\" , \"time\" : 1791871112 , \"inet-addresses\": [ { \
+         \"inet-addr\": \"127.0.0.1\", \"netmask\": \"255.0.0.0\", \"interface\": \"lo\" }, { \
+         \"inet-addr\": \"172.30.74.31\", \"netmask\": \"255.255.255.0\", \"interface\": \"eth0\" \
+         } ], \"inet-routes\": [ { \"destination\": \"172.30.74.0\", \"netmask\": \
+         \"255.255.255.0\", \"next-hop\": \"0.0.0.0\", \"interface\": \"eth0\" } ], \
+         \"inet-dhcp\": true, \"inet6-addresses\" : [ {\"inet6-addr\" : \
+         \"2001:db8:7769:6e00::31\", \"prefix-length\" : 64,\"scope\" : \"Global\", \"interface\" \
+         : \"eth0\"} , {\"inet6-addr\" : \"fe80::387c:edff:fe5e:33a2\", \"prefix-length\" : \
+         64,\"scope\" : \"Link\", \"interface\" : \"eth0\"} , {\"inet6-addr\" : \"::1\", \
+         \"prefix-length\" : 128,\"scope\" : \"Host\", \"interface\" : \"lo\"}], \"inet6-routes\" \
+         : [ {\"destination\" : \"2001:db8:7769:6e00::\", \"prefix-length\" : 64,\"next-hop\" : \
+         \"::\", \"flags\" : \"\", \"metric\" : 256 , \"interface\" : \"eth0\"} , \
+         {\"destination\" : \"fe80::\", \"prefix-length\" : 64,\"next-hop\" : \"::\", \"flags\" : \
+         \"\", \"metric\" : 256 , \"interface\" : \"eth0\"}], \"dns\": [ { \"nameserver\": \
+         \"172.30.74.20\" }, { \"nameserver\": \"2001:db8:7769:6e00::20\" } ]}\n";
 
     fn body(inet6: Option<(&str, &str)>, resolv_conf: Option<&[u8]>) -> Option<String> {
         rptaddrs_body(&RptaddrsInputs {
@@ -880,8 +889,8 @@ fe80000000000000787c53fffea68c95 8d 40 20 80     eth0
             })
             .unwrap()
         };
-        let want = "\"inet-addresses\": [  ], \"inet-routes\": [  ], \"inet-dhcp\": true, \
-                    \"dns\": [  ]";
+        let want =
+            "\"inet-addresses\": [  ], \"inet-routes\": [  ], \"inet-dhcp\": true, \"dns\": [  ]";
         assert_eq!(empty(None), want);
         assert_eq!(empty(Some(("", ""))), want);
         // Addresses but no route left after the filters: only the addresses.
@@ -947,9 +956,9 @@ fec00000000000000000000000000001 02 40 40 80     eth0
         assert_eq!(
             out,
             ", \"inet6-addresses\" : [ {\"inet6-addr\" : \"::172.30.74.31\", \"prefix-length\" : \
-             96,\"scope\" : \"Compat\", \"interface\" : \"sit0\"} , {\"inet6-addr\" : \"fec0::1\", \
-             \"prefix-length\" : 64,\"scope\" : \"Site\", \"interface\" : \"eth0\"} , \
-             {\"inet6-addr\" : \"2001:db8::1\", \"prefix-length\" : 64,\"scope\" : \"Unknown \
+             96,\"scope\" : \"Compat\", \"interface\" : \"sit0\"} , {\"inet6-addr\" : \
+             \"fec0::1\", \"prefix-length\" : 64,\"scope\" : \"Site\", \"interface\" : \"eth0\"} \
+             , {\"inet6-addr\" : \"2001:db8::1\", \"prefix-length\" : 64,\"scope\" : \"Unknown \
              80\", \"interface\" : \"eth0\"}]"
         );
     }
@@ -974,8 +983,8 @@ fec00000000000000000000000000001 02 40 40 80     eth0
     fn inet6_routes_are_filtered_and_flagged_as_the_applet_does() {
         let route = |dst: &str, plen: &str, nh: &str, metric: &str, flags: &str| {
             format!(
-                "{dst} {plen} 00000000000000000000000000000000 00 {nh} {metric} 00000001 \
-                 00000000 {flags}     eth0\n"
+                "{dst} {plen} 00000000000000000000000000000000 00 {nh} {metric} 00000001 00000000 \
+                 {flags}     eth0\n"
             )
         };
         let zero = "00000000000000000000000000000000";
@@ -1055,10 +1064,10 @@ fec00000000000000000000000000001 02 40 40 80     eth0
             out,
             ", \"inet6-routes\" : [ {\"destination\" : \"::\", \"prefix-length\" : 0,\"next-hop\" \
              : \"fe80::1\", \"flags\" : \"GDA\", \"metric\" : 1024 , \"interface\" : \"eth0\"} , \
-             {\"destination\" : \"::\", \"prefix-length\" : 0,\"next-hop\" : \"fe80::1\", \"flags\" \
-             : \"G\", \"metric\" : 1024 , \"interface\" : \"eth0\"} , {\"destination\" : \
-             \"2001:db8:0:3::\", \"prefix-length\" : 64,\"next-hop\" : \"::\", \"flags\" : \"C\", \
-             \"metric\" : 256 , \"interface\" : \"eth0\"} , {\"destination\" : \"ff0e::\", \
+             {\"destination\" : \"::\", \"prefix-length\" : 0,\"next-hop\" : \"fe80::1\", \
+             \"flags\" : \"G\", \"metric\" : 1024 , \"interface\" : \"eth0\"} , {\"destination\" \
+             : \"2001:db8:0:3::\", \"prefix-length\" : 64,\"next-hop\" : \"::\", \"flags\" : \
+             \"C\", \"metric\" : 256 , \"interface\" : \"eth0\"} , {\"destination\" : \"ff0e::\", \
              \"prefix-length\" : 16,\"next-hop\" : \"::\", \"flags\" : \"\", \"metric\" : 256 , \
              \"interface\" : \"eth0\"} , {\"destination\" : \"2001:db8:0:5::\", \"prefix-length\" \
              : 64,\"next-hop\" : \"::\", \"flags\" : \"\", \"metric\" : -1 , \"interface\" : \

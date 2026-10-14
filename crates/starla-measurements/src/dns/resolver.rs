@@ -985,8 +985,8 @@ fn write_header_and_answers(s: &mut String, wire: &[u8]) {
                 ]);
                 let _ = write!(
                     s,
-                    "\"TYPE\" : \"SOA\" , \"NAME\" : \"{name}.\" , \"TTL\" : {ttl} , \
-                     \"MNAME\" : \"{mname}.\" , \"RNAME\" : \"{rname}.\" , \"SERIAL\" : {serial}"
+                    "\"TYPE\" : \"SOA\" , \"NAME\" : \"{name}.\" , \"TTL\" : {ttl} , \"MNAME\" : \
+                     \"{mname}.\" , \"RNAME\" : \"{rname}.\" , \"SERIAL\" : {serial}"
                 );
                 offset += 5 * 4;
                 s.push_str(" } ");
@@ -1389,7 +1389,9 @@ mod tests {
         let path = dir.join("resolv.conf");
         std::fs::write(
             &path,
-            "# atlas-twin\nsearch example\nnameserver 172.30.74.20\n\tnameserver\t2001:db8:7769:6e00::20 # x\n#nameserver 9.9.9.9\nnameserver\nnameserver 10.0.0.3\nnameserver 10.0.0.4\n",
+            "# atlas-twin\nsearch example\nnameserver \
+             172.30.74.20\n\tnameserver\t2001:db8:7769:6e00::20 # x\n#nameserver \
+             9.9.9.9\nnameserver\nnameserver 10.0.0.3\nnameserver 10.0.0.4\n",
         )
         .unwrap();
         assert_eq!(
@@ -1408,10 +1410,10 @@ mod tests {
         write_header_and_answers(&mut s, &abuf);
         assert_eq!(
             s,
-            ",\"ID\" : 24205 , \"ANCOUNT\" : 1 , \"QDCOUNT\" : 1 , \"NSCOUNT\" : 0 , \
-             \"ARCOUNT\" : 0,\"answers\" : [ { \"TYPE\" : \"SOA\" , \"NAME\" : \".\" , \
-             \"TTL\" : 300 , \"MNAME\" : \"a.root-servers.net.\" , \
-             \"RNAME\" : \"nstld.verisign-grs.com.\" , \"SERIAL\" : 2026101300 }  ]"
+            ",\"ID\" : 24205 , \"ANCOUNT\" : 1 , \"QDCOUNT\" : 1 , \"NSCOUNT\" : 0 , \"ARCOUNT\" \
+             : 0,\"answers\" : [ { \"TYPE\" : \"SOA\" , \"NAME\" : \".\" , \"TTL\" : 300 , \
+             \"MNAME\" : \"a.root-servers.net.\" , \"RNAME\" : \"nstld.verisign-grs.com.\" , \
+             \"SERIAL\" : 2026101300 }  ]"
         );
     }
 
@@ -1423,8 +1425,8 @@ mod tests {
         write_header_and_answers(&mut s, &abuf);
         assert!(
             s.ends_with(
-                "\"ARCOUNT\" : 0,\"answers\" : [ {\"TYPE\" : \"TXT\" , \
-                 \"NAME\" : \"version.bind\" , \"RDATA\" : [ \"atlas-twin\" ] } ]"
+                "\"ARCOUNT\" : 0,\"answers\" : [ {\"TYPE\" : \"TXT\" , \"NAME\" : \
+                 \"version.bind\" , \"RDATA\" : [ \"atlas-twin\" ] } ]"
             ),
             "{s}"
         );
@@ -1438,8 +1440,8 @@ mod tests {
         write_header_and_answers(&mut s, &abuf);
         assert_eq!(
             s,
-            ",\"ID\" : 6073 , \"ANCOUNT\" : 1 , \"QDCOUNT\" : 1 , \"NSCOUNT\" : 0 , \
-             \"ARCOUNT\" : 1"
+            ",\"ID\" : 6073 , \"ANCOUNT\" : 1 , \"QDCOUNT\" : 1 , \"NSCOUNT\" : 0 , \"ARCOUNT\" : \
+             1"
         );
     }
 
@@ -1529,7 +1531,10 @@ mod tests {
         }
     }
 
-    /// The loopback interface: its name and index
+    /// The loopback interface: its name and index. Unix only:
+    /// `libc::if_nametoindex` has no Windows binding, and the test that uses
+    /// it checks glibc getnameinfo formatting.
+    #[cfg(unix)]
     fn lo() -> (&'static str, u32) {
         let name = if cfg!(target_os = "linux") {
             "lo"
@@ -1546,6 +1551,7 @@ mod tests {
     /// getnameinfo(NI_NUMERICHOST) as glibc writes it: a link-local
     /// (unicast or multicast) address with a scope gets its interface's
     /// name, anything else with a scope the number.
+    #[cfg(unix)]
     #[test]
     fn addresses_are_written_as_getnameinfo_writes_them() {
         let (lo, index) = lo();

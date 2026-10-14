@@ -778,12 +778,10 @@ mod tests {
         assert_eq!(
             request_head(&target, None, 91),
             format!(
-                "POST /?PROBE_ID=1018212&SESSION_ID={REF_SESSION}&SRC=timesync HTTP/1.1\r\n\
-                 Host: 127.0.0.1\r\n\
-                 Connection: close\r\n\
-                 User-Agent: httppost for atlas.ripe.net\r\n\
-                 Content-Type: application/x-www-form-urlencoded\r\n\
-                 Content-Length: 91\r\n\r\n"
+                "POST /?PROBE_ID=1018212&SESSION_ID={REF_SESSION}&SRC=timesync HTTP/1.1\r\nHost: \
+                 127.0.0.1\r\nConnection: close\r\nUser-Agent: httppost for \
+                 atlas.ripe.net\r\nContent-Type: \
+                 application/x-www-form-urlencoded\r\nContent-Length: 91\r\n\r\n"
             )
         );
         // --local-time: Unix-Date after Content-Type (httppost.c:404-408).

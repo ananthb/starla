@@ -104,19 +104,19 @@ pub struct DnsConfig {
 /// (evtdig.c:2461-2466) and nothing clears them again, so printReply()
 /// (evtdig.c:3785-3811) reports what the last query that set one left:
 ///
-/// - `loc_sin6`, the source address, set by getsockname() after a UDP
-///   connect or a TCP connection. A query that fails before that (a socket
-///   or connect error, a refused address, a TCP connect that fails or times
-///   out) reports the one before it: within a `--resolv` run the previous
-///   resolver's, for the first resolver the previous run's. RIPE stored one
-///   in all 58 resultset entries with a "socket" error from firmware 5130
-///   on 2026-10-13 (msm 30001, probe 1010265: `"dst_name":"fd7a:115c:a1e0::53",
+/// - `loc_sin6`, the source address, set by getsockname() after a UDP connect
+///   or a TCP connection. A query that fails before that (a socket or connect
+///   error, a refused address, a TCP connect that fails or times out) reports
+///   the one before it: within a `--resolv` run the previous resolver's, for
+///   the first resolver the previous run's. RIPE stored one in all 58 resultset
+///   entries with a "socket" error from firmware 5130 on 2026-10-13 (msm 30001,
+///   probe 1010265: `"dst_name":"fd7a:115c:a1e0::53",
 ///   "src_addr":"100.83.59.57"`, subid 1's source).
 /// - `rcvdttl`, set by every UDP reply (process_reply(), evtdig.c:2032): with
 ///   `--ttl` a timeout or error after a reply still reports its `"ttl"`.
 /// - `dst_ai_family`/`dst_addr_str`, set by tcp_beforeconnect() and
-///   TU_BAD_ADDR: a later TCP query whose server does not resolve reports
-///   the last address connected to beside its `"dst_name"`.
+///   TU_BAD_ADDR: a later TCP query whose server does not resolve reports the
+///   last address connected to beside its `"dst_name"`.
 ///
 /// Clones share it, as the runs of one scheduled measurement do (each run
 /// gets a clone of its config); a new CRONLINE starts afresh.
@@ -553,7 +553,8 @@ mod tests {
 
     /// msm 11001 (`evtdig -6 --soa .`) as the reference reported it in the
     /// twin run of 2026-10-13, byte for byte. Starla wrote
-    /// `"answers":[ {"TYPE":"SOA", "NAME":".", "RDATA":[ "a.root-servers.net. …" ]} ]`.
+    /// `"answers":[ {"TYPE":"SOA", "NAME":".", "RDATA":[ "a.root-servers.net.
+    /// …" ]} ]`.
     #[test]
     fn a_soa_result_is_the_references_line() {
         let cfg = DnsConfig {
@@ -1467,7 +1468,10 @@ mod tests {
         assert!(accepted.is_err(), "connected");
     }
 
-    /// The loopback interface: its name and index
+    /// The loopback interface: its name and index. Unix only:
+    /// `libc::if_nametoindex` has no Windows binding, and the test that uses
+    /// it checks glibc getnameinfo formatting.
+    #[cfg(unix)]
     fn lo() -> (&'static str, u32) {
         let name = if cfg!(target_os = "linux") {
             "lo"
@@ -1501,6 +1505,7 @@ mod tests {
     /// as RIPE stored it from firmware 5130 on 2026-10-13, its interface
     /// (ens18) the test host's loopback. Starla dropped the zone from
     /// src_addr.
+    #[cfg(unix)]
     #[test]
     fn link_local_addresses_keep_their_zone_where_getnameinfo_writes_them() {
         let (lo, index) = lo();
