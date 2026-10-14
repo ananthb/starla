@@ -54,15 +54,33 @@ impl HostTelemetry {
     }
 
     /// Push a RESULT line to be uploaded with the next batch.
-    async fn push(&self, line: String) {
+    pub(crate) async fn push(&self, line: String) {
         let mut p = self.pending.lock().await;
         p.push(line);
+        cap_pending(&mut p);
     }
 
     /// Drain all pending host-telemetry RESULT lines. Called by the uploader.
     pub async fn drain(&self) -> Vec<String> {
         let mut p = self.pending.lock().await;
         std::mem::take(&mut *p)
+    }
+
+    /// Put back the lines a FAILED upload drained, ahead of anything queued
+    /// since, so the next upload carries them in their original order. The
+    /// uploader requeues a failed batch's results; without this, the batch's
+    /// telemetry was lost. That matters most for rptaddrs: its change cache
+    /// re-sends an unchanged report only once an hour, so on 2026-10-12 the
+    /// one address report of a probe that had never sent one (RIPE answered
+    /// its upload 429) was gone for the hour.
+    pub async fn restore(&self, mut lines: Vec<String>) {
+        if lines.is_empty() {
+            return;
+        }
+        let mut p = self.pending.lock().await;
+        lines.append(&mut p);
+        *p = lines;
+        cap_pending(&mut p);
     }
 
     /// Schedule periodic buddyinfo reports.
@@ -121,6 +139,18 @@ impl HostTelemetry {
         } else {
             debug!(?kind, interval, "scheduled telemetry");
         }
+    }
+}
+
+/// The most lines kept pending. Lines are restored on every failed upload, so
+/// an outage must not grow the list without bound. A report every 180 s that
+/// changes is far below this; when over it, the oldest go first.
+const MAX_PENDING: usize = 64;
+
+fn cap_pending(p: &mut Vec<String>) {
+    if p.len() > MAX_PENDING {
+        let excess = p.len() - MAX_PENDING;
+        p.drain(..excess);
     }
 }
 
@@ -546,6 +576,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restore_puts_lines_back_ahead_of_new_ones_and_caps() {
+        let t = HostTelemetry::new();
+        t.push("new".into()).await;
+        t.restore(vec!["old-1".into(), "old-2".into()]).await;
+        assert_eq!(t.drain().await, ["old-1", "old-2", "new"]);
+        t.restore((0..MAX_PENDING + 5).map(|i| i.to_string()).collect())
+            .await;
+        let kept = t.drain().await;
+        assert_eq!(kept.len(), MAX_PENDING);
+        assert_eq!(kept[0], "5", "the oldest go first");
+    }
+
+    #[tokio::test]
     async fn drain_is_idempotent() {
         let t = HostTelemetry::new();
         let drained = t.drain().await;
@@ -587,6 +630,32 @@ mod tests {
         // Immediately again: unchanged + recent → suppressed.
         let second = rptaddrs_line(9104, &t);
         assert!(second.is_none(), "rptaddrs should suppress unchanged");
+    }
+
+    /// The probe schedules rptaddrs itself at startup, because RIPE's
+    /// controllers never do (binaries/starla-probe, `RPTADDRS_*`). That only
+    /// reaches RIPE if the first report is queued at once, not after the
+    /// first 180 s, and carries the IPv4 side: addresses AND routes, which is
+    /// what RIPE judges IPv4 by.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_scheduled_rptaddrs_reports_at_once_with_both_families() {
+        let t = HostTelemetry::new();
+        t.schedule_rptaddrs(180, 9104).await;
+        let mut lines = Vec::new();
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+            lines = t.drain().await;
+            if !lines.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(lines.len(), 1, "one report, queued at once: {lines:?}");
+        let line = &lines[0];
+        assert!(line.contains("\"id\": \"9104\""), "{line}");
+        assert!(line.contains("\"inet-addresses\": ["), "{line}");
+        assert!(line.contains("\"inet-routes\": ["), "{line}");
     }
 
     #[tokio::test]

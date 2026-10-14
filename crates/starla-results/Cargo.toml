@@ -24,3 +24,5 @@ tracing = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+# Paused time for the upload loop's backoff test (no new crates).
+tokio = { workspace = true, features = ["test-util"] }
