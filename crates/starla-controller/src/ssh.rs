@@ -49,11 +49,14 @@ impl Default for SshConfig {
 }
 
 /// Controller information returned from INIT
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ControllerInfo {
     pub host: String,
     pub port: u16,
     pub probe_id: u32,
+    /// `REREGISTER <secs>`: how long the assignment holds before the probe
+    /// must ask the registration server again.
+    pub rereg_secs: Option<u64>,
 }
 
 /// INIT response variants
@@ -70,6 +73,9 @@ pub enum InitResponse {
     Ok,
     /// Server tells us to wait and retry after timeout seconds
     Wait { timeout_secs: u32 },
+    /// `REFUSED` (the line after it is the reason): the reference probe waits
+    /// and then registers again (atlasinit writes force_reg.sh).
+    Refused { reason: String },
 }
 
 /// Probe information sent during registration INIT
@@ -584,6 +590,13 @@ impl SshConnection {
             self.execute("INIT").await?
         };
 
+        parse_init_response(&output)
+    }
+}
+
+/// Parse a registration server's or controller's INIT reply.
+pub fn parse_init_response(output: &str) -> anyhow::Result<InitResponse> {
+    {
         // Parse response line by line - the actual response may have multiple lines
         let lines: Vec<&str> = output.lines().collect();
 
@@ -607,6 +620,7 @@ impl SshConnection {
                 let mut controller_host: Option<String> = None;
                 let mut controller_port: Option<u16> = None;
                 let mut probe_id: u32 = 0;
+                let mut rereg_secs: Option<u64> = None;
 
                 for line in lines.iter().skip(1) {
                     let parts: Vec<&str> = line.split_whitespace().collect();
@@ -617,6 +631,10 @@ impl SshConnection {
                     if parts[0] == "CONTROLLER" && parts.len() >= 4 {
                         controller_host = Some(parts[1].to_string());
                         controller_port = parts[2].parse().ok();
+                    }
+
+                    if parts[0] == "REREGISTER" && parts.len() >= 2 {
+                        rereg_secs = parts[1].parse().ok();
                     }
 
                     if parts[0] == "PROBE_ID" && parts.len() >= 2 {
@@ -633,6 +651,7 @@ impl SshConnection {
                         host,
                         port,
                         probe_id,
+                        rereg_secs,
                     }));
                 }
 
@@ -688,12 +707,19 @@ impl SshConnection {
                 debug!("Server requested wait: {} seconds", timeout_secs);
                 Ok(InitResponse::Wait { timeout_secs })
             }
+            "REFUSED" => {
+                let reason = lines.get(1).map(|l| l.trim()).unwrap_or("").to_string();
+                debug!("Server refused us: {}", reason);
+                Ok(InitResponse::Refused { reason })
+            }
             _ => {
                 anyhow::bail!("Unknown INIT response: {}", output);
             }
         }
     }
+}
 
+impl SshConnection {
     /// Start the KEEP session and monitor it.
     ///
     /// Opens a channel with the KEEP command and blocks until the channel
@@ -1036,10 +1062,8 @@ impl SshConnection {
                     output.push_str(&String::from_utf8_lossy(data));
                 }
                 ChannelMsg::Eof => break,
-                ChannelMsg::ExitStatus { exit_status } => {
-                    if exit_status != 0 {
-                        debug!("Command exited with status {}", exit_status);
-                    }
+                ChannelMsg::ExitStatus { exit_status } if exit_status != 0 => {
+                    debug!("Command exited with status {}", exit_status);
                 }
                 _ => {}
             }

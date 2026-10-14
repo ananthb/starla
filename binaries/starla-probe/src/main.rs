@@ -13,7 +13,8 @@ use anyhow::Result;
 use clap::Parser;
 use starla_common::logging::{init_logging, LogConfig};
 use starla_controller::{
-    InitResponse, KnownHosts, ProbeInitInfo, SshConfig, SshConnection, TelnetCommand,
+    registration::DEFAULT_WAIT_SECS, InitResponse, KnownHosts, ProbeInitInfo, RegState, RegStep,
+    SshConfig, SshConnection, TelnetCommand,
 };
 #[cfg(feature = "metrics-export")]
 use starla_metrics::MetricsRegistry;
@@ -718,13 +719,8 @@ async fn main() -> Result<()> {
             let mut tick = tokio::time::interval(Duration::from_secs(5));
             loop {
                 tick.tick().await;
-                let current = starla_common::read_pause_state().and_then(|s| {
-                    if s.is_active(chrono::Utc::now()) {
-                        Some(s)
-                    } else {
-                        None
-                    }
-                });
+                let current =
+                    starla_common::read_pause_state().filter(|s| s.is_active(chrono::Utc::now()));
                 let mut s = status.lock().await;
                 if s.pause != current {
                     s.pause = current;
@@ -852,8 +848,9 @@ async fn main() -> Result<()> {
         .map(|s| s.as_str())
         .collect();
 
-    // Create probe info for registration
-    let probe_info = ProbeInitInfo::new(starla_common::FIRMWARE_VERSION);
+    // What the registration server last told us, kept across restarts like
+    // the reference probe's con_init_conf.txt (registration.rs).
+    let reg_path = state_dir.join("con_init_conf.txt");
 
     // Registration loop: retries indefinitely with backoff
     let mut reg_delay = Duration::from_secs(5);
@@ -866,8 +863,67 @@ async fn main() -> Result<()> {
     let mut ctrl_delay = Duration::from_secs(5);
     let max_ctrl_delay = Duration::from_secs(60);
 
+    // Back to the top of 'register_and_connect after ctrl_delay: the saved
+    // assignment (if still valid) means no new registration.
+    macro_rules! ctrl_retry {
+        ($outer:lifetime) => {{
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Received Ctrl+C during controller-connect retry");
+                    scheduler_cancel.cancel();
+                    metrics_cancel_token.cancel();
+                    result_cancel_token.cancel();
+                    return Ok(());
+                }
+                _ = tokio::time::sleep(ctrl_delay) => {
+                    ctrl_delay = std::cmp::min(ctrl_delay * 2, max_ctrl_delay);
+                    continue $outer;
+                }
+            }
+        }};
+    }
+
     'register_and_connect: loop {
+        let mut reg = RegState::load(&reg_path);
         let controller_info = loop {
+            let reason = match reg.next_step(unix_now()) {
+                RegStep::Cached(info) => {
+                    info!(
+                        "Reusing the controller assignment {}:{} (registering again after {})",
+                        info.host,
+                        info.port,
+                        reg.rereg_at.unwrap_or(0)
+                    );
+                    let mut s = probe_status.lock().await;
+                    if info.probe_id != 0 {
+                        probe_id = starla_common::ProbeId(info.probe_id);
+                        info!("Probe ID: {}", info.probe_id);
+                        s.probe_id = info.probe_id;
+                    }
+                    s.controller = Some(format!("{}:{}", info.host, info.port));
+                    break info;
+                }
+                RegStep::WaitUntil(t) => {
+                    let secs = (t - unix_now()).max(1) as u64;
+                    info!(
+                        "A registration server asked us to wait; registering again in {}s",
+                        secs
+                    );
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {
+                            info!("Received Ctrl+C");
+                            scheduler_cancel.cancel();
+                            metrics_cancel_token.cancel();
+                            result_cancel_token.cancel();
+                            return Ok(());
+                        }
+                        _ = tokio::time::sleep(Duration::from_secs(secs)) => continue,
+                    }
+                }
+                RegStep::Register(reason) => reason,
+            };
+            let probe_info = ProbeInitInfo::reregister(starla_common::FIRMWARE_VERSION, reason);
+
             // Connect to registration server
             #[cfg(feature = "metrics-export")]
             metrics.record_connection_attempt();
@@ -940,8 +996,18 @@ async fn main() -> Result<()> {
                         s.last_connection_error = None;
                     }
 
+                    reg.registered(&info, unix_now());
+                    save_reg(&reg, &reg_path);
                     reg_delay = Duration::from_secs(5);
                     break info;
+                }
+                Ok(InitResponse::Refused { reason }) => {
+                    // atlasinit: anything but OK or WAIT from a registration
+                    // server is a forced wait of ATLAS_DEFAULT_WAIT.
+                    warn!("Registration server refused us: {}", reason);
+                    reg.told_to_wait(DEFAULT_WAIT_SECS, unix_now());
+                    save_reg(&reg, &reg_path);
+                    continue;
                 }
                 Ok(InitResponse::Wait { timeout_secs }) => {
                     if notice.show() || !explained {
@@ -953,7 +1019,11 @@ async fn main() -> Result<()> {
                             .to_string(),
                     );
                     debug!("Registration server requested wait: {}s", timeout_secs);
-                    Some(Duration::from_secs(timeout_secs as u64))
+                    // Kept across restarts (REG_WAIT_UNTIL); the top of this
+                    // loop sleeps it out.
+                    reg.told_to_wait(timeout_secs as i64, unix_now());
+                    save_reg(&reg, &reg_path);
+                    continue;
                 }
                 Ok(InitResponse::Ok) => {
                     if notice.show() || !explained {
@@ -1045,9 +1115,8 @@ async fn main() -> Result<()> {
                                 _ = tokio::time::sleep(Duration::from_secs(timeout_secs as u64)) => {
                                     // Check if connection is still alive before retrying
                                     if !ctrl_ssh.is_connected().await {
-                                        error!("Controller connection lost during wait");
-                                        error!("Please restart the probe to reconnect");
-                                        return Ok(());
+                                        warn!("Controller connection lost during wait; reconnecting");
+                                        ctrl_retry!('register_and_connect);
                                     }
                                     debug!("Retrying controller INIT...");
                                     continue;
@@ -1068,9 +1137,8 @@ async fn main() -> Result<()> {
                                 _ = tokio::time::sleep(Duration::from_secs(30)) => {
                                     // Check if connection is still alive before retrying
                                     if !ctrl_ssh.is_connected().await {
-                                        error!("Controller connection lost during wait");
-                                        error!("Please restart the probe to reconnect");
-                                        return Ok(());
+                                        warn!("Controller connection lost during wait; reconnecting");
+                                        ctrl_retry!('register_and_connect);
                                     }
                                     debug!("Retrying controller INIT...");
                                     continue;
@@ -1082,19 +1150,27 @@ async fn main() -> Result<()> {
                             error!(
                                 "Got CONTROLLER response from controller (expected REMOTE_PORT)"
                             );
-                            return Ok(());
+                            ctrl_retry!('register_and_connect);
+                        }
+                        Ok(InitResponse::Refused { reason }) => {
+                            // atlasinit: the controller's REFUSED forces a new
+                            // registration after ATLAS_DEFAULT_WAIT.
+                            warn!(
+                                "Controller refused us ({}); registering again in {}s",
+                                reason, DEFAULT_WAIT_SECS
+                            );
+                            reg.refused(&reason);
+                            save_reg(&reg, &reg_path);
+                            ctrl_delay = Duration::from_secs(DEFAULT_WAIT_SECS as u64);
+                            ctrl_retry!('register_and_connect);
                         }
                         Err(e) => {
-                            // Connection may have dropped during the wait period
-                            // Exit so the probe can be restarted for a fresh
-                            // connection
-                            error!(
-                                "Controller INIT failed: {} (connection may have timed out during \
-                                 wait)",
-                                e
-                            );
-                            error!("Please restart the probe to reconnect");
-                            return Ok(());
+                            // The reference's reginit.sh exits on a failed
+                            // controller INIT and its main loop runs it again;
+                            // Starla exited 0 here, which Restart=on-failure
+                            // leaves dead. Retry, on the same assignment.
+                            error!("Controller INIT failed: {}; reconnecting", e);
+                            ctrl_retry!('register_and_connect);
                         }
                     }
                 };
@@ -1329,6 +1405,24 @@ const RPTADDRS_INTERVAL_SECS: u64 = 180;
 /// The measurement id the reference probe reports addresses under
 /// (`rptaddrs -A 9104`).
 const RPTADDRS_MSM_ID: u32 = 9104;
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+/// A lost save means one extra registration at the next start, not a fault.
+fn save_reg(reg: &RegState, path: &std::path::Path) {
+    if let Err(e) = reg.save(path) {
+        warn!(
+            "Could not save the registration to {}: {}",
+            path.display(),
+            e
+        );
+    }
+}
 
 #[cfg(test)]
 mod tests {

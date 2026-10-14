@@ -7,6 +7,7 @@
 //! - Reverse port forwarding
 
 pub mod channel_stream;
+pub mod registration;
 pub mod ssh;
 pub mod telnet;
 
@@ -14,10 +15,11 @@ pub mod telnet;
 pub use russh;
 
 pub use channel_stream::channel_to_stream;
+pub use registration::{RegState, RegStep};
 pub use ssh::{
     generate_key, key_fingerprint, load_key, load_key_from_string, load_or_create_key,
-    public_key_openssh, save_key, ControllerInfo, InitResponse, KnownHosts, ProbeInitInfo,
-    SshConfig, SshConnection, TelnetState,
+    parse_init_response, public_key_openssh, save_key, ControllerInfo, InitResponse, KnownHosts,
+    ProbeInitInfo, SshConfig, SshConnection, TelnetState,
 };
 pub use telnet::{
     DnsSpec, HostTelemetryKind, HostTelemetrySpec, HttpSpec, NtpSpec, PingSpec, ScheduleSpec,
