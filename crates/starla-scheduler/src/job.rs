@@ -95,6 +95,8 @@ pub struct HttpJobSpec {
     pub headers: Vec<String>,
     pub body: Option<String>,
     pub max_body_size: Option<u32>,
+    pub store_headers: u32,
+    pub http10: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +112,8 @@ pub struct NtpJobSpec {
     pub target: String,
     pub af: u8,
     pub packets: u32,
+    pub timeout_ms: u32,
+    pub gap_ms: u32,
 }
 
 impl MeasurementJob {
@@ -197,6 +201,9 @@ impl MeasurementJob {
                         timeout_ms: 30000,
                         verify_ssl: true,
                         version: None,
+                        af: spec.af,
+                        store_headers: spec.store_headers as usize,
+                        http10: spec.http10,
                     },
                     probe_id,
                     msm_id,
@@ -221,8 +228,11 @@ impl MeasurementJob {
                 Ok(Box::new(Ntp {
                     config: NtpConfig {
                         target,
-                        timeout_ms: 5000,
+                        dst_name: spec.target.clone(),
+                        timeout_ms: spec.timeout_ms as u64,
                         port: 123,
+                        count: spec.packets,
+                        gap_ms: spec.gap_ms as u64,
                     },
                     probe_id,
                     msm_id,

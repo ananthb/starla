@@ -597,6 +597,8 @@ async fn main() -> Result<()> {
                         headers: spec.headers,
                         body: spec.body,
                         max_body_size: spec.max_body_size,
+                        store_headers: spec.store_headers,
+                        http10: spec.http10,
                     })
                 ),
                 TelnetCommand::Tls(spec) => dispatch_measurement!(
@@ -622,6 +624,8 @@ async fn main() -> Result<()> {
                         target: spec.target,
                         af: spec.af,
                         packets: spec.packets,
+                        timeout_ms: spec.timeout_ms,
+                        gap_ms: spec.gap_ms,
                     })
                 ),
                 TelnetCommand::HostTelemetry(spec) => {

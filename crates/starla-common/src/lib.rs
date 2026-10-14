@@ -26,8 +26,10 @@ pub use pause::{read_pause_state, write_pause_state, PauseState};
 pub use types::*;
 
 /// Firmware version: must match the reference probe version for controller
-/// acceptance
-pub const FIRMWARE_VERSION: u32 = 5120;
+/// acceptance. 5130 (2026-08-05): the measurement-visible changes are all in
+/// evntp (RFC 5905 offset in fixed point, `-g` gap between requests, "RIPE"
+/// reference id in network byte order), which Starla's NTP now follows.
+pub const FIRMWARE_VERSION: u32 = 5130;
 
 /// Version string
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

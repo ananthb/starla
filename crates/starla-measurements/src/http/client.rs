@@ -35,6 +35,9 @@ pub struct HttpResult {
     /// Request headers sent
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header: Option<Vec<String>>,
+    /// Response header lines, "name: value" (names as reqwest gives them)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_headers: Option<Vec<String>>,
     /// Readbuf - partial body content for debugging
     #[serde(skip_serializing_if = "Option::is_none")]
     pub readbuf: Option<String>,
@@ -97,6 +100,10 @@ pub async fn execute_http_request(config: &HttpConfig) -> anyhow::Result<HttpRes
 
     // Calculate sizes
     let headers = response.headers();
+    let response_headers: Vec<String> = headers
+        .iter()
+        .map(|(k, v)| format!("{}: {}", k, String::from_utf8_lossy(v.as_bytes())))
+        .collect();
     let mut header_size = 0;
     for (k, v) in headers {
         header_size += k.as_str().len() + v.as_bytes().len() + 4; // key + ": "
@@ -130,6 +137,7 @@ pub async fn execute_http_request(config: &HttpConfig) -> anyhow::Result<HttpRes
         } else {
             Some(headers_sent)
         },
+        response_headers: Some(response_headers),
         readbuf,
         err: None,
     })
