@@ -98,12 +98,6 @@ impl ScheduledTask {
         self.end_time > 0 && now > self.end_time
     }
 
-    /// A slot the run is more than [`TIME_SLACK`] seconds late for: eperd's
-    /// RunJob draws a new cycle instead of running it stale (eperd.c:1268).
-    pub fn is_stale(&self, now: i64) -> bool {
-        now > self.next_run.saturating_add(TIME_SLACK)
-    }
-
     /// eperd's set_timeout(line, 1) (eperd.c:744-753): the first cycle
     /// after `now`, its offset drawn afresh (do_distr, :489-511).
     fn draw_cycle(&mut self, now: i64) {

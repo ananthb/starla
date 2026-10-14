@@ -183,12 +183,6 @@ impl Lines {
             if !task.is_due(now) {
                 return true;
             }
-            // eperd's RunJob draws a new cycle instead of running a slot it
-            // is over 10 s late for (eperd.c:1268).
-            if task.is_stale(now) {
-                task.schedule_next(now);
-                return true;
-            }
             due.push(task.job.clone());
             task.schedule_next(now);
             if own && task.is_expired(now) {
