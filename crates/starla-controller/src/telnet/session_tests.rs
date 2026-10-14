@@ -72,7 +72,7 @@ fn login() -> String {
 fn parsed<S: AsRef<str>>(lines: &[S]) -> String {
     let commands: Vec<_> = lines.iter().map(|l| parse_command(l.as_ref())).collect();
     for command in &commands {
-        assert!(!matches!(command, TelnetCommand::Unknown(_)), "{command:?}");
+        assert!(!matches!(command, TelnetCommand::Unknown(_)), "a known command");
     }
     format!("{commands:?}")
 }
@@ -85,7 +85,7 @@ fn handed_on(commands: &[TelnetCommand]) -> String {
 /// after "CRONLINE "), and how parse_command reads it.
 fn crontab_line(line: &str) -> CrontabLine {
     let command = parse_command(line);
-    assert!(!matches!(command, TelnetCommand::Unknown(_)), "{command:?}");
+    assert!(!matches!(command, TelnetCommand::Unknown(_)), "a known command");
     CrontabLine {
         line: line.strip_prefix("CRONLINE ").unwrap().to_string(),
         command,
@@ -217,7 +217,7 @@ async fn a_crontab_its_session_leaves_open_is_never_handed_on() {
     let request = format!("{}CRONTAB /home/atlas/crons/7\n{b}\n", login());
     let (out, commands) = session(&request).await;
     assert_eq!(out, "\r\nPassword: ");
-    assert!(commands.is_empty(), "{commands:?}");
+    assert!(commands.is_empty(), "commands were sent");
 
     // A newer session takes over mid-crontab: the old one's is closed and
     // never installed (:1112-1122), and the newer session's crontab is
@@ -529,7 +529,7 @@ async fn authenticate(session: &mut Open) {
     let command = session.commands.recv().await;
     assert!(
         matches!(&command, Some(c) if !matches!(c, TelnetCommand::Unknown(_))),
-        "{command:?}"
+        "a known command"
     );
 }
 
