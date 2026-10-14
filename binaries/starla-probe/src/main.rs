@@ -433,6 +433,7 @@ async fn main() -> Result<()> {
     let scheduler_tx_cmd = scheduler_tx.clone();
     let scheduler_cancel_cmd = scheduler_cancel.clone();
     let host_telemetry_cmd = result_handler.host_telemetry();
+    let result_handler_cmd = result_handler.clone();
     // THE ADDRESS REPORT IS THE PROBE'S OWN JOB, NOT THE CONTROLLER'S. The
     // reference probe runs `rptaddrs -A 9104` in its main loop, every pass
     // (`bin/ripe-atlas.in`: `rptaddrs …`, then `sleepkick 180`), and RIPE's
@@ -499,6 +500,18 @@ async fn main() -> Result<()> {
             }
 
             debug!("Processing command: {:?}", cmd);
+
+            // A ONEOFF's result is eooqd's: posted on its own, at once, with
+            // `&SRC=oneoff` (eooqd.c:792-820), not in the next main upload.
+            let cmd = match cmd {
+                TelnetCommand::Oneoff(inner) => {
+                    if let Some(msm_id) = oneoff_msm_id(&inner) {
+                        result_handler_cmd.expect_oneoff(msm_id).await;
+                    }
+                    *inner
+                }
+                cmd => cmd,
+            };
 
             // Helper macro to schedule/execute a measurement job.
             // Handles logging, metrics, and recurring vs one-shot dispatch.
@@ -574,14 +587,35 @@ async fn main() -> Result<()> {
                     "dns",
                     "dns",
                     MeasurementSpec::Dns(DnsJobSpec {
-                        target: spec.target,
+                        server: spec.target,
                         af: spec.af,
-                        protocol: spec.protocol,
-                        query_type: spec.query_type,
-                        query_class: spec.query_class,
-                        query_argument: spec.query_argument,
-                        use_dnssec: spec.use_dnssec,
-                        recursion_desired: spec.recursion_desired,
+                        tcp: spec.protocol == "TCP",
+                        port: spec.port,
+                        qtype: spec.qtype,
+                        qclass: spec.qclass,
+                        query: spec.query_argument,
+                        resolv: spec.resolv,
+                        rd: spec.rd,
+                        ad: spec.ad,
+                        cd: spec.cd,
+                        dnssec: spec.dnssec,
+                        nsid: spec.nsid,
+                        client_subnet: spec.client_subnet,
+                        cookies: spec.cookies,
+                        edns0: spec.edns0,
+                        edns_version: spec.edns_version,
+                        edns_flags: spec.edns_flags,
+                        edns_option: spec.edns_option,
+                        qbuf: spec.qbuf,
+                        abuf: spec.abuf,
+                        prepend_probe_id: spec.prepend_probe_id,
+                        timeout_ms: spec.timeout_ms,
+                        retry: spec.retry,
+                        bundle: spec.bundle,
+                        ttl: spec.ttl,
+                        // ATLAS_DISABLE_CHECK_ADDR is read from the
+                        // environment; nothing is left over yet
+                        ..Default::default()
                     })
                 ),
                 TelnetCommand::Http(spec) => dispatch_measurement!(
@@ -643,6 +677,29 @@ async fn main() -> Result<()> {
                                 .await;
                         }
                     }
+                    Ok(())
+                }
+                TelnetCommand::Httppost(spec) => {
+                    // The controller's upload line: its URL, on perd's slots.
+                    let line = starla_results::HttppostLine {
+                        schedule: starla_results::PostSchedule {
+                            interval: spec.interval,
+                            start_time: spec.start_time,
+                            end_time: spec.end_time,
+                            spread: spec.spread as u64,
+                        },
+                        url: spec.url,
+                        post_dir: spec.post_dir,
+                        set_time: spec.set_time,
+                        local_time: spec.local_time,
+                    };
+                    if let Err(e) = result_handler_cmd.set_httppost_line(line).await {
+                        warn!("Ignoring httppost line: {}", e);
+                    }
+                    Ok(())
+                }
+                TelnetCommand::Oneoff(_) => {
+                    // A ONEOFF inside a ONEOFF: the parser makes none.
                     Ok(())
                 }
                 TelnetCommand::Status => {
@@ -1185,6 +1242,8 @@ async fn main() -> Result<()> {
                 // Session ID is set on TelnetState before each KEEP connection
 
                 let actual_probe_id = probe_id.0;
+                // evtdig's $p: the scheduler was built before we registered
+                starla_scheduler::job::set_registered_probe_id(actual_probe_id);
 
                 // Set result upload endpoint path (query params for HTTP POST)
                 let endpoint_path =
@@ -1401,6 +1460,19 @@ async fn main() -> Result<()> {
     info!("Shutting down probe");
 
     Ok(())
+}
+
+/// The measurement id of a ONEOFF's command, whose result is the one-off's.
+fn oneoff_msm_id(cmd: &TelnetCommand) -> Option<u64> {
+    match cmd {
+        TelnetCommand::Ping(s) => Some(s.msm_id),
+        TelnetCommand::Traceroute(s) => Some(s.msm_id),
+        TelnetCommand::Dns(s) => Some(s.msm_id),
+        TelnetCommand::Http(s) => Some(s.msm_id),
+        TelnetCommand::Tls(s) => Some(s.msm_id),
+        TelnetCommand::Ntp(s) => Some(s.msm_id),
+        _ => None,
+    }
 }
 
 /// The reference probe's main-loop period, which is how often it runs

@@ -191,23 +191,29 @@
       <p>RTT 3 decimals. 3 probes per hop. Requires <code>CAP_NET_RAW</code>.</p>
 
       <h3>DNS — <code>evtdig</code></h3>
-      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evtdig [-4|-6] [-t qtype] [-c qclass] [-T] [-r] [-d] [-e bufsize] [-R] [-h] [-b] [-i] [--soa] [--resolv] [--type N] [--class N] [--query NAME] [-A msm_id] [-O output] [@server] [query]</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">grammar</span></div><div class="pre-body"><code>evtdig [-4|-6|-a] [-t] [-R] [-d] [-n] [-e size] [--qbuf] [--resolv]
+  [--soa NAME | --a NAME | --aaaa NAME | &hellip; | --type N --class N --query NAME | -h | -b | -i | -r]
+  [--retry N] [--timeout ms] [--port N] [-A msm_id] [-O output] server</code></div></pre>
+
+      <p>Parsed as <code>eperd/evtdig.c</code> (firmware 5130) parses it, with getopt_long: options in any order, long ones by a unique prefix. The name must end with a dot, and there must be exactly one server unless <code>--resolv</code> is given. A line the reference refuses (an unknown option, no final dot, no server) is refused.</p>
 
       <table>
         <thead><tr><th>Flag</th><th>Description</th></tr></thead>
         <tbody>
-          <tr><td><code>-T</code></td><td>Use TCP (default UDP)</td></tr>
-          <tr><td><code>-h</code></td><td>Query <code>hostname.bind CH TXT</code></td></tr>
-          <tr><td><code>-b</code></td><td>Query <code>version.bind CH TXT</code></td></tr>
-          <tr><td><code>-i</code></td><td>Query <code>id.server CH TXT</code></td></tr>
-          <tr><td><code>--soa</code></td><td>Query SOA for <code>.</code></td></tr>
-          <tr><td><code>-r/-d/+dnssec</code></td><td>Enable DNSSEC (DO bit)</td></tr>
-          <tr><td><code>-R</code></td><td>Disable recursion desired</td></tr>
-          <tr><td><code>-e</code></td><td>EDNS buffer size</td></tr>
-          <tr><td><code>--type N</code></td><td>Numeric type (1=A, 28=AAAA, 16=TXT…)</td></tr>
-          <tr><td><code>--class N</code></td><td>Numeric class (1=IN, 3=CH)</td></tr>
-          <tr><td><code>--query NAME</code></td><td>Query name</td></tr>
-          <tr><td><code>@server</code></td><td>Target DNS server IP</td></tr>
+          <tr><td><code>-4</code> / <code>-6</code> / <code>-a</code></td><td>The server's address family: IPv4 (default), IPv6, either</td></tr>
+          <tr><td><code>-t</code></td><td>TCP (default UDP); the result adds <code>qt</code></td></tr>
+          <tr><td><code>-h</code>, <code>-b</code>, <code>-i</code>, <code>-r</code></td><td><code>hostname.bind</code>, <code>version.bind</code>, <code>id.server</code>, <code>version.server</code>, CH TXT</td></tr>
+          <tr><td><code>--soa NAME</code>, <code>--a NAME</code>, <code>--aaaa NAME</code>, &hellip;</td><td>That type, class IN</td></tr>
+          <tr><td><code>--type N</code>, <code>--class N</code>, <code>--query NAME</code></td><td>Numeric type and class (default TXT CH)</td></tr>
+          <tr><td><code>-R</code></td><td>Set RD. evtdig never sets it otherwise, <code>--resolv</code> aside</td></tr>
+          <tr><td><code>-d</code></td><td>The DO bit</td></tr>
+          <tr><td><code>-n</code></td><td>An NSID option</td></tr>
+          <tr><td><code>-e N</code></td><td>EDNS0 UDP size (512). An OPT record goes out only for <code>-n</code>, <code>-d</code>, <code>-c</code>, <code>--cookies</code>, <code>-e</code> above 512, or a non-zero <code>--edns-version</code>/<code>--edns-flags</code>/<code>--edns-option</code></td></tr>
+          <tr><td><code>--qbuf</code></td><td>Report the query sent (base64) as <code>qbuf</code></td></tr>
+          <tr><td><code>--resolv</code></td><td>Ask each resolver in <code>/etc/resolv.conf</code> (at most 3), a second apart, with RD; one <code>resultset</code> entry each. Nobody else is asked</td></tr>
+          <tr><td><code>--retry N</code>, <code>--timeout ms</code></td><td>Repeats after a timeout (0); the UDP wait (5000). TCP has 5 s for the whole exchange</td></tr>
+          <tr><td><code>--ttl</code></td><td>Report the TTL (hop limit) a UDP reply arrived with, as <code>"ttl"</code> before <code>"proto"</code>: beside the addresses, not inside <code>result</code> where the result-format documentation (5010) puts it</td></tr>
+          <tr><td><code>--tls</code>, <code>--https</code></td><td>Not supported: the line is refused</td></tr>
         </tbody>
       </table>
 
@@ -215,15 +221,27 @@
       <table>
         <thead><tr><th>Variable</th><th>Expansion</th><th>Purpose</th></tr></thead>
         <tbody>
-          <tr><td><code>$r</code></td><td>8-char random alphanumeric</td><td>Prevent DNS caching</td></tr>
-          <tr><td><code>$p</code></td><td>Probe ID (decimal)</td><td>Per-probe uniqueness</td></tr>
+          <tr><td><code>$r</code></td><td>16 random lowercase hex digits</td><td>Prevent DNS caching</td></tr>
+          <tr><td><code>$p</code></td><td>Probe ID (decimal), as registration assigned it</td><td>Per-probe uniqueness</td></tr>
           <tr><td><code>$t</code></td><td>Unix timestamp (decimal)</td><td>Per-query uniqueness</td></tr>
         </tbody>
       </table>
+      <p>With <code>--resolv</code> the name is expanded afresh for each resolver. Any other <code>$</code> fails the expansion, which is reported.</p>
 
-      <pre><div class="pre-head"><span class="lang">json</span><span>result · PreFormatted object · abuf</span></div><div class="pre-body"><code>RESULT { "id":"10310", "fw":5120, "mver": "2.6.4", "lts":51, "time":1775314719, "af":4, "dst_addr":"170.247.170.2", "dst_port":"53", "src_addr":"204.168.188.81", "proto":"UDP", "result": { "rt":29.846,"size":50, "abuf":"qr2AAAABAAEAAAAACGhvc3RuYW1lBGJpbmQAABAAA8AMABAAAwAAAAAABwZiNC1mcmE=", "ID":43709, "ANCOUNT":1, "QDCOUNT":1, "NSCOUNT":0, "ARCOUNT":0, "answers":[ {"TYPE":"TXT", "NAME":"hostname.bind.", "RDATA":[ "b4-fra" ]} ] } }</code></div></pre>
+      <pre><div class="pre-head"><span class="lang">json</span><span>result · FullLine · abuf</span></div><div class="pre-body"><code>RESULT { "id" : "11201" , "fw":5130, "mver": "2.6.4", "time" : 1791871219 , "lts" : 8 ,
+  "dst_addr" : "2001:db8:7769:6e00::20" , "dst_port" : "53" , "af" : 6 ,
+  "src_addr" : "2001:db8:7769:6e00::31" , "proto" : "UDP" ,"result" : { "rt" : 0.649,"size" : 53 ,
+  "abuf" : "sPqEAAABAAEAAAAAB3ZlcnNpb24EYmluZAAAEAADwAwAEAADAAAAAAALCmF0bGFzLXR3aW4=",
+  "ID" : 45306 , "ANCOUNT" : 1 , "QDCOUNT" : 1 , "NSCOUNT" : 0 , "ARCOUNT" : 0,
+  "answers" : [ {"TYPE" : "TXT" , "NAME" : "version.bind" , "RDATA" : [ "atlas-twin" ] } ] } }</code></div></pre>
 
-      <p>On timeout: <code>"result": { "error":{"timeout":5000} }</code></p>
+      <p>The spacing is printReply()'s (<code>"key" : value , </code>), kept as it is (wrapped here). Only the first two answers are decoded, and only TXT and SOA (as <code>TYPE</code>, <code>NAME</code>, <code>TTL</code>, <code>MNAME</code>, <code>RNAME</code>, <code>SERIAL</code>); the rest is in <code>abuf</code>. With <code>--resolv</code> the line carries <code>"time"</code>, <code>"lts"</code> and a <code>"resultset"</code> whose entries add <code>subid</code> and <code>submax</code>.</p>
+
+      <p>On timeout: <code>"proto" : "UDP" , "error" : { "timeout" : 5000}</code>, and no <code>result</code>. Every error is such an object beside the addresses (per <code>resultset</code> entry with <code>--resolv</code>), never inside <code>result</code>.</p>
+
+      <p>Where firmware 5130 differs from the result-format documentation (version 5000), Starla writes what 5130 writes, which is what RIPE stores: a server given by name is <code>"name"</code> beside <code>dst_addr</code> once a UDP query is sent, and <code>"dst_name"</code> over TCP or when nothing was sent; a name that does not resolve is <code>"error" : {"evdns_getaddrinfo": "NAME nodename nor servname provided, or not known"}</code> (or <code>non-recoverable failure in name resolution</code>), not <code>"getaddrinfo"</code>, in libevent's words and not the system resolver's; <code>dst_addr</code> is there for a timeout, a send error or a refused TCP connect, and missing only when no address was ever known.</p>
+
+      <p>A server on loopback, a private or link-local network, ULA or multicast, given as an address or as a name that resolves to one, is not asked, as atlas_check_addr() has it (IPv4 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 224/4; IPv6 ::1, ::ffff:0:0/96, e000::/3): UDP reports <code>"error" : { "reason" : "address not allowed"}</code> with the address, except with <code>--resolv</code>; TCP reports <code>"error" : { "TU_BAD_ADDR" : true}</code>, <code>--resolv</code> or not. <code>ATLAS_DISABLE_CHECK_ADDR=yes</code> in Starla's environment lets them through, as it does the reference. A link-local <code>src_addr</code>, and TCP's <code>dst_addr</code>, carry their zone (<code>fe80::1%eth0</code>) as getnameinfo() writes them; UDP's <code>dst_addr</code> does not. As in 5130, a query that fails before it has a source address (a socket or connect error, a refused address) reports the <code>src_addr</code> the query before it left, from the previous resolver or the previous run; with <code>--ttl</code>, the last reply's <code>"ttl"</code> stays on later timeouts and errors; a server name with several addresses of the family is asked at each, and the last one is reported.</p>
 
       <div class="callout">
         <div class="label">⚠ abuf</div>
@@ -317,7 +335,7 @@
       <p>The HTTP measurement computed the address family correctly but hardcoded <code>af: 0</code> in the result struct. The controller silently drops results with <code>af:0</code> while returning <code>OK</code>.</p>
 
       <h3>DNS timeouts must be results, not errors</h3>
-      <p>When a DNS query times out (e.g. ISP blocks outbound UDP 53), the official probe reports <code>{"error":{"timeout":5000}}</code> as a valid measurement result. Treating timeouts as execution errors loses them.</p>
+      <p>When a DNS query times out (e.g. ISP blocks outbound UDP&nbsp;53), the official probe reports <code>"error" : { "timeout" : 5000}</code> as a valid measurement result. Treating timeouts as execution errors loses them.</p>
 
       <h3>Upload rate: 60 seconds, not 10</h3>
       <p>The official <code>httppost</code> runs once per 60 seconds. Uploading more often triggers 429 rate limiting from the controller. The penalty is per-probe (tied to SSH key / probe ID) and persists across reconnections.</p>
@@ -326,7 +344,7 @@
       <p>The controller expects system health data (disk stats, uptime, network interface counters, ongoing status) in every upload batch. Sending only measurement RESULT lines causes persistent 429 rate limiting that survives reconnections and lasts hours.</p>
 
       <h3>DNS template variables</h3>
-      <p>Query names may contain <code>$r</code>, <code>$p</code>, and <code>$t</code> templates. Failing to expand <code>$p</code> causes <code>hickory-dns</code> to reject the label as malformed (measurement 30001 uses these).</p>
+      <p>Query names may contain <code>$r</code>, <code>$p</code>, and <code>$t</code> templates (measurement 30001 uses them). <code>$p</code> must be the probe ID registration assigned: the scheduler starts before registration, and until 2026-10-13 Starla asked for <code>0.ripe-tld-experiment.&hellip;</code> where the reference asked for <code>1018212.ripe-tld-experiment.&hellip;</code>.</p>
     </section>
 
     <hr class="divider">
