@@ -158,7 +158,11 @@ impl ResultHandler {
     ) -> Self {
         let queue = ResultQueue::new(config.max_queue_size);
         let host_telemetry = HostTelemetry::new();
-        let time_sync = Arc::new(TimeSyncTracker::new());
+        // Keep the last sync on disk so lts does not reset to -1 on restart,
+        // as the reference reads its timesync file back (atlas_timesync.c).
+        let time_sync = Arc::new(TimeSyncTracker::open(
+            starla_common::state_dir().join("timesync"),
+        ));
         let uploader = ResultUploader::new(
             transport,
             uploader_config,

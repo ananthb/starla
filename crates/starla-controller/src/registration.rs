@@ -165,6 +165,108 @@ impl RegState {
     }
 }
 
+/// The controller KEEP state: what reginit.sh keeps in con_keep_conf.txt so a
+/// restart can reuse the controller session instead of running another
+/// controller INIT (reginit.sh:404-461). REMOTE_PORT is the reverse tunnel the
+/// controller assigned, SESSION_ID comes with it, and CON_WAIT_TIMER is set
+/// when a controller answered WAIT.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ConKeep {
+    /// REMOTE_PORT: the reverse tunnel port the controller assigned.
+    pub remote_port: Option<u16>,
+    /// SESSION_ID: the session the controller assigned with it.
+    pub session_id: Option<String>,
+    /// CON_WAIT_TIMER: the time a controller asked us to wait until (unix
+    /// seconds).
+    pub wait_until: Option<i64>,
+}
+
+impl ConKeep {
+    /// The session to reuse now, if the controller assigned one and any wait
+    /// has expired. A wait still in the future is not reusable: the caller
+    /// must sleep until [`waiting_until`](Self::waiting_until) first
+    /// (reginit.sh:436-441,459-467).
+    pub fn reusable(&self, now: i64) -> Option<(u16, String)> {
+        if self.wait_until.is_some_and(|t| now < t) {
+            return None;
+        }
+        match (&self.remote_port, &self.session_id) {
+            (Some(port), Some(sid)) => Some((*port, sid.clone())),
+            _ => None,
+        }
+    }
+
+    /// The time a pending CON_WAIT_TIMER runs out, if it is still in the
+    /// future.
+    pub fn waiting_until(&self, now: i64) -> Option<i64> {
+        self.wait_until.filter(|&t| now < t)
+    }
+
+    /// The controller assigned a session (a KEEP-ready INIT reply).
+    pub fn set_ready(&mut self, remote_port: u16, session_id: String) {
+        self.remote_port = Some(remote_port);
+        self.session_id = Some(session_id);
+        self.wait_until = None;
+    }
+
+    /// The controller answered WAIT until `until`.
+    pub fn set_wait(&mut self, until: i64) {
+        self.wait_until = Some(until);
+    }
+
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Read the saved state; a missing or unreadable file is no state.
+    pub fn load(path: &Path) -> Self {
+        std::fs::read_to_string(path)
+            .map(|text| Self::parse(&text))
+            .unwrap_or_default()
+    }
+
+    /// Write it atomically (temp file, then rename), owner-only.
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        let tmp = path.with_extension("new");
+        std::fs::write(&tmp, self.render())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+        }
+        std::fs::rename(&tmp, path)
+    }
+
+    fn parse(text: &str) -> Self {
+        let mut st = Self::default();
+        for line in text.lines() {
+            let (k, v) = line.split_once(' ').unwrap_or((line, ""));
+            let v = v.trim();
+            match k {
+                "REMOTE_PORT" => st.remote_port = v.parse().ok(),
+                "SESSION_ID" => st.session_id = Some(v.to_string()),
+                "CON_WAIT_TIMER" => st.wait_until = v.parse().ok(),
+                _ => {}
+            }
+        }
+        st
+    }
+
+    fn render(&self) -> String {
+        let mut out = String::new();
+        if let Some(p) = self.remote_port {
+            out.push_str(&format!("REMOTE_PORT {p}\n"));
+        }
+        if let Some(s) = &self.session_id {
+            out.push_str(&format!("SESSION_ID {s}\n"));
+        }
+        if let Some(t) = self.wait_until {
+            out.push_str(&format!("CON_WAIT_TIMER {t}\n"));
+        }
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +358,31 @@ mod tests {
         // And it survives a restart the same way.
         let saved = RegState::parse(&st.render());
         assert_eq!(saved.next_step(NOW + 1), RegStep::WaitUntil(NOW + 600));
+    }
+
+    #[test]
+    fn con_keep_reuses_a_ready_session_and_honours_a_wait() {
+        let mut ck = ConKeep::default();
+        assert_eq!(ck.reusable(NOW), None);
+
+        ck.set_ready(37_214, "sess-1".into());
+        assert_eq!(ck.reusable(NOW), Some((37_214, "sess-1".into())));
+        // It survives a restart.
+        let saved = ConKeep::parse(&ck.render());
+        assert_eq!(saved, ck);
+
+        // A wait blocks reuse until it expires.
+        ck.set_wait(NOW + 100);
+        assert_eq!(ck.reusable(NOW), None);
+        assert_eq!(ck.waiting_until(NOW), Some(NOW + 100));
+        assert_eq!(ck.reusable(NOW + 100), Some((37_214, "sess-1".into())));
+        assert_eq!(ck.waiting_until(NOW + 100), None);
+
+        // A new assignment clears the wait.
+        ck.set_wait(NOW + 100);
+        ck.set_ready(1, "s".into());
+        assert_eq!(ck.wait_until, None);
+        assert_eq!(ck.reusable(NOW), Some((1, "s".into())));
     }
 
     #[test]

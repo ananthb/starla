@@ -104,12 +104,24 @@ pub fn spool_marker(id: u32, spool: &str) -> String {
 
 /// Measurement results: eperd's crons/7, `condmv -A "RESULT 9907 ongoing"`.
 pub fn results_marker() -> String {
-    spool_marker(9907, "/home/atlas/data/new/7")
+    spool_marker(9907, &spool_path("7"))
 }
 
 /// httppost's own lines: crons/main, `condmv -A "RESULT 9901 ongoing"`.
 pub fn main_marker() -> String {
-    spool_marker(9901, "/home/atlas/data/new/main")
+    spool_marker(9901, &spool_path("main"))
+}
+
+/// The spool path condmv reports for a file under `data/new`. The reference
+/// software probe's spool is under `@atlas_spooldir@`, not the hardware
+/// probe's `/home/atlas/data/new`, so hardcoding the latter was wrong for a
+/// software probe. Use the probe's own state directory.
+fn spool_path(name: &str) -> String {
+    starla_common::state_dir()
+        .join("data/new")
+        .join(name)
+        .display()
+        .to_string()
 }
 
 /// The host's uptime in seconds (sysinfo on Linux, as rptuptime).
@@ -228,11 +240,18 @@ mod tests {
 
     #[test]
     fn markers_are_condmvs() {
+        let spool = starla_common::state_dir().join("data/new");
         let m = results_marker();
         assert!(m.starts_with("RESULT 9907 ongoing "), "{m}");
-        assert!(m.ends_with(" /home/atlas/data/new/7\n"), "{m}");
+        assert!(
+            m.ends_with(&format!(" {}\n", spool.join("7").display())),
+            "{m}"
+        );
         let m = main_marker();
         assert!(m.starts_with("RESULT 9901 ongoing "), "{m}");
-        assert!(m.ends_with(" /home/atlas/data/new/main\n"), "{m}");
+        assert!(
+            m.ends_with(&format!(" {}\n", spool.join("main").display())),
+            "{m}"
+        );
     }
 }

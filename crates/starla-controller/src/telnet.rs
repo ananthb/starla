@@ -199,6 +199,10 @@ pub struct DnsSpec {
     pub query_argument: String,
     /// `--resolv`: ask the probe's own resolvers (/etc/resolv.conf)
     pub resolv: bool,
+    /// `-I <ifname>`: with `--resolv`, read `/etc/resolv.conf.<ifname>` when
+    /// it exists and fall back to `/etc/resolv.conf`, as get_local_resolvers()
+    /// does (readresolv.c:54-67).
+    pub interface: Option<String>,
     /// `-R`: set RD; evtdig never sets it otherwise (`--resolv` aside)
     pub rd: bool,
     /// `--ad`, `--cd`
@@ -248,6 +252,7 @@ impl Default for DnsSpec {
             qclass: 3,
             query_argument: String::new(),
             resolv: false,
+            interface: None,
             rd: false,
             ad: false,
             cd: false,
@@ -288,6 +293,10 @@ pub struct HttpSpec {
     /// `-0`: HTTP/1.0 (evhttpget's default, and `-1`, is HTTP/1.1)
     #[serde(default)]
     pub http10: bool,
+    /// `--timeout N`: ms to wait, as evhttpget's read/connect timeout. None
+    /// keeps Starla's default.
+    #[serde(default)]
+    pub timeout_ms: Option<u32>,
     pub spread: Option<u32>,
     pub schedule: ScheduleSpec,
 }
@@ -566,6 +575,8 @@ pub async fn handle_connection(
     let mut raw_buf = [0u8; 4096];
     let mut state = ConnectionState::GetLoginName;
     let mut lines = LineSplitter::default();
+    // Carries telnet negotiation state across reads (a split IAC sequence).
+    let mut telnet_filter = TelnetFilter::default();
     // Set once authenticated: tells when a newer session has taken over
     let mut atlas: Option<tokio::sync::watch::Receiver<()>> = None;
     // The crontab DO_CRONTAB is taking, root.new: dropped unsent if the
@@ -595,7 +606,7 @@ pub async fn handle_connection(
         };
 
         // Filter out telnet IAC sequences and split the rest into lines
-        for line in lines.feed(&filter_telnet_commands(&raw_buf[..n])) {
+        for line in lines.feed(&telnet_filter.feed(&raw_buf[..n])) {
             if atlas
                 .as_ref()
                 .is_some_and(|rx| rx.has_changed().unwrap_or(false))
@@ -907,67 +918,117 @@ fn c_isspace(c: char) -> bool {
 
 /// Filter out telnet IAC sequences from raw data and return just the data
 /// bytes (made text a whole line at a time, by LineSplitter)
-fn filter_telnet_commands(data: &[u8]) -> Vec<u8> {
-    let mut result = Vec::new();
-    let mut i = 0;
+/// Strip the controller's telnet IAC negotiation from the byte stream,
+/// carrying state across reads.
+///
+/// The filter must survive a sequence split across two reads (the reference
+/// keeps a `buffered_IAC_for_pty` flag for exactly this, telnetd.c:250-330):
+/// a lone trailing IAC, or a command whose option byte has not arrived, is
+/// resumed on the next call rather than leaking into the command line.
+#[derive(Default)]
+struct TelnetFilter {
+    state: FilterState,
+}
 
-    while i < data.len() {
-        if data[i] == IAC && i + 1 < data.len() {
-            // Handle telnet command sequences
-            match data[i + 1] {
-                IAC => {
-                    // Escaped IAC (255 255) -> single 255
-                    result.push(IAC);
-                    i += 2;
-                }
-                WILL | WONT | DO | DONT => {
-                    // 3-byte command: IAC + cmd + option
-                    if i + 2 < data.len() {
-                        debug!(
-                            "Telnet: {:?} option {}",
-                            match data[i + 1] {
-                                WILL => "WILL",
-                                WONT => "WONT",
-                                DO => "DO",
-                                DONT => "DONT",
-                                _ => "?",
-                            },
-                            data[i + 2]
-                        );
-                        i += 3;
+#[derive(Default, Clone, Copy)]
+enum FilterState {
+    /// Ordinary data.
+    #[default]
+    Normal,
+    /// An IAC byte was the last one seen; its command byte is still to come.
+    Iac,
+    /// An IAC WILL/WONT/DO/DONT was seen; its option byte is still to come.
+    IacOption,
+    /// Inside IAC SB ... IAC SE; everything up to the closing sequence goes.
+    Sb,
+    /// Inside SB, an IAC was just seen: SE closes it, IAC IAC stays inside.
+    SbIac,
+}
+
+impl TelnetFilter {
+    fn feed(&mut self, data: &[u8]) -> Vec<u8> {
+        let mut result = Vec::with_capacity(data.len());
+        let mut state = self.state;
+        for &byte in data {
+            state = match state {
+                FilterState::Normal => {
+                    if byte == IAC {
+                        FilterState::Iac
                     } else {
-                        i += 2;
+                        result.push(byte);
+                        FilterState::Normal
                     }
                 }
-                SB => {
-                    // Subnegotiation: IAC SB ... IAC SE
-                    // Skip until we find IAC SE
-                    i += 2;
-                    while i + 1 < data.len() {
-                        if data[i] == IAC && data[i + 1] == SE {
-                            i += 2;
-                            break;
-                        }
-                        i += 1;
+                FilterState::Iac => match byte {
+                    IAC => {
+                        // Escaped IAC (255 255) is a literal 0xff.
+                        result.push(IAC);
+                        FilterState::Normal
+                    }
+                    WILL | WONT | DO | DONT => FilterState::IacOption,
+                    SB => FilterState::Sb,
+                    // 2-byte commands (SE, NOP, ...) are no-ops here.
+                    _ => FilterState::Normal,
+                },
+                // IAC WILL/WONT/DO/DONT <option>: drop the option byte.
+                FilterState::IacOption => FilterState::Normal,
+                FilterState::Sb => {
+                    if byte == IAC {
+                        FilterState::SbIac
+                    } else {
+                        FilterState::Sb
                     }
                 }
-                240..=249 => {
-                    // 2-byte commands (NOP, etc.)
-                    i += 2;
-                }
-                _ => {
-                    // Unknown, skip 2 bytes
-                    i += 2;
-                }
-            }
-        } else {
-            // Regular data byte
-            result.push(data[i]);
-            i += 1;
+                FilterState::SbIac => match byte {
+                    SE => FilterState::Normal,
+                    IAC => FilterState::SbIac,
+                    _ => FilterState::Sb,
+                },
+            };
         }
+        self.state = state;
+        result
+    }
+}
+
+#[cfg(test)]
+mod telnet_filter_tests {
+    use super::*;
+
+    #[test]
+    fn strips_two_and_three_byte_commands() {
+        let mut f = TelnetFilter::default();
+        // IAC WILL ECHO, then "hi"
+        assert_eq!(f.feed(&[IAC, WILL, 1, b'h', b'i']), b"hi".to_vec());
     }
 
-    result
+    #[test]
+    fn escaped_iac_is_a_literal() {
+        let mut f = TelnetFilter::default();
+        assert_eq!(f.feed(&[IAC, IAC]), vec![IAC]);
+    }
+
+    #[test]
+    fn a_dangling_iac_across_reads_is_not_leaked() {
+        let mut f = TelnetFilter::default();
+        assert_eq!(f.feed(&[b'a', IAC]), vec![b'a']);
+        assert_eq!(f.feed(&[WONT, 1, b'b']), vec![b'b']);
+    }
+
+    #[test]
+    fn a_split_three_byte_command_across_reads_is_not_leaked() {
+        let mut f = TelnetFilter::default();
+        assert_eq!(f.feed(&[IAC, WILL]), Vec::<u8>::new());
+        assert_eq!(f.feed(&[3]), Vec::<u8>::new());
+        assert_eq!(f.feed(b"ok"), b"ok".to_vec());
+    }
+
+    #[test]
+    fn subnegotiation_is_dropped_whole_and_across_reads() {
+        let mut f = TelnetFilter::default();
+        assert_eq!(f.feed(&[IAC, SB, 31, 0, 40]), Vec::<u8>::new());
+        assert_eq!(f.feed(&[IAC, SE, b'x']), vec![b'x']);
+    }
 }
 
 /// Parse a command line into a TelnetCommand
@@ -1840,9 +1901,10 @@ fn parse_evtdig(args: &[String], interval: u64, end_time: i64, spread: u32) -> T
             }
             DigOpt::PrependProbeId => spec.prepend_probe_id = true,
             DigOpt::Ttl => spec.ttl = true,
+            // -I <ifname>: which resolv.conf.<ifname> --resolv reads.
+            DigOpt::Interface => spec.interface = Some(value.to_string()),
             DigOpt::Tls | DigOpt::Https => return unknown("DNS over TLS/HTTPS is not supported"),
-            DigOpt::Interface
-            | DigOpt::Ipv6DestOption
+            DigOpt::Ipv6DestOption
             | DigOpt::OutFile
             | DigOpt::SniCertName
             | DigOpt::HttpsPath
@@ -1897,6 +1959,7 @@ fn parse_evhttpget(args: &[String], interval: u64, end_time: i64, spread: u32) -
     let mut max_body_size: Option<u32> = None;
     let mut store_headers: u32 = 0;
     let mut http10 = false;
+    let mut timeout_ms: Option<u32> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -1929,11 +1992,18 @@ fn parse_evhttpget(args: &[String], interval: u64, end_time: i64, spread: u32) -
                     i += 1;
                 }
             }
+            // --timeout N: the reference waits N ms between read calls
+            // (httpget.c:711-719); honour it instead of the fixed default.
+            "--timeout" => {
+                if i + 1 < args.len() {
+                    timeout_ms = args[i + 1].parse().ok();
+                    i += 1;
+                }
+            }
             // httpget options with a value Starla does not use: their value
             // must not be taken for the URL.
             "-I" | "-R" | "-W" | "-b" | "--host" | "--post-file" | "--post-header"
-            | "--post-footer" | "--read-limit" | "--store-body" | "--user-agent" | "--sni"
-            | "--timeout" => {
+            | "--post-footer" | "--read-limit" | "--store-body" | "--user-agent" | "--sni" => {
                 if i + 1 < args.len() {
                     i += 1;
                 }
@@ -1971,6 +2041,7 @@ fn parse_evhttpget(args: &[String], interval: u64, end_time: i64, spread: u32) -
         max_body_size,
         store_headers,
         http10,
+        timeout_ms,
         spread: Some(spread),
         schedule: ScheduleSpec {
             interval,
@@ -2315,6 +2386,7 @@ fn parse_json_command(spec: &serde_json::Value) -> TelnetCommand {
                 .map(|v| v as u32),
             store_headers: 0,
             http10: false,
+            timeout_ms: None,
             spread,
             schedule,
         }),

@@ -115,6 +115,8 @@ pub struct HttpJobSpec {
     pub max_body_size: Option<u32>,
     pub store_headers: u32,
     pub http10: bool,
+    /// `--timeout N` (ms) as the controller sent it; None keeps the default.
+    pub timeout_ms: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -257,7 +259,7 @@ impl MeasurementJob {
                             Some(headers)
                         },
                         body: spec.body.clone(),
-                        timeout_ms: 30000,
+                        timeout_ms: spec.timeout_ms.map(u64::from).unwrap_or(30000),
                         verify_ssl: true,
                         version: None,
                         af: spec.af,
@@ -958,6 +960,7 @@ mod tests {
                     max_body_size: None,
                     store_headers: 1024,
                     http10: false,
+                    timeout_ms: None,
                 }),
                 MeasurementType::Http,
             ),
