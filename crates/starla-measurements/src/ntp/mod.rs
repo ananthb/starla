@@ -74,9 +74,9 @@ fn result_body(
             };
             let precision_val = 2.0_f64.powi(h.precision as i32);
             format!(
-                ", \"li\":\"{}\", \"version\":{}, \"mode\":\"{}\", \"stratum\":{}, \
-                 \"poll\":{}, \"precision\":{:e}, \"root-delay\":{}, \
-                 \"root-dispersion\":{}, \"ref-id\":\"{}\", \"ref-ts\":{:.9}",
+                ", \"li\":\"{}\", \"version\":{}, \"mode\":\"{}\", \"stratum\":{}, \"poll\":{}, \
+                 \"precision\":{:e}, \"root-delay\":{}, \"root-dispersion\":{}, \
+                 \"ref-id\":\"{}\", \"ref-ts\":{:.9}",
                 li_str,
                 h.version,
                 mode_str,

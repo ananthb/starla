@@ -138,30 +138,48 @@ async fn ntp_exchange(
     let t1 = now_ntp();
     socket.send_to(&request(t1), dest).await?;
 
+    // Match the reply to this request. A bare recv_from on an unconnected
+    // socket accepts a late reply to the previous request -- or an off-path
+    // spoof -- as this one, and reports its arrival as our T4. Require the
+    // reply to come from the server we asked (RFC 5905 section 8) and to echo
+    // our transmit timestamp in its origin timestamp, and keep waiting until
+    // the deadline for one that does.
+    let deadline = Instant::now() + timeout_dur;
     let mut recv_buf = [0u8; 48];
-    let (len, _) = timeout(timeout_dur, socket.recv_from(&mut recv_buf)).await??;
-    let t4 = now_ntp();
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!("NTP request timed out");
+        }
+        let (len, from) = match timeout(remaining, socket.recv_from(&mut recv_buf)).await {
+            Ok(res) => res?,
+            Err(_) => anyhow::bail!("NTP request timed out"),
+        };
+        if from.ip() != dest.ip() || len < 48 {
+            continue;
+        }
+        if recv_buf[24..32] != t1.to_be_bytes() {
+            continue;
+        }
+        let t4 = now_ntp();
 
-    if len < 48 {
-        anyhow::bail!("NTP response too short");
+        let mut buf = &recv_buf[32..];
+        let t2 = buf.get_u64();
+        let t3 = buf.get_u64();
+        let (rtt, offset) = delay_and_offset(t1, t2, t3, t4);
+
+        return Ok((
+            NtpSample {
+                origin_ts: ntp_ts_to_f64(t1),
+                receive_ts: ntp_ts_to_f64(t2),
+                transmit_ts: ntp_ts_to_f64(t3),
+                final_ts: ntp_ts_to_f64(t4),
+                rtt,
+                offset,
+            },
+            recv_buf,
+        ));
     }
-
-    let mut buf = &recv_buf[32..];
-    let t2 = buf.get_u64();
-    let t3 = buf.get_u64();
-    let (rtt, offset) = delay_and_offset(t1, t2, t3, t4);
-
-    Ok((
-        NtpSample {
-            origin_ts: ntp_ts_to_f64(t1),
-            receive_ts: ntp_ts_to_f64(t2),
-            transmit_ts: ntp_ts_to_f64(t3),
-            final_ts: ntp_ts_to_f64(t4),
-            rtt,
-            offset,
-        },
-        recv_buf,
-    ))
 }
 
 /// Send `config.count` requests, each at least `config.gap_ms` after the

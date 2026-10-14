@@ -214,10 +214,10 @@ mod tests {
         assert_eq!(
             body,
             format!(
-                "\"id\":\"13027\", \"fw\":{}, \"mver\": \"2.6.4\", \"lts\":0, \"time\":1791860335, \
-                 \"result\":[ {{ \"header\": [ \"X-Client-IP: 2602:f337:ed:4174:2020:2041:746c:6173\", \
-                 \"Content-Length: 37\", \"\" ], \"method\":\"GET\", \"af\": 6, \
-                 \"dst_addr\":\"2001:67c:2e8:16::c100:68d\", \
+                "\"id\":\"13027\", \"fw\":{}, \"mver\": \"2.6.4\", \"lts\":0, \
+                 \"time\":1791860335, \"result\":[ {{ \"header\": [ \"X-Client-IP: \
+                 2602:f337:ed:4174:2020:2041:746c:6173\", \"Content-Length: 37\", \"\" ], \
+                 \"method\":\"GET\", \"af\": 6, \"dst_addr\":\"2001:67c:2e8:16::c100:68d\", \
                  \"src_addr\":\"2602:f337:ed:4174:2020:2041:746c:6173\", \"rt\":269.242169, \
                  \"res\":200, \"ver\":\"1.0\", \"hsize\":72, \"bsize\":37 }} ]",
                 starla_common::FIRMWARE_VERSION
@@ -247,7 +247,13 @@ mod tests {
             ..Default::default()
         };
         let body = result_body(12023, 1, &out);
-        assert!(body.contains("\"time\":1, \"ttr\":1.500000, \"result\":[ { \"err\":\"connect: timeout\", \"method\":\"GET\", \"af\": 4, \"dst_addr\":\"193.0.6.141\" } ]"), "{body}");
+        assert!(
+            body.contains(
+                "\"time\":1, \"ttr\":1.500000, \"result\":[ { \"err\":\"connect: timeout\", \
+                 \"method\":\"GET\", \"af\": 4, \"dst_addr\":\"193.0.6.141\" } ]"
+            ),
+            "{body}"
+        );
         assert!(!body.contains("\"rt\""), "{body}");
     }
 }

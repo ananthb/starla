@@ -1929,6 +1929,10 @@ fn parse_json_command(spec: &serde_json::Value) -> TelnetCommand {
 }
 
 #[cfg(test)]
+// rustfmt's format_strings reflows these literals across line continuations
+// and splits the `\n` in a `\r\n\r\n` sequence, changing what the test asserts.
+// Leave them exactly as written.
+#[rustfmt::skip]
 mod session_tests;
 
 #[cfg(test)]

@@ -123,7 +123,15 @@ pub async fn fetch(
     timeout: Duration,
 ) -> anyhow::Result<RawHttpOutcome> {
     let (dst, ttr) = match url.host.parse::<IpAddr>() {
-        Ok(ip) => (SocketAddr::new(ip, url.port), None),
+        Ok(ip) => {
+            // A literal host must still honour -4/-6: evhttpget resolves with
+            // the requested family, so an IPv4 literal under -6 is a
+            // resolution failure, not an IPv4 connect.
+            if (af == 4 && ip.is_ipv6()) || (af == 6 && ip.is_ipv4()) {
+                anyhow::bail!("no IPv{af} address for {}", url.host);
+            }
+            (SocketAddr::new(ip, url.port), None)
+        }
         Err(_) => {
             let t0 = Instant::now();
             let addrs = tokio::time::timeout(
@@ -449,7 +457,8 @@ mod tests {
         let u = parse_http_url("http://[2001:67c:2e8:16::c100:68d]").unwrap();
         assert_eq!(
             request(&u, false),
-            "GET / HTTP/1.1\r\nHost: [2001:67c:2e8:16::c100:68d]\r\nConnection: close\r\nUser-Agent: httpget for atlas.ripe.net\r\n\r\n"
+            "GET / HTTP/1.1\r\nHost: [2001:67c:2e8:16::c100:68d]\r\nConnection: \
+             close\r\nUser-Agent: httpget for atlas.ripe.net\r\n\r\n"
         );
         assert!(request(&u, true).starts_with("GET / HTTP/1.0\r\n"));
     }
@@ -508,7 +517,8 @@ mod tests {
     }
 
     /// The live echo server, the URLs of built-ins 12027 and 13027. Network,
-    /// so ignored: `cargo test -p starla-measurements -- --ignored live_ip_echo`.
+    /// so ignored: `cargo test -p starla-measurements -- --ignored
+    /// live_ip_echo`.
     #[tokio::test]
     #[ignore]
     async fn live_ip_echo() {
