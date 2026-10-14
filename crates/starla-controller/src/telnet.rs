@@ -570,17 +570,14 @@ fn parse_cronline(cmd: &str) -> TelnetCommand {
     let measurement_cmd = &tokens[6];
     let measurement_args = &tokens[7..];
 
-    // Deliberately not logging measurement_args: CodeQL's
-    // rust/cleartext-logging flags the arguments of an evsslgetcert line as
-    // sensitive (and the rule gates this repo's merge ruleset). The parsed
-    // command already carries everything the scheduler needs.
     trace!(
-        "CRONLINE: interval={}, start_time={}, end_time={}, spread={}, cmd={}",
+        "CRONLINE: interval={}, start_time={}, end_time={}, spread={}, cmd={}, args={:?}",
         interval,
         start_time,
         end_time,
         spread,
-        measurement_cmd
+        measurement_cmd,
+        measurement_args
     );
 
     // Parse the measurement command
@@ -1709,7 +1706,9 @@ mod tests {
                 TelnetCommand::Traceroute(s) => s.schedule.start_time,
                 TelnetCommand::Dns(s) => s.schedule.start_time,
                 TelnetCommand::Http(s) => s.schedule.start_time,
-                other => panic!("{other:?}"),
+                // Not `{other:?}`: printing the parsed command trips CodeQL's
+                // rust/cleartext-logging (an evsslgetcert line is sensitive).
+                _ => panic!("unexpected command for {line}"),
             };
             assert_eq!(got, start, "{line}");
         }
