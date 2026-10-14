@@ -1024,10 +1024,9 @@ mod tests {
     /// 1791871194.82), ICMPv6 part: 96 bytes, "size":88 in the result.
     fn ref_port_unreachable() -> Vec<u8> {
         let mut icmp = hex("0104 5550 0000 0000");
-        icmp.extend(hex(
-            "600c 7336 0030 1101 2001 0db8 7769 6e00 0000 0000 0000 0031
-             2001 0db8 7769 6e00 0000 0000 0000 0020 500d 829b 0030 26d8",
-        ));
+        icmp.extend(hex("600c 7336 0030 1101 2001 0db8 7769 6e00 0000 0000 \
+                         0000 0031
+             2001 0db8 7769 6e00 0000 0000 0000 0020 500d 829b 0030 26d8"));
         icmp.extend(hex(REF_UDP6_PROBE));
         icmp
     }
@@ -1142,8 +1141,8 @@ mod tests {
         assert_eq!(
             a.icmpext.as_deref(),
             Some(
-                ", \"icmpext\": { \"version\":2, \"rfc4884\":1, \"obj\": [ { \"class\":1, \"type\":1, \
-                 \"mpls\": [ { \"label\":16, \"exp\":0, \"s\":1, \"ttl\":1 } ] } ] }"
+                ", \"icmpext\": { \"version\":2, \"rfc4884\":1, \"obj\": [ { \"class\":1, \
+                 \"type\":1, \"mpls\": [ { \"label\":16, \"exp\":0, \"s\":1, \"ttl\":1 } ] } ] }"
             )
         );
 

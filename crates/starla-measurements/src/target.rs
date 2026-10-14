@@ -1452,8 +1452,8 @@ mod tests {
         let (server, seen) = fake_server(answer_both).await;
         let mut resolver = resolver(server);
         resolver.hosts = parse_hosts(
-            "# comment\n127.0.0.1\tlocalhost\n::1 localhost ip6-localhost # x\n\
-             192.0.2.1 v4only.lan\n",
+            "# comment\n127.0.0.1\tlocalhost\n::1 localhost ip6-localhost # x\n192.0.2.1 \
+             v4only.lan\n",
         );
         let found = resolver.lookup("LocalHost", 6).await;
         assert_eq!(found.addr, Ok("::1".parse().unwrap()));
@@ -1504,12 +1504,11 @@ mod tests {
     #[test]
     fn resolv_conf_is_read_as_evdns_reads_it() {
         let conf = ResolvConf::parse(
-            "# atlas-twin\nnameserver 172.30.74.20\nnameserver\t2001:db8:7769:6e00::20\n\
-             nameserver [2001:db8::53]:5353\nnameserver 192.0.2.53:54\nnameserver bogus\n\
-             nameserver 172.30.74.20:53\n\
-             domain example.net\nsearch .a.example b.example\n\
-             options ndots:2 timeout:1.5 attempts:2 rotate max-timeouts:300 \
-             initial-probe-timeout:4000\n",
+            "# atlas-twin\nnameserver \
+             172.30.74.20\nnameserver\t2001:db8:7769:6e00::20\nnameserver \
+             [2001:db8::53]:5353\nnameserver 192.0.2.53:54\nnameserver bogus\nnameserver \
+             172.30.74.20:53\ndomain example.net\nsearch .a.example b.example\noptions ndots:2 \
+             timeout:1.5 attempts:2 rotate max-timeouts:300 initial-probe-timeout:4000\n",
             Some("probe.lan.example"),
         );
         assert_eq!(
@@ -1600,8 +1599,9 @@ mod tests {
         assert!(lo_index > 0);
         let conf = ResolvConf::parse(
             &format!(
-                "nameserver fe80::1%{lo}\nnameserver fe80::2%7\nnameserver [fe80::3%{lo}]:5353\n\
-                 nameserver fe80::4%nosuchif0\nnameserver 192.0.2.1:0\nnameserver fe80::5%\n"
+                "nameserver fe80::1%{lo}\nnameserver fe80::2%7\nnameserver \
+                 [fe80::3%{lo}]:5353\nnameserver fe80::4%nosuchif0\nnameserver \
+                 192.0.2.1:0\nnameserver fe80::5%\n"
             ),
             None,
         );
@@ -1679,8 +1679,8 @@ mod tests {
 
     /// evdns keeps one socket per server: every query to a server leaves
     /// from the same port (the twin's reference: 79 queries from two ports,
-    /// one per server; Starla's from a new port each). The servers take turns in evdns's ring order,
-    /// resolv.conf's A, B, C as A, C, B.
+    /// one per server; Starla's from a new port each). The servers take turns
+    /// in evdns's ring order, resolv.conf's A, B, C as A, C, B.
     #[tokio::test]
     async fn one_socket_per_server_taking_turns_in_ring_order() {
         let (a, seen_a) = fake_server(answer_both).await;

@@ -738,7 +738,8 @@ mod tests {
         let size = if cfg!(target_os = "macos") { 28 } else { 68 };
         assert!(
             r.starts_with(&format!(
-                "[ {{ \"hop\":1, \"result\": [ {{ \"from\":\"127.0.0.1\", \"ttl\":64, \"size\":{size}, \"rtt\":"
+                "[ {{ \"hop\":1, \"result\": [ {{ \"from\":\"127.0.0.1\", \"ttl\":64, \
+                 \"size\":{size}, \"rtt\":"
             )),
             "{r}"
         );
@@ -760,7 +761,10 @@ mod tests {
         assert_eq!(r.matches(", \"size\":40 }").count(), 3, "{r}");
         let r = trace_localhost(Ipv4Addr::LOCALHOST.into(), TracerouteProtocol::ICMP).await;
         assert!(
-            r.starts_with("[ { \"hop\":1, \"result\": [ { \"from\":\"127.0.0.1\", \"ttl\":64, \"size\":40, \"rtt\":"),
+            r.starts_with(
+                "[ { \"hop\":1, \"result\": [ { \"from\":\"127.0.0.1\", \"ttl\":64, \"size\":40, \
+                 \"rtt\":"
+            ),
             "{r}"
         );
         assert_eq!(r.matches("\"from\":\"127.0.0.1\"").count(), 3, "{r}");
@@ -772,7 +776,10 @@ mod tests {
     async fn tcp_to_localhost_gets_the_rst() {
         let r = trace_localhost(Ipv4Addr::LOCALHOST.into(), TracerouteProtocol::TCP).await;
         assert!(
-            r.starts_with("[ { \"hop\":1, \"result\": [ { \"from\":\"127.0.0.1\", \"ttl\":64, \"size\":0, \"flags\":\"RA\", \"rtt\":"),
+            r.starts_with(
+                "[ { \"hop\":1, \"result\": [ { \"from\":\"127.0.0.1\", \"ttl\":64, \"size\":0, \
+                 \"flags\":\"RA\", \"rtt\":"
+            ),
             "{r}"
         );
         assert!(!r.contains("\"hop\":2"), "{r}");

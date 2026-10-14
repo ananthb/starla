@@ -60,16 +60,16 @@ pub struct PingConfig {
 /// ping_start2, ping.c:1470-1481), so a line can carry what an earlier run
 /// left:
 ///
-/// - a run whose socket or connect fails reports the "size" and the
-///   "src_addr" (loc_sin6) kept, 0 and "" before any run
-///   (ping.c:1482-1580, 283-298), where Starla always wrote 0 and "";
-/// - a reply whose TTL the backend cannot tell gets rcvd_ttl, the last
-///   reply's that had one, in this run or an earlier one, 0 before any:
-///   ping.c only sets it from an IPv4 header or an IPV6_HOPLIMIT
-///   (ping.c:960, 1155-1162), and hands it on whether set or not
-///   (ping.c:1183). Starla gave such a reply the TTL it sent with, 64;
-/// - a failed lookup or a refused address keeps the `-s` as given as the
-///   size (ping.c:454-466), an empty answer cursize (PING_ERR_DNS_NO_ADDR,
+/// - a run whose socket or connect fails reports the "size" and the "src_addr"
+///   (loc_sin6) kept, 0 and "" before any run (ping.c:1482-1580, 283-298),
+///   where Starla always wrote 0 and "";
+/// - a reply whose TTL the backend cannot tell gets rcvd_ttl, the last reply's
+///   that had one, in this run or an earlier one, 0 before any: ping.c only
+///   sets it from an IPv4 header or an IPV6_HOPLIMIT (ping.c:960, 1155-1162),
+///   and hands it on whether set or not (ping.c:1183). Starla gave such a reply
+///   the TTL it sent with, 64;
+/// - a failed lookup or a refused address keeps the `-s` as given as the size
+///   (ping.c:454-466), an empty answer cursize (PING_ERR_DNS_NO_ADDR,
 ///   ping.c:1733-1744, 355-357), though it reports nothing;
 /// - and pingstate->busy: a run is under way ([`PingKept::start`]).
 ///

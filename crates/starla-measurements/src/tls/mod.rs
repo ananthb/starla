@@ -522,16 +522,21 @@ mod tests {
             head_body(&env, 7, &head) + &alert_suffix(2, 70),
             "\"id\":\"15001\", \"fw\":5130, \"mver\": \"2.6.4\", \"lts\":0, \"time\":7, \
              \"dst_name\":\"www.ripe.net\", \"dst_port\":\"443\", \"method\":\"TLS\", \
-             \"ver\":\"1.2\", \"dst_addr\":\"193.0.6.139\", \"af\": 4, \"src_addr\":\"192.0.2.10\", \
-             \"ttc\": 1.000000, \"rt\": 2.000000, \"server_cipher\": \"0x0000\", \
-             \"alert\": { \"level\": 2, \"description\": 70 }"
+             \"ver\":\"1.2\", \"dst_addr\":\"193.0.6.139\", \"af\": 4, \
+             \"src_addr\":\"192.0.2.10\", \"ttc\": 1.000000, \"rt\": 2.000000, \"server_cipher\": \
+             \"0x0000\", \"alert\": { \"level\": 2, \"description\": 70 }"
         );
         // Without -A: no id, version or lts, and report() has no time either
         let env = Envelope { atlas: None, ..env };
         assert_eq!(
-            report_body(&env, 7, Some("::2".parse().unwrap()), "\"err\":\"bad type\""),
-            "\"dst_name\":\"www.ripe.net\", \"dst_port\":\"443\", \"dst_addr\":\"::2\", \"af\": 6, \
-             \"err\":\"bad type\""
+            report_body(
+                &env,
+                7,
+                Some("::2".parse().unwrap()),
+                "\"err\":\"bad type\""
+            ),
+            "\"dst_name\":\"www.ripe.net\", \"dst_port\":\"443\", \"dst_addr\":\"::2\", \"af\": \
+             6, \"err\":\"bad type\""
         );
         assert!(head_body(&env, 7, &head).starts_with("\"time\":7, \"dst_name\""));
         assert_eq!(method_ver((3, 0)), ("SSL", "3.0".into()));
@@ -634,8 +639,8 @@ mod tests {
                 "\"id\":\"15001\", \"fw\":5130, \"mver\": \"2.6.4\", \"lts\":0, \"time\":N, \
                  \"dst_name\":\"www.ripe.net\", \"dst_port\":\"{port}\", \"ttr\":N, \
                  \"method\":\"TLS\", \"ver\":\"1.2\", \"dst_addr\":\"127.0.0.1\", \"af\": 4, \
-                 \"src_addr\":\"127.0.0.1\", \"ttc\": N, \"rt\": N, \
-                 \"server_cipher\": \"0xc02b\", \"cert\":[ {REF_CERT_JSON} ]"
+                 \"src_addr\":\"127.0.0.1\", \"ttc\": N, \"rt\": N, \"server_cipher\": \
+                 \"0xc02b\", \"cert\":[ {REF_CERT_JSON} ]"
             )
         );
         assert_eq!(sni.lock().unwrap().as_deref(), Some("www.ripe.net"));
@@ -654,8 +659,8 @@ mod tests {
                 "\"id\":\"15001\", \"fw\":5130, \"mver\": \"2.6.4\", \"lts\":0, \"time\":N, \
                  \"dst_name\":\"127.0.0.1\", \"dst_port\":\"{port}\", \"method\":\"TLS\", \
                  \"ver\":\"1.2\", \"dst_addr\":\"127.0.0.1\", \"af\": 4, \
-                 \"src_addr\":\"127.0.0.1\", \"ttc\": N, \"rt\": N, \
-                 \"server_cipher\": \"0x0000\", \"alert\": {{ \"level\": 2, \"description\": 70 }}"
+                 \"src_addr\":\"127.0.0.1\", \"ttc\": N, \"rt\": N, \"server_cipher\": \
+                 \"0x0000\", \"alert\": {{ \"level\": 2, \"description\": 70 }}"
             )
         );
     }
@@ -683,7 +688,9 @@ mod tests {
     fn body_of(result: &MeasurementResult) -> &str {
         match &result.data {
             MeasurementData::FullLine(body) => body,
-            other => panic!("{other:?}"),
+            // Not `{other:?}`: the result line can hold a certificate, which
+            // CodeQL flags as cleartext logging.
+            _ => panic!("measurement result is not a full line"),
         }
     }
 

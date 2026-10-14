@@ -2,17 +2,17 @@
 //!
 //! Provides utilities for constructing and parsing ICMPv4 and ICMPv6 packets.
 
-use pnet::packet::icmp::{
+use pnet_packet::icmp::{
     checksum, destination_unreachable::DestinationUnreachablePacket, echo_reply::EchoReplyPacket,
     echo_request::MutableEchoRequestPacket, time_exceeded::TimeExceededPacket, IcmpCode,
     IcmpPacket, IcmpTypes,
 };
-use pnet::packet::icmpv6::{
+use pnet_packet::icmpv6::{
     echo_reply::EchoReplyPacket as EchoReplyPacketV6,
     echo_request::MutableEchoRequestPacket as MutableEchoRequestPacketV6, Icmpv6Code, Icmpv6Packet,
     Icmpv6Types,
 };
-use pnet::packet::Packet;
+use pnet_packet::Packet;
 use std::io;
 
 /// Construct an ICMPv4 Echo Request packet
@@ -86,7 +86,7 @@ pub fn set_icmpv6_checksum(packet: &mut [u8], src: std::net::Ipv6Addr, dst: std:
         return;
     };
     // the checksum word itself is skipped
-    let sum = pnet::packet::icmpv6::checksum(&message, &src, &dst);
+    let sum = pnet_packet::icmpv6::checksum(&message, &src, &dst);
     packet[2..4].copy_from_slice(&sum.to_be_bytes());
 }
 

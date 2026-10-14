@@ -720,7 +720,12 @@ mod tests {
             .to_result_line();
         assert_eq!(
             line,
-            "RESULT { \"id\":\"1040114\", \"fw\":5130, \"mver\": \"2.6.4\", \"lts\":12, \"time\":1791871295, \"dst_name\":\"bits.wikimedia.org\", \"ttr\":1.030459, \"af\":6, \"dst_addr\":\"2001:db8:7769:6e00::20\", \"src_addr\":\"2001:db8:7769:6e00::31\", \"proto\":\"ICMP\", \"ttl\":64, \"size\":32, \"result\": [ { \"rtt\":0.082583 }, { \"rtt\":0.220125 }, { \"rtt\":0.124625 } ] }\n"
+            "RESULT { \"id\":\"1040114\", \"fw\":5130, \"mver\": \"2.6.4\", \"lts\":12, \
+             \"time\":1791871295, \"dst_name\":\"bits.wikimedia.org\", \"ttr\":1.030459, \
+             \"af\":6, \"dst_addr\":\"2001:db8:7769:6e00::20\", \
+             \"src_addr\":\"2001:db8:7769:6e00::31\", \"proto\":\"ICMP\", \"ttl\":64, \
+             \"size\":32, \"result\": [ { \"rtt\":0.082583 }, { \"rtt\":0.220125 }, { \
+             \"rtt\":0.124625 } ] }\n"
         );
     }
 

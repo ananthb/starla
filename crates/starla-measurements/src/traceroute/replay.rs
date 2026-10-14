@@ -2,22 +2,21 @@
 //! probe's traffic.
 //!
 //! - Replay: the reference probe's results for the scenario's measurements
-//!   (probe 1000004, firmware 5130; the latest result of each as RIPE's
-//!   archive had it on 2026-10-13, in testdata/) are turned back into the
-//!   packets that drew them and run through Starla's reading of replies
-//!   (`wire::parse_reply`), its trace (`engine::Trace`: which probe next,
-//!   when the trace ends) and its result line (`Traceroute::result_body`).
-//!   The line, as RIPE stores it (`id` → `msm_id`, `time` → `timestamp`,
-//!   `lts` from the results queue, the backend's own fields aside), must be
-//!   the stored object: the same keys in the same order, the same values.
-//!   The scenario's traceroutes are all IPv6 (UDP and ICMP); the IPv4 and
-//!   TCP replies' fields are pinned against traceroute.c in engine.rs and
-//!   wire.rs.
-//! - Cross-talk (N3): every run's raw ICMP socket hears all ICMP to the
-//!   host. Starla's stored traceroutes of 2026-10-12, read through sockets
-//!   that matched nothing, listed a root server's and other measurements'
-//!   replies in hop 1 (starla-6152.json). Here concurrent traces, pings and
-//!   other ICMP are fed to every trace, and each keeps only its own.
+//!   (probe 1000004, firmware 5130; the latest result of each as RIPE's archive
+//!   had it on 2026-10-13, in testdata/) are turned back into the packets that
+//!   drew them and run through Starla's reading of replies
+//!   (`wire::parse_reply`), its trace (`engine::Trace`: which probe next, when
+//!   the trace ends) and its result line (`Traceroute::result_body`). The line,
+//!   as RIPE stores it (`id` → `msm_id`, `time` → `timestamp`, `lts` from the
+//!   results queue, the backend's own fields aside), must be the stored object:
+//!   the same keys in the same order, the same values. The scenario's
+//!   traceroutes are all IPv6 (UDP and ICMP); the IPv4 and TCP replies' fields
+//!   are pinned against traceroute.c in engine.rs and wire.rs.
+//! - Cross-talk (N3): every run's raw ICMP socket hears all ICMP to the host.
+//!   Starla's stored traceroutes of 2026-10-12, read through sockets that
+//!   matched nothing, listed a root server's and other measurements' replies in
+//!   hop 1 (starla-6152.json). Here concurrent traces, pings and other ICMP are
+//!   fed to every trace, and each keeps only its own.
 
 use super::engine::{Probe, Trace};
 use super::wire::{self, TraceId, BASE_PORT, SRC_BASE_PORT};

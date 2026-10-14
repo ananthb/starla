@@ -495,10 +495,10 @@ mod tests {
         assert_eq!(t.next_probe(ms(100.0)), None);
         assert_eq!(
             render_hops(t.hops()),
-            "[ { \"hop\":1, \"result\": [ \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.155, \"size\":88 }, \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.119, \"size\":88 }, \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.229, \"size\":88 } ] } ]"
+            "[ { \"hop\":1, \"result\": [ { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \
+             \"rtt\":0.155, \"size\":88 }, { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \
+             \"rtt\":0.119, \"size\":88 }, { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \
+             \"rtt\":0.229, \"size\":88 } ] } ]"
         );
     }
 
@@ -521,7 +521,8 @@ mod tests {
         let hops: Vec<u8> = t.hops().iter().map(|h| h.hop).collect();
         assert_eq!(hops, [1, 2, 3, 4, 5, 255]);
         assert!(render_hops(t.hops()).starts_with(
-            "[ { \"hop\":1, \"result\": [ { \"x\":\"*\" }, { \"x\":\"*\" }, { \"x\":\"*\" } ] }, { \"hop\":2"
+            "[ { \"hop\":1, \"result\": [ { \"x\":\"*\" }, { \"x\":\"*\" }, { \"x\":\"*\" } ] }, \
+             { \"hop\":2"
         ));
     }
 
@@ -568,11 +569,13 @@ mod tests {
         assert_eq!(e[0], "\"x\":\"*\"");
         assert_eq!(
             e[1],
-            "\"late\":1, \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":4001.500, \"size\":88"
+            "\"late\":1, \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":4001.500, \
+             \"size\":88"
         );
         assert_eq!(
             e[3],
-            "\"dup\":true, \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":3.000, \"size\":88"
+            "\"dup\":true, \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":3.000, \
+             \"size\":88"
         );
         assert_eq!(e.len(), 4, "the duplicate's wait adds no x:*");
         // An answer from the future is no answer.
@@ -686,8 +689,8 @@ mod tests {
         assert_eq!(t.next_probe(ms(0.0)), None);
         assert_eq!(
             render_hops(t.hops()),
-            "[ { \"hop\":1, \"result\": [ { \"x\":\"*\" }, \
-             { \"error\":\"sendto failed: Network is unreachable\" } ] } ]"
+            "[ { \"hop\":1, \"result\": [ { \"x\":\"*\" }, { \"error\":\"sendto failed: Network \
+             is unreachable\" } ] } ]"
         );
     }
 

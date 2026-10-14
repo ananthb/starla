@@ -351,10 +351,10 @@ mod tests {
         let h = hops(true, TracerouteProtocol::UDP, 0, 1, 1, 3, &replies);
         assert_eq!(
             engine::render_hops(&h),
-            "[ { \"hop\":1, \"result\": [ \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.155, \"size\":88 }, \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.119, \"size\":88 }, \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.229, \"size\":88 } ] } ]"
+            "[ { \"hop\":1, \"result\": [ { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \
+             \"rtt\":0.155, \"size\":88 }, { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \
+             \"rtt\":0.119, \"size\":88 }, { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \
+             \"rtt\":0.229, \"size\":88 } ] } ]"
         );
     }
 
@@ -371,12 +371,11 @@ mod tests {
         let h = hops(true, TracerouteProtocol::UDP, 0, 1, 3, 3, &[router, dst]);
         assert_eq!(
             engine::render_hops(&h),
-            "[ { \"hop\":1, \"result\": [ { \"x\":\"*\" }, \
-             { \"from\":\"2001:db8::1\", \"ttl\":64, \"rtt\":1.500, \"size\":88 }, { \"x\":\"*\" } ] }, \
-             { \"hop\":2, \"result\": [ { \"x\":\"*\" }, { \"x\":\"*\" }, { \"x\":\"*\" } ] }, \
-             { \"hop\":3, \"result\": [ \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":2.000, \"size\":88 }, \
-             { \"x\":\"*\" }, { \"x\":\"*\" } ] } ]"
+            "[ { \"hop\":1, \"result\": [ { \"x\":\"*\" }, { \"from\":\"2001:db8::1\", \
+             \"ttl\":64, \"rtt\":1.500, \"size\":88 }, { \"x\":\"*\" } ] }, { \"hop\":2, \
+             \"result\": [ { \"x\":\"*\" }, { \"x\":\"*\" }, { \"x\":\"*\" } ] }, { \"hop\":3, \
+             \"result\": [ { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":2.000, \
+             \"size\":88 }, { \"x\":\"*\" }, { \"x\":\"*\" } ] } ]"
         );
     }
 
@@ -401,9 +400,9 @@ mod tests {
         let h = hops(false, TracerouteProtocol::ICMP, 0, 1, 1, 2, &[echo, admin]);
         assert_eq!(
             engine::render_hops(&h),
-            "[ { \"hop\":1, \"result\": [ \
-             { \"from\":\"192.0.2.7\", \"ttl\":57, \"size\":40, \"rtt\":1.250 }, \
-             { \"from\":\"192.0.2.7\", \"ttl\":57, \"size\":68, \"rtt\":1.250, \"err\":\"A\" } ] } ]"
+            "[ { \"hop\":1, \"result\": [ { \"from\":\"192.0.2.7\", \"ttl\":57, \"size\":40, \
+             \"rtt\":1.250 }, { \"from\":\"192.0.2.7\", \"ttl\":57, \"size\":68, \"rtt\":1.250, \
+             \"err\":\"A\" } ] } ]"
         );
     }
 
@@ -418,10 +417,9 @@ mod tests {
         let h = hops(true, TracerouteProtocol::UDP, 0, 255, 255, 2, &[first, dup]);
         assert_eq!(
             engine::render_hops(&h),
-            "[ { \"hop\":255, \"result\": [ \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.300, \"size\":88 }, \
-             { \"dup\":true, \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.400, \"size\":88 }, \
-             { \"x\":\"*\" } ] } ]"
+            "[ { \"hop\":255, \"result\": [ { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \
+             \"rtt\":0.300, \"size\":88 }, { \"dup\":true, \"from\":\"2001:db8:7769:6e00::20\", \
+             \"ttl\":64, \"rtt\":0.400, \"size\":88 }, { \"x\":\"*\" } ] } ]"
         );
     }
 }

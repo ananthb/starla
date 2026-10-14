@@ -1194,7 +1194,8 @@ fn tokenize_cronline(cmd: &str) -> Vec<String> {
 /// 2026-10-13 has it); only the probe's own SOS ping, msm 9017, does
 /// (bin/ripe-atlas.in), which belongs to registration.
 ///
-/// Usage: evping [-4|-6] [-c count] [-s size] [-i interval] [-A msm_id] [-O output] target
+/// Usage: evping [-4|-6] [-c count] [-s size] [-i interval] [-A msm_id] [-O
+/// output] target
 fn parse_evping(args: &[String], interval: u64, end_time: i64, spread: u32) -> TelnetCommand {
     let mut v4 = false;
     let mut count: u32 = 3;
@@ -2405,7 +2406,7 @@ mod tests {
     fn evping_reads_its_options_as_ping_init_does() {
         let spec = |line: &str| match parse_command(line) {
             TelnetCommand::Ping(spec) => spec,
-            other => panic!("{other:?}"),
+            _ => panic!("not a ping command"),
         };
         let s = spec(
             r#"CRONLINE 21600 1384530082 1791883921 UNIFORM 14 evping -6 -c 16 -A "1040114" -O /home/atlas/data/new/7 bits.wikimedia.org"#,
@@ -2485,9 +2486,9 @@ mod tests {
             // own (&SRC=oneoff).
             TelnetCommand::Oneoff(inner) => match *inner {
                 TelnetCommand::Traceroute(spec) => spec,
-                other => panic!("{line}: {other:?}"),
+                _ => panic!("oneoff is not a traceroute: {line}"),
             },
-            other => panic!("{line}: {other:?}"),
+            _ => panic!("not a traceroute command: {line}"),
         }
     }
 
@@ -2502,7 +2503,7 @@ mod tests {
             TelnetCommand::Traceroute(s) => {
                 (s.opts.paris_mod, s.opts.paris_base, s.target, s.opts.size)
             }
-            other => panic!("{line}: {other:?}"),
+            _ => panic!("not a traceroute command: {line}"),
         };
         assert_eq!(
             paris(
@@ -3012,7 +3013,7 @@ mod tests {
             r#"CRONLINE 43200 6472 1794447121 UNIFORM 3 evsslgetcert -6 -h www.ripe.net -A "15001" -O /home/atlas/data/new/7 www.ripe.net"#,
         );
         let TelnetCommand::Tls(spec) = cmd else {
-            panic!("Expected Tls command, got {cmd:?}");
+            panic!("Expected Tls command");
         };
         assert_eq!(spec.msm_id, 15001);
         assert_eq!(spec.target, "www.ripe.net");
@@ -3025,7 +3026,7 @@ mod tests {
             r#"CRONLINE 43200 0 0 UNIFORM 3 evsslgetcert -A "15003" -O /home/atlas/data/new/7 www.ripe.net"#,
         );
         let TelnetCommand::Tls(spec) = cmd else {
-            panic!("Expected Tls command, got {cmd:?}");
+            panic!("Expected Tls command");
         };
         assert_eq!(spec.hostname, None);
         assert_eq!(spec.af, 0);

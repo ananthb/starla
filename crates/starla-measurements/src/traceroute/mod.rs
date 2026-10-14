@@ -105,7 +105,8 @@ impl Drop for Run<'_> {
 }
 
 impl TracerouteInstance {
-    /// The IPv4 echo id has 12 bits for the index (TRT_ICMP4_INSTANCE_ID_SHIFT).
+    /// The IPv4 echo id has 12 bits for the index
+    /// (TRT_ICMP4_INSTANCE_ID_SHIFT).
     const SLOTS: u16 = 1 << 12;
 
     pub fn index(&self) -> u16 {
@@ -287,8 +288,8 @@ impl Traceroute {
             .unwrap_or_default();
         format!(
             "\"id\":\"{}\", \"fw\":{}, \"mver\": \"2.6.4\", \"lts\":0, \"time\":{}, \
-             \"endtime\":{}, {}{}, \"dst_addr\":\"{}\", \"src_addr\":\"{}\", \
-             \"proto\":\"{}\", \"af\": {}, \"size\":{}{}, \"result\": {}",
+             \"endtime\":{}, {}{}, \"dst_addr\":\"{}\", \"src_addr\":\"{}\", \"proto\":\"{}\", \
+             \"af\": {}, \"size\":{}{}, \"result\": {}",
             self.msm_id.0,
             starla_common::FIRMWARE_VERSION,
             time,
@@ -392,8 +393,8 @@ impl Traceroute {
             .unwrap_or_default();
         let body = format!(
             "\"id\":\"{}\", \"fw\":{}, \"mver\": \"2.6.4\", \"lts\":0, \"time\":{}, \
-             \"endtime\":{}, {}{}{}, \"proto\":\"{}\", \"af\": {}, \"size\":{}{}, \
-             \"result\": [ {{ \"error\":\"{}\" }} ]",
+             \"endtime\":{}, {}{}{}, \"proto\":\"{}\", \"af\": {}, \"size\":{}{}, \"result\": [ \
+             {{ \"error\":\"{}\" }} ]",
             self.msm_id.0,
             starla_common::FIRMWARE_VERSION,
             now.0,
@@ -517,12 +518,13 @@ mod tests {
         assert_eq!(
             format!("RESULT {{ {} }}", body),
             "RESULT { \"id\":\"6016\", \"fw\":5130, \"mver\": \"2.6.4\", \"lts\":0, \
-             \"time\":1791871244, \"endtime\":1791871244, \"dst_name\":\"2001:db8:7769:6e00::20\", \
-             \"dst_addr\":\"2001:db8:7769:6e00::20\", \"src_addr\":\"2001:db8:7769:6e00::31\", \
-             \"proto\":\"UDP\", \"af\": 6, \"size\":40, \"paris_id\":1, \"result\": [ { \"hop\":1, \
-             \"result\": [ { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.155, \"size\":88 }, \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.119, \"size\":88 }, \
-             { \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.229, \"size\":88 } ] } ] }"
+             \"time\":1791871244, \"endtime\":1791871244, \
+             \"dst_name\":\"2001:db8:7769:6e00::20\", \"dst_addr\":\"2001:db8:7769:6e00::20\", \
+             \"src_addr\":\"2001:db8:7769:6e00::31\", \"proto\":\"UDP\", \"af\": 6, \"size\":40, \
+             \"paris_id\":1, \"result\": [ { \"hop\":1, \"result\": [ { \
+             \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.155, \"size\":88 }, { \
+             \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.119, \"size\":88 }, { \
+             \"from\":\"2001:db8:7769:6e00::20\", \"ttl\":64, \"rtt\":0.229, \"size\":88 } ] } ] }"
         );
     }
 
@@ -550,7 +552,10 @@ mod tests {
             "{body}"
         );
         assert!(
-            body.ends_with("\"proto\":\"ICMP\", \"af\": 4, \"size\":40, \"result\": [ { \"hop\":1, \"result\": [  ] } ]"),
+            body.ends_with(
+                "\"proto\":\"ICMP\", \"af\": 4, \"size\":40, \"result\": [ { \"hop\":1, \
+                 \"result\": [  ] } ]"
+            ),
             "{body}"
         );
     }
@@ -697,10 +702,11 @@ mod tests {
             &[],
         );
         let reference = "\"id\":\"6152\", \"fw\":5130, \"mver\": \"2.6.4\", \"lts\":0, \
-             \"time\":1791871334, \"endtime\":1791871334, \
-             \"dst_name\":\"topology6.dyndns.atlas.ripe.net\", \"ttr\":1.003708, \
-             \"dst_addr\":\"2001:db8:7769:6e00::20\", \"src_addr\":\"2001:db8:7769:6e00::31\", \
-             \"proto\":\"ICMP\", \"af\": 6, \"size\":40, \"paris_id\":1, \"result\": ";
+                         \"time\":1791871334, \"endtime\":1791871334, \
+                         \"dst_name\":\"topology6.dyndns.atlas.ripe.net\", \"ttr\":1.003708, \
+                         \"dst_addr\":\"2001:db8:7769:6e00::20\", \
+                         \"src_addr\":\"2001:db8:7769:6e00::31\", \"proto\":\"ICMP\", \"af\": 6, \
+                         \"size\":40, \"paris_id\":1, \"result\": ";
         assert!(body.starts_with(reference), "{body}");
 
         // an address literal has no ttr (msm 6016's line)
@@ -714,7 +720,8 @@ mod tests {
         let body = t.result_body(1, 2, &t.dst_name.fields(), None, Some(1), &[]);
         assert!(
             body.contains(
-                "\"endtime\":2, \"dst_name\":\"2001:db8:7769:6e00::20\", \"dst_addr\":\"2001:db8:7769:6e00::20\", \"src_addr\":\"\""
+                "\"endtime\":2, \"dst_name\":\"2001:db8:7769:6e00::20\", \
+                 \"dst_addr\":\"2001:db8:7769:6e00::20\", \"src_addr\":\"\""
             ),
             "{body}"
         );
@@ -744,7 +751,8 @@ mod tests {
                 "\"id\":\"6152\", \"fw\":5130, \"mver\": \"2.6.4\", \"lts\":0, \"time\":{time}, \
                  \"endtime\":{time}, \"dst_name\":\"nonexistent.example\", \"ttr\":2.500000, \
                  \"proto\":\"ICMP\", \"af\": 6, \"size\":40, \"paris_id\":0, \"result\": [ {{ \
-                 \"error\":\"name resolution failed: nodename nor servname provided, or not known\" }} ]"
+                 \"error\":\"name resolution failed: nodename nor servname provided, or not \
+                 known\" }} ]"
             )
         );
         assert_eq!(r.src_addr, None);
@@ -759,7 +767,8 @@ mod tests {
         };
         assert!(
             body.ends_with(
-                "\"proto\":\"UDP\", \"af\": 4, \"size\":40, \"result\": [ { \"error\":\"name resolution failed: non-recoverable failure in name resolution\" } ]"
+                "\"proto\":\"UDP\", \"af\": 4, \"size\":40, \"result\": [ { \"error\":\"name \
+                 resolution failed: non-recoverable failure in name resolution\" } ]"
             ),
             "{body}"
         );
@@ -783,7 +792,8 @@ mod tests {
         };
         assert!(
             body.ends_with(
-                "\"ttr\":0.500000, \"proto\":\"ICMP\", \"af\": 6, \"size\":40, \"paris_id\":0, \"result\": [ { \"error\":\"name resolution failed: out of addresses\" } ]"
+                "\"ttr\":0.500000, \"proto\":\"ICMP\", \"af\": 6, \"size\":40, \"paris_id\":0, \
+                 \"result\": [ { \"error\":\"name resolution failed: out of addresses\" } ]"
             ),
             "{body}"
         );
@@ -796,7 +806,9 @@ mod tests {
         };
         assert!(
             body.ends_with(
-                "\"dst_name\":\"lan.example\", \"ttr\":0.500000, \"dst_addr\":\"fd00::7\", \"proto\":\"ICMP\", \"af\": 6, \"size\":40, \"paris_id\":0, \"result\": [ { \"error\":\"address not allowed\" } ]"
+                "\"dst_name\":\"lan.example\", \"ttr\":0.500000, \"dst_addr\":\"fd00::7\", \
+                 \"proto\":\"ICMP\", \"af\": 6, \"size\":40, \"paris_id\":0, \"result\": [ { \
+                 \"error\":\"address not allowed\" } ]"
             ),
             "{body}"
         );
@@ -824,7 +836,10 @@ mod tests {
         };
         let body = line(&t);
         assert!(
-            body.contains(", \"bundle\":77, \"dst_name\":\"nonexistent.example\", \"ttr\":2.500000, \"proto\""),
+            body.contains(
+                ", \"bundle\":77, \"dst_name\":\"nonexistent.example\", \"ttr\":2.500000, \
+                 \"proto\""
+            ),
             "{body}"
         );
         assert!(body.contains("\"paris_id\":0, "), "{body}");

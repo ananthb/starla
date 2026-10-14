@@ -28,7 +28,6 @@ tracing = { workspace = true }
 bytes = { workspace = true }
 rand = { workspace = true }
 socket2 = { workspace = true }
-pnet = { workspace = true }
 pnet_packet = { workspace = true }
 webpki-roots = { workspace = true }
 sha2 = { workspace = true }
