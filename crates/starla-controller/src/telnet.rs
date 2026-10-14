@@ -34,15 +34,68 @@ pub enum TelnetCommand {
     Oneoff(Box<TelnetCommand>),
     /// An httppost CRONLINE: when and where the probe posts its results
     Httppost(HttppostSpec),
+    /// A crontab the controller sent whole: its CRONLINEs, handed on once
+    /// a line other than a CRONLINE has ended it
+    Crontab(CrontabSpec),
     /// Status query
     Status,
     /// Stop a running measurement
     Stop(u64),
-    /// Ignored command (known but not handled, e.g., CRONTAB, internal
+    /// Ignored command (known but not handled, e.g. condmv, internal
     /// commands)
     Ignored(String),
     /// Unknown command
     Unknown(String),
+}
+
+/// A crontab, as the controller sends one: a CRONTAB line, its CRONLINEs,
+/// and a line that ends it (telnetd.c:1230-1262). telnetd writes each
+/// CRONLINE to `<dir>/root.new` as it comes (add_to_crontab, :1520-1533);
+/// only end_crontab (:1535-1600), on the line that ends the crontab, renames
+/// that to `<dir>/root` and tells the directory's cron daemon to read it
+/// again (`cron.update`), and the daemon then reads the whole file anew. A
+/// crontab still open when its session ends is closed and never renamed,
+/// whether the connection went (kill_session, :1302-1311) or a newer session
+/// took over (:1112-1122): the directory keeps the crontab it had. So a
+/// crontab is handed on whole, once it has ended, or not at all.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrontabSpec {
+    /// The directory, rebased as start_crontab rebases it (:1484-1499):
+    /// `/home/atlas/crons/7` is `/var/spool/ripe-atlas/crons/7`
+    pub dir: String,
+    /// Its CRONLINEs, in order
+    pub lines: Vec<CrontabLine>,
+}
+
+/// A CRONLINE of a crontab.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrontabLine {
+    /// The line as add_to_crontab writes it to the file: what follows
+    /// "CRONLINE " (telnetd.c:1258)
+    pub line: String,
+    /// The line as parse_command reads it
+    pub command: TelnetCommand,
+}
+
+impl CrontabLine {
+    /// The line's command text, eperd's cl_Shell: what follows its five
+    /// leading fields (interval, start time, end time, distribution and its
+    /// parameter), as SynchronizeFile's config_read(…, 6, 1, "# \t",
+    /// PARSE_NORMAL) cuts it (eperd.c:550, 566-567, 612;
+    /// libbb/parse_config.c:162-243): the fields are apart at runs of
+    /// blanks, a '#' ends the line, and the blanks at its ends are trimmed.
+    /// With the interval and start time, it is what Insert() tells one line
+    /// from another by (eperd.c:789-791, 806-808).
+    pub fn shell(&self) -> &str {
+        let blank = |c: char| c == ' ' || c == '\t';
+        let line = self.line.split('#').next().unwrap_or_default();
+        let mut rest = line.trim_start_matches(blank);
+        for _ in 0..5 {
+            let field = rest.find(blank).unwrap_or(rest.len());
+            rest = rest[field..].trim_start_matches(blank);
+        }
+        rest.trim_end_matches(blank)
+    }
 }
 
 /// Which host-telemetry reporter the controller is asking us to run.
@@ -303,6 +356,15 @@ const NAME_TOO_LONG: &str = "NAME_TOO_LONG\r\n\r\n";
 const BAD_PATH: &str = "BAD_PATH\r\n\r\n";
 const BAD_REMOUNT: &str = "BAD_REMOUNT\r\n\r\n";
 
+/// The most lines of a crontab its cron daemon reads. telnetd writes every
+/// CRONLINE to the file, but eperd and perd read "root" with maxLines
+/// 65535, decremented before each line (eperd.c:542-549, perd.c:458-474):
+/// the 65535th line and those after it are never read ("too many lines",
+/// eperd.c:638-640). config_read does not count a blank or comment-only
+/// line; this counts every CRONLINE, and RIPE's controller sends no such
+/// line.
+const CRONTAB_MAX_LINES: usize = 65534;
+
 // Where request paths may point: rebased_validated_filename(ATLAS_SPOOLDIR,
 // path, "crons") (libbb/validate_filename.c) takes a path under
 // /home/atlas/crons/ (what RIPE's controller sends) and rebases it onto the
@@ -506,6 +568,9 @@ pub async fn handle_connection(
     let mut lines = LineSplitter::default();
     // Set once authenticated: tells when a newer session has taken over
     let mut atlas: Option<tokio::sync::watch::Receiver<()>> = None;
+    // The crontab DO_CRONTAB is taking, root.new: dropped unsent if the
+    // session ends before a line ends the crontab
+    let mut crontab: Option<CrontabSpec> = None;
 
     // Maximum length of a line not yet ended, to bound the memory a
     // malicious or malfunctioning controller can take
@@ -572,30 +637,46 @@ pub async fn handle_connection(
                     }
                 }
                 ConnectionState::DoCrontab if line.starts_with(CMD_CRONLINE) => {
-                    // add_to_crontab, no reply (telnetd.c:1241-1262).
-                    // A known difference: the reference only writes the line
-                    // to root.new, and installs the crontab in end_crontab
-                    // (:1535-1600) when a line other than a CRONLINE comes; a
-                    // crontab still open when the session is killed
-                    // (:1302-1311) or taken over (:1112-1122) is closed and
-                    // never renamed into place. Starla hands each CRONLINE on
-                    // as it comes, as it always has, so it acts on a crontab
-                    // the controller never finished.
-                    if !forward(&command_tx, parse_command(&line)).await {
-                        break 'session;
+                    // add_to_crontab, no reply (telnetd.c:1241-1262): the
+                    // line goes into root.new, and nothing acts on it until
+                    // the crontab has ended
+                    match &mut crontab {
+                        Some(crontab) if crontab.lines.len() < CRONTAB_MAX_LINES => {
+                            crontab.lines.push(CrontabLine {
+                                line: line[CMD_CRONLINE.len()..].to_string(),
+                                command: parse_command(&line),
+                            });
+                        }
+                        Some(crontab) => debug!(
+                            "Telnet: crontab {} has {} lines already, the most its cron daemon \
+                             reads; line not taken",
+                            crontab.dir, CRONTAB_MAX_LINES
+                        ),
+                        None => {}
                     }
                 }
                 ConnectionState::GetCmd | ConnectionState::DoCrontab => {
-                    // Any other line ends the crontab and is the next
-                    // command ("goto do_cmd", telnetd.c:1242-1256).
+                    // Any other line ends the crontab — end_crontab installs
+                    // it (telnetd.c:1535-1600) — and is the next command
+                    // ("goto do_cmd", :1242-1256).
+                    if let Some(ended) = crontab.take() {
+                        if !forward(&command_tx, TelnetCommand::Crontab(ended)).await {
+                            break 'session;
+                        }
+                    }
                     let (response, command, next) = get_cmd(&line);
                     if let Some(response) = response {
                         reply(&mut writer, response).await;
                     }
-                    if let Some(command) = command {
-                        if !forward(&command_tx, command).await {
-                            break 'session;
+                    match command {
+                        // start_crontab opened root.new: its CRONLINEs follow
+                        Some(TelnetCommand::Crontab(started)) => crontab = Some(started),
+                        Some(command) => {
+                            if !forward(&command_tx, command).await {
+                                break 'session;
+                            }
                         }
+                        None => {}
                     }
                     state = next;
                 }
@@ -708,14 +789,22 @@ fn log_received(state: ConnectionState, line: &str) {
 }
 
 /// GET_CMD for one line (telnetd.c:1138-1228): the reply, if any, the
-/// command to hand to the probe, if any, and the next state.
+/// command to hand to the probe, if any, and the next state. For a CRONTAB
+/// line the command is the crontab it starts, still empty, which the session
+/// fills and hands on once it has ended.
 fn get_cmd(line: &str) -> (Option<&'static str>, Option<TelnetCommand>, ConnectionState) {
     use ConnectionState::{DoCrontab, EomSeen, GetCmd};
 
     if let Some(dir) = line.strip_prefix(CMD_CRONTAB) {
         // start_crontab (telnetd.c:1471-1518); its CRONLINEs follow
         return match crontab_dir_check(dir) {
-            Ok(()) => (None, Some(parse_command(line)), DoCrontab),
+            Ok(()) => {
+                let crontab = CrontabSpec {
+                    dir: rebased_crons_path(dir).unwrap_or_else(|| dir.to_string()),
+                    lines: Vec::new(),
+                };
+                (None, Some(TelnetCommand::Crontab(crontab)), DoCrontab)
+            }
             Err(reply) => (Some(reply), None, GetCmd),
         };
     }
@@ -784,26 +873,31 @@ fn oneoff_file_check(rest: &str) -> Result<(), &'static str> {
 }
 
 /// rebased_validated_filename(ATLAS_SPOOLDIR, path, "crons")
-/// (libbb/validate_filename.c:3-131): the path's length once rebased onto
-/// the spool directory, or None where the reference answers BAD_PATH. The
-/// path is /home/atlas/crons/… or <spooldir>/crons/… (properties 1 and 2),
-/// holds no "/../" and does not end in "/.." (3 and 4).
-fn rebased_crons_path_len(path: &str) -> Option<usize> {
+/// (libbb/validate_filename.c:3-131): the path rebased onto the spool
+/// directory, or None where the reference answers BAD_PATH. The path is
+/// /home/atlas/crons/… or <spooldir>/crons/… (properties 1 and 2), holds no
+/// "/../" and does not end in "/.." (3 and 4).
+fn rebased_crons_path(path: &str) -> Option<String> {
     let under = |base: &str| {
         path.strip_prefix(base)
-            .is_some_and(|rest| rest.starts_with("/crons/"))
+            .filter(|rest| rest.starts_with("/crons/"))
     };
-    let len = if under(ATLAS_HOME) {
-        path.len() - ATLAS_HOME.len() + ATLAS_SPOOLDIR.len()
-    } else if under(ATLAS_SPOOLDIR) {
-        path.len()
+    let rebased = if let Some(rest) = under(ATLAS_HOME) {
+        format!("{ATLAS_SPOOLDIR}{rest}")
+    } else if under(ATLAS_SPOOLDIR).is_some() {
+        path.to_string()
     } else {
         return None;
     };
     if path.contains("/../") || path.ends_with("/..") {
         return None;
     }
-    Some(len)
+    Some(rebased)
+}
+
+/// The length of [`rebased_crons_path`], which telnetd's buffers must fit.
+fn rebased_crons_path_len(path: &str) -> Option<usize> {
+    rebased_crons_path(path).map(|rebased| rebased.len())
 }
 
 /// isspace(3) in the C locale, which do_oneoff splits the name off with
@@ -922,7 +1016,8 @@ pub fn parse_command(cmd: &str) -> TelnetCommand {
             }
         }
         "CRONTAB" => {
-            // CRONTAB defines which cron directory following CRONLINEs belong to
+            // CRONTAB defines which cron directory following CRONLINEs
+            // belong to; the session collects them (CrontabSpec)
             trace!("CRONTAB command: {}", cmd);
             TelnetCommand::Ignored(cmd.to_string())
         }
@@ -2323,6 +2418,43 @@ mod tests {
             TelnetCommand::Stop(id) => assert_eq!(id, 12345),
             _ => panic!("Expected Stop command"),
         }
+    }
+
+    /// eperd's cl_Shell, which Insert() tells lines apart by with their
+    /// interval and start time (eperd.c:789-791, 806-808): the line after
+    /// its five leading fields, as config_read cuts it
+    /// (libbb/parse_config.c:162-243).
+    #[test]
+    fn a_crontab_lines_command_text_is_eperds() {
+        let shell = |line: &str| {
+            CrontabLine {
+                line: line.to_string(),
+                command: TelnetCommand::Status,
+            }
+            .shell()
+            .to_string()
+        };
+        assert_eq!(
+            shell(
+                r#"600 1791854199 1791854229 UNIFORM 3 evtdig -4 --resolv --qbuf --type 1 --class 1 --query jd.com. -A "30002" -O /home/atlas/data/new/7"#
+            ),
+            r#"evtdig -4 --resolv --qbuf --type 1 --class 1 --query jd.com. -A "30002" -O /home/atlas/data/new/7"#
+        );
+        // Runs of blanks part the fields (PARSE_COLLAPSE); the command's own
+        // are kept, and those at the ends trimmed (PARSE_TRIM)
+        assert_eq!(
+            shell(" 600\t1  2 NONE 0   evping  -c 3\t192.0.2.1 \t"),
+            "evping  -c 3\t192.0.2.1"
+        );
+        // A '#' ends the line (PARSE_EOL_COMMENTS)
+        assert_eq!(
+            shell("600 1 2 UNIFORM 3 evping 192.0.2.1 # a note"),
+            "evping 192.0.2.1"
+        );
+        // Five fields and no command: SynchronizeFile skips such a line
+        // (n < 6, eperd.c:566-567)
+        assert_eq!(shell("600 1 2 UNIFORM 3"), "");
+        assert_eq!(shell("600 1 2 UNIFORM # 3 evping 192.0.2.1"), "");
     }
 
     // CRONLINE tests
