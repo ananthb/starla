@@ -118,7 +118,8 @@ pub fn main_marker() -> String {
 /// software probe. Use the probe's own state directory.
 fn spool_path(name: &str) -> String {
     starla_common::state_dir()
-        .join("data/new")
+        .join("data")
+        .join("new")
         .join(name)
         .display()
         .to_string()
@@ -240,7 +241,7 @@ mod tests {
 
     #[test]
     fn markers_are_condmvs() {
-        let spool = starla_common::state_dir().join("data/new");
+        let spool = starla_common::state_dir().join("data").join("new");
         let m = results_marker();
         assert!(m.starts_with("RESULT 9907 ongoing "), "{m}");
         assert!(

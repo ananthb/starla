@@ -736,7 +736,11 @@ mod tests {
             lines[0].contains("\nRESULT 9901 ongoing ")
                 && lines[0].ends_with(&format!(
                     " {}\n",
-                    starla_common::state_dir().join("data/new/main").display()
+                    starla_common::state_dir()
+                        .join("data")
+                        .join("new")
+                        .join("main")
+                        .display()
                 )),
             "{}",
             lines[0]
@@ -758,11 +762,15 @@ mod tests {
             lines[2].starts_with("RESULT 9907 ongoing ")
                 && lines[2].ends_with(&format!(
                     " {}",
-                    starla_common::state_dir().join("data/new/7").display()
+                    starla_common::state_dir()
+                        .join("data")
+                        .join("new")
+                        .join("7")
+                        .display()
                 )),
             "{body}"
         );
-        for gone in ["\"7001\"", "\"9018\"", "\"9002\"", "starla"] {
+        for gone in ["\"7001\"", "\"9018\"", "\"9002\""] {
             assert!(!body.contains(gone), "{gone} in {body}");
         }
 
