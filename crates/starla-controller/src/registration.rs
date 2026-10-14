@@ -78,8 +78,16 @@ impl RegState {
     }
 
     /// A registration server said WAIT (or answered something else).
+    ///
+    /// reginit.sh deletes force_reg.sh after every registration attempt, before
+    /// it reads REG_WAIT_UNTIL, so a server's explicit WAIT takes over from an
+    /// earlier controller REFUSED. If we kept `forced` here, `next_step` would
+    /// answer FORCE_REG again on the very next call and the probe would
+    /// re-handshake with the registration servers back to back, without pause,
+    /// for as long as the key stays unapproved.
     pub fn told_to_wait(&mut self, secs: i64, now: i64) {
         self.wait_until = Some(now + clamp_wait(secs));
+        self.forced = None;
     }
 
     /// A controller said REFUSED: drop the assignment, register again.
@@ -230,6 +238,27 @@ mod tests {
     }
 
     #[test]
+    fn a_wait_after_a_refusal_stops_the_forced_registration() {
+        // A controller REFUSED (forced), then the registration server answered
+        // WAIT because the key is not approved yet. reginit drops FORCE_REG
+        // before reading REG_WAIT_UNTIL, so the wait must win -- otherwise the
+        // probe re-handshakes with the registration servers without pause.
+        let mut st = RegState::default();
+        st.registered(&ctr(Some(86_400)), NOW);
+        st.refused("key not approved");
+        assert_eq!(st.next_step(NOW), RegStep::Register("FORCE_REG"));
+
+        st.told_to_wait(600, NOW);
+        assert_eq!(st.forced, None);
+        assert_eq!(st.next_step(NOW), RegStep::WaitUntil(NOW + 600));
+        assert_eq!(st.next_step(NOW + 600), RegStep::Register("WAIT_OVER"));
+
+        // And it survives a restart the same way.
+        let saved = RegState::parse(&st.render());
+        assert_eq!(saved.next_step(NOW + 1), RegStep::WaitUntil(NOW + 600));
+    }
+
+    #[test]
     fn save_and_load_round_trip_and_missing_is_new() {
         let dir = std::env::temp_dir().join(format!("starla-reg-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -247,7 +276,8 @@ mod tests {
 
     #[test]
     fn the_init_replies_carry_rereg_and_refused() {
-        let reply = "OK\nPROBE_ID 1018212\nCONTROLLER ctr-dub-sw02.atlas.prod.ripe.net 443 ssh-ed25519 AAAA\nREREGISTER 86400\n";
+        let reply = "OK\nPROBE_ID 1018212\nCONTROLLER ctr-dub-sw02.atlas.prod.ripe.net 443 \
+                     ssh-ed25519 AAAA\nREREGISTER 86400\n";
         match parse_init_response(reply).unwrap() {
             InitResponse::Controller(c) => {
                 assert_eq!(c.rereg_secs, Some(86_400));
