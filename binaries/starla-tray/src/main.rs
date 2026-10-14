@@ -372,7 +372,7 @@ impl ApplicationHandler for App {
                         let _ =
                             open::that(format!("https://atlas.ripe.net/probes/{}/", s.probe_id));
                     } else {
-                        let _ = open::that("https://atlas.ripe.net/apply/swprobe/");
+                        let _ = open::that("https://atlas.ripe.net/register/swprobe/");
                     }
                 }
             } else if event.id == self.ids.resume {

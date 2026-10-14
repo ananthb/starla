@@ -9,8 +9,7 @@
 use russh::client::{self, Handle, Msg};
 use russh::keys::ssh_key::{self, Algorithm};
 use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKey, PublicKeyBase64};
-use russh::{kex, Channel, ChannelMsg, Preferred};
-use std::borrow::Cow;
+use russh::{Channel, ChannelMsg, Preferred};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -369,6 +368,25 @@ pub struct TelnetState {
     pub session_id: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
+/// The russh client configuration for every registration-server and
+/// controller connection.
+///
+/// RIPE's registration servers offer diffie-hellman-group1-sha1 and
+/// diffie-hellman-group-exchange-sha256 (plus ext-info-s and
+/// kex-strict-s-v00@openssh.com; read from reg03 and reg-05 on 2026-10-10).
+/// russh's default list includes group exchange, so the 1024-bit group1 is
+/// never needed. Keep the default whole: a custom list also drops the
+/// ext-info-c and kex-strict-c markers, and with them the Terrapin
+/// (CVE-2023-48795) countermeasure.
+fn client_config(config: &SshConfig) -> client::Config {
+    client::Config {
+        inactivity_timeout: Some(config.inactivity_timeout),
+        keepalive_interval: Some(config.keepalive_interval),
+        preferred: Preferred::DEFAULT,
+        ..Default::default()
+    }
+}
+
 /// SSH connection to RIPE Atlas controller
 pub struct SshConnection {
     session: Arc<Mutex<Handle<AtlasClientHandler>>>,
@@ -390,25 +408,7 @@ impl SshConnection {
         known_hosts: KnownHosts,
         telnet_state: Option<TelnetState>,
     ) -> anyhow::Result<Self> {
-        // RIPE Atlas registration servers only support diffie-hellman-group1-sha1
-        // and diffie-hellman-group-exchange-sha256. Since russh doesn't support
-        // group exchange, we must use group1-sha1 (despite it being considered weak).
-        let preferred = Preferred {
-            kex: Cow::Owned(vec![
-                kex::DH_G1_SHA1,
-                kex::DH_G14_SHA1,
-                kex::DH_G14_SHA256,
-                kex::CURVE25519,
-            ]),
-            ..Preferred::DEFAULT
-        };
-
-        let ssh_config = client::Config {
-            inactivity_timeout: Some(config.inactivity_timeout),
-            keepalive_interval: Some(config.keepalive_interval),
-            preferred,
-            ..Default::default()
-        };
+        let ssh_config = client_config(&config);
 
         let (command_tx, probe_id, session_id) = match telnet_state {
             Some(ts) => (Some(ts.command_tx), ts.probe_id, ts.session_id),
@@ -1133,20 +1133,74 @@ pub async fn save_key(key: &PrivateKey, path: &Path) -> anyhow::Result<()> {
     tokio::fs::write(&pub_path, pub_key_str.as_bytes()).await?;
     debug!("Public key: {}", pub_key_str);
 
-    // Save private key in OpenSSH format
+    // Save private key in OpenSSH format. It is created 0600 from the first
+    // byte (never written under the umask and chmodded afterwards, which left
+    // a window -- or, after a crash, a key -- readable by others) and renamed
+    // into place, so a reader never sees a half-written key.
     let openssh_pem = key.to_openssh(ssh_key::LineEnding::LF)?;
-    tokio::fs::write(path, openssh_pem.as_bytes()).await?;
-
-    // Set restrictive permissions on private key (Unix only)
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = tokio::fs::metadata(path).await?.permissions();
-        perms.set_mode(0o600);
-        tokio::fs::set_permissions(path, perms).await?;
-    }
+    write_private_file(path, openssh_pem.as_bytes())?;
 
     Ok(())
+}
+
+/// Write `contents` to `path` through a `0600` temp file and a rename.
+fn write_private_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let tmp = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(&tmp)?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(&tmp, path)
+}
+
+/// Load the probe key from `path`, or create it there if there is none.
+///
+/// Returns the key and whether it was just generated. The key IS the probe's
+/// identity at RIPE Atlas: a new one registers as a different probe, with
+/// none of the old one's history or credits. So a key file that exists but
+/// cannot be read or parsed is an error -- it is never replaced -- and so is
+/// a new key that cannot be saved, since an unsaved key would change on
+/// every restart.
+pub async fn load_or_create_key(path: &Path) -> anyhow::Result<(PrivateKey, bool)> {
+    let exists = path.try_exists().map_err(|e| {
+        anyhow::anyhow!(
+            "cannot check for the probe key at {}: {}",
+            path.display(),
+            e
+        )
+    })?;
+    if exists {
+        let key = load_key(path).await.map_err(|e| {
+            anyhow::anyhow!(
+                "the probe key at {} exists but cannot be loaded ({}). Refusing to replace it: \
+                 the key is this probe's identity at RIPE Atlas. Restore or fix the file, or move \
+                 it aside deliberately to start a new probe",
+                path.display(),
+                e
+            )
+        })?;
+        return Ok((key, false));
+    }
+    let key = generate_key()?;
+    save_key(&key, path).await.map_err(|e| {
+        anyhow::anyhow!(
+            "generated a probe key but cannot save it to {} ({}); an unsaved key would change at \
+             every restart",
+            path.display(),
+            e
+        )
+    })?;
+    Ok((key, true))
 }
 
 #[cfg(test)]
@@ -1182,6 +1236,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn key_exchange_never_offers_group1_and_keeps_strict_kex() {
+        let cfg = client_config(&SshConfig::default());
+        let kex = &cfg.preferred.kex;
+        assert!(
+            !kex.contains(&russh::kex::DH_G1_SHA1),
+            "1024-bit diffie-hellman-group1-sha1 must not be offered"
+        );
+        assert!(
+            kex.contains(&russh::kex::DH_GEX_SHA256),
+            "RIPE's servers need group exchange"
+        );
+        assert!(
+            kex.contains(&russh::kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT),
+            "dropping the strict-kex marker disables the Terrapin countermeasure"
+        );
+    }
+
+    #[test]
     fn test_default_config() {
         let config = SshConfig::default();
         assert_eq!(config.connect_timeout, Duration::from_secs(30));
@@ -1194,6 +1266,46 @@ mod tests {
         let public = key.public_key();
         // Just verify we can get the public key
         assert_eq!(public.algorithm(), Algorithm::Ed25519);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_private_key_is_written_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe_key");
+        save_key(&generate_key().unwrap(), &path).await.unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert!(
+            !path.with_extension("tmp").exists(),
+            "temp file renamed away"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_key_is_created_and_then_reused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe_key");
+        let (first, generated) = load_or_create_key(&path).await.unwrap();
+        assert!(generated);
+        let (again, generated) = load_or_create_key(&path).await.unwrap();
+        assert!(!generated);
+        assert_eq!(
+            first.public_key().public_key_base64(),
+            again.public_key().public_key_base64()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_key_is_an_error_and_is_never_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe_key");
+        std::fs::write(&path, "not a key\n").unwrap();
+        let err = load_or_create_key(&path).await.unwrap_err().to_string();
+        assert!(err.contains("Refusing to"), "{err}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "not a key\n");
+        assert!(!path.with_extension("pub").exists());
     }
 
     fn tmp_path(tag: &str) -> PathBuf {

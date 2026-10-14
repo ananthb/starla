@@ -70,7 +70,7 @@
       <h2 class="section"><span class="num">1</span>Connection lifecycle</h2>
 
       <h3>Registration</h3>
-      <p>On startup, the probe SSHes to a registration server (e.g. <code>reg03.atlas.ripe.net:443</code>) and runs <code>INIT</code> with probe identification on stdin:</p>
+      <p>On startup, the probe SSHes to a registration server (e.g. <code>reg-05.prod.atlas.ripe.net:443</code>) and runs <code>INIT</code> with probe identification on stdin:</p>
 
       <pre><div class="pre-head"><span class="lang">stdin</span><span>P_TO_R_INIT</span></div><div class="pre-body"><code>P_TO_R_INIT
 TOKEN_SPECS fluffy 1000 5120 debian/13/x86_64/starla/0.4.0
@@ -83,7 +83,7 @@ CONTROLLER ctr-dub-sw01.atlas.prod.ripe.net 443 ssh-rsa AAAA...
 REREGISTER 3000
 PROBE_ID 1015186</code></div></pre>
 
-      <p>If the probe is not yet registered, the server responds with plain <code>OK</code> (no <code>CONTROLLER</code> line). The probe retries with backoff until approved at <a href="https://atlas.ripe.net/apply/swprobe/">atlas.ripe.net/apply/swprobe</a>.</p>
+      <p>If the probe is not yet registered, the server responds with plain <code>OK</code> (no <code>CONTROLLER</code> line). The probe retries with backoff until approved at <a href="https://atlas.ripe.net/register/swprobe/">atlas.ripe.net/register/swprobe</a>.</p>
 
       <h3>Controller INIT</h3>
       <p>After receiving the controller assignment, the probe connects to the controller via SSH and sends another <code>INIT</code> (no stdin data this time):</p>

@@ -14,7 +14,11 @@ LimitNOFILE=4096
 
 DynamicUser=true
 ConfigurationDirectory=starla
-ConfigurationDirectoryMode=0750
+# 0755, not 0750: systemd never re-owns a configuration directory, so it
+# stays root:root and a 0750 one is closed to the DynamicUser -- which then
+# could not read config.toml. The file holds no secret (the key lives in the
+# state directory or arrives as a credential).
+ConfigurationDirectoryMode=0755
 StateDirectory=starla
 StateDirectoryMode=0750
 RuntimeDirectory=starla
@@ -39,7 +43,13 @@ MemoryDenyWriteExecute=true
 NoNewPrivileges=true
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
-SystemCallFilter=@system-service ~@privileged @network-io @raw-io
+# One list per line: systemd honours "~" only as the first character of a
+# line, so "~@privileged" in the middle of the allow list was ignored (with a
+# warning) and "@raw-io" joined the allow list. Raw sockets need neither
+# @raw-io (that is ioperm/iopl) nor anything in @privileged; Starla never
+# calls capset.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
 
 [Install]
 WantedBy=multi-user.target

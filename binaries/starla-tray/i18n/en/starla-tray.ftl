@@ -12,7 +12,7 @@ status-disconnected = Disconnected
 status-not-registered = Not registered
 
 # Shown under "Not registered" — the probe has no ID yet.
-status-register-hint = Register the public key at atlas.ripe.net/apply/swprobe
+status-register-hint = Register the public key at atlas.ripe.net/register/swprobe
 
 # Fallback detail line when the probe is down for an unreported reason.
 status-controller-unreachable = controller unreachable

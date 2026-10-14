@@ -141,14 +141,15 @@ fn default_log_level() -> String {
 }
 fn default_registration_servers() -> Vec<String> {
     vec![
-        // Primary registration server (hostname, IPv4, IPv6)
-        "reg03.atlas.ripe.net:443".to_string(),
-        "193.0.19.246:443".to_string(),
-        "[2001:67c:2e8:11::c100:13f6]:443".to_string(),
-        // Secondary registration server (hostname, IPv4, IPv6)
-        "reg04.atlas.ripe.net:443".to_string(),
-        "193.0.19.247:443".to_string(),
-        "[2001:67c:2e8:11::c100:13f7]:443".to_string(),
+        // RIPE's production registration servers since release 5130
+        // (config/probe/reg_servers.sh.prod, 2026-07-13), which replaced
+        // reg03/reg04. Hostname, IPv4, IPv6 for each, in that order.
+        "reg-05.prod.atlas.ripe.net:443".to_string(),
+        "193.0.19.75:443".to_string(),
+        "[2001:67c:2e8:11::c100:134b]:443".to_string(),
+        "reg-06.prod.atlas.ripe.net:443".to_string(),
+        "193.0.19.76:443".to_string(),
+        "[2001:67c:2e8:11::c100:134c]:443".to_string(),
     ]
 }
 fn default_ssh_timeout() -> u64 {
