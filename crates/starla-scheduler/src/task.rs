@@ -124,12 +124,12 @@ fn first_cycle_after(now: i64, start_time: i64, interval: u64) -> i64 {
     if interval == 0 || now < start_time {
         0
     } else {
-        (now - start_time) / interval as i64 + 1
+        now.saturating_sub(start_time) / interval as i64 + 1
     }
 }
 
 fn slot(start_time: i64, interval: u64, cycle: i64) -> i64 {
-    start_time + cycle * interval as i64
+    start_time.saturating_add(cycle.saturating_mul(interval as i64))
 }
 
 /// eperd's do_distr for UNIFORM: an integer in `[0, spread]`, less

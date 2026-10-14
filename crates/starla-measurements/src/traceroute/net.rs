@@ -610,7 +610,10 @@ pub async fn run(spec: &RunSpec<'_>) -> Vec<Hop> {
                 }
             };
             let Ok((is_tcp, pkt)) = got else {
-                // ready_callback*: "read error", and on with the wait.
+                // ready_callback*: "read error", and on with the wait. Yield
+                // briefly so a socket that keeps erroring does not spin the
+                // loop hot until the deadline.
+                tokio::time::sleep(Duration::from_millis(1)).await;
                 continue;
             };
             let data = if is_tcp {

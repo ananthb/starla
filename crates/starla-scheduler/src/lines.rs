@@ -169,12 +169,23 @@ impl Lines {
     pub(crate) fn take_due(&mut self, now: i64) -> Vec<MeasurementJob> {
         let mut due = Vec::new();
         self.lines.retain(|key, task| {
+            let own = matches!(key, LineKey::Own(_));
+            // An Own line whose next slot is already past its end time will
+            // never run again: drop it rather than leave it in the map (and
+            // counted in metrics) forever.
+            if own && task.is_expired(now) && !task.is_due(now) {
+                info!(
+                    msm_id = task.job.msm_id,
+                    "Measurement expired, removing from schedule"
+                );
+                return false;
+            }
             if !task.is_due(now) {
                 return true;
             }
             due.push(task.job.clone());
             task.schedule_next(now);
-            if matches!(key, LineKey::Own(_)) && task.is_expired(now) {
+            if own && task.is_expired(now) {
                 info!(
                     msm_id = task.job.msm_id,
                     "Measurement expired, removing from schedule"

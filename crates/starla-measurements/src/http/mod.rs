@@ -11,7 +11,7 @@ use starla_common::{
 };
 use starla_network::get_source_addr_for_dest;
 use std::fmt::Write;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::IpAddr;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,16 +105,24 @@ impl Measurement for Http {
         let gstart = Timestamp::now();
         let timeout = Duration::from_millis(self.config.timeout_ms);
         let out = match raw::parse_http_url(&self.config.url) {
-            Ok(url) => {
-                raw::fetch(
-                    &url,
-                    self.config.af,
-                    self.config.http10,
-                    self.config.store_headers,
-                    timeout,
-                )
-                .await?
-            }
+            Ok(url) => match raw::fetch(
+                &url,
+                self.config.af,
+                self.config.http10,
+                self.config.store_headers,
+                timeout,
+            )
+            .await
+            {
+                Ok(out) => out,
+                // A resolution failure is reported as an "err" result, not
+                // dropped (httpget's reporterr writes one).
+                Err(e) => raw::RawHttpOutcome {
+                    err: Some(e.to_string()),
+                    af: self.config.af,
+                    ..Default::default()
+                },
+            },
             // https: still through reqwest, reported in the same shape.
             Err(_) => self.fetch_tls().await?,
         };
@@ -149,8 +157,8 @@ impl Http {
         let url = reqwest::Url::parse(&self.config.url)?;
         let port = url.port_or_known_default().unwrap_or(443);
         let host = url.host_str().unwrap_or("unknown");
-        let dst: Option<IpAddr> = format!("{host}:{port}")
-            .to_socket_addrs()
+        let dst: Option<IpAddr> = tokio::net::lookup_host((host, port))
+            .await
             .ok()
             .and_then(|mut addrs| {
                 addrs.find(|a| match self.config.af {

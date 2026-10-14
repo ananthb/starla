@@ -94,6 +94,8 @@ impl RegState {
     pub fn refused(&mut self, reason: &str) {
         self.controller = None;
         self.rereg_at = None;
+        // A forced registration re-runs now, whatever wait a server set.
+        self.wait_until = None;
         self.forced = Some(reason.to_string());
     }
 

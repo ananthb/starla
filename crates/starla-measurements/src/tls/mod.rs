@@ -410,7 +410,11 @@ impl Measurement for Tls {
         let out = sslgetcert(c, atlas.as_deref(), last).await;
         if let Ok(mut m) = LAST_CIPHER.lock() {
             if m.len() >= MAX_LINES && !m.contains_key(&line) {
-                m.clear();
+                // Evict one entry, not the whole map: clearing would lose
+                // every other line's last cipher.
+                if let Some(oldest) = m.keys().next().cloned() {
+                    m.remove(&oldest);
+                }
             }
             m.insert(line, out.cipher);
         }
