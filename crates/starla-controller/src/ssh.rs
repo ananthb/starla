@@ -1182,9 +1182,9 @@ pub async fn load_or_create_key(path: &Path) -> anyhow::Result<(PrivateKey, bool
     if exists {
         let key = load_key(path).await.map_err(|e| {
             anyhow::anyhow!(
-                "the probe key at {} exists but cannot be loaded ({}). Refusing to \
-                 replace it: the key is this probe's identity at RIPE Atlas. Restore \
-                 or fix the file, or move it aside deliberately to start a new probe",
+                "the probe key at {} exists but cannot be loaded ({}). Refusing to replace it: \
+                 the key is this probe's identity at RIPE Atlas. Restore or fix the file, or move \
+                 it aside deliberately to start a new probe",
                 path.display(),
                 e
             )
@@ -1194,8 +1194,8 @@ pub async fn load_or_create_key(path: &Path) -> anyhow::Result<(PrivateKey, bool
     let key = generate_key()?;
     save_key(&key, path).await.map_err(|e| {
         anyhow::anyhow!(
-            "generated a probe key but cannot save it to {} ({}); an unsaved key \
-             would change at every restart",
+            "generated a probe key but cannot save it to {} ({}); an unsaved key would change at \
+             every restart",
             path.display(),
             e
         )
