@@ -612,7 +612,8 @@ mod tests {
     fn a_full_line_carries_the_lts_it_was_queued_with() {
         let mut result = make_ping_result();
         result.data = MeasurementData::FullLine(
-            "\"id\":\"5051\", \"fw\":5120, \"mver\": \"2.6.4\", \"lts\":0, \"time\":1, \"result\": [ { \"hop\":1 } ]"
+            "\"id\":\"5051\", \"fw\":5120, \"mver\": \"2.6.4\", \"lts\":0, \"time\":1, \
+             \"result\": [ { \"hop\":1 } ]"
                 .to_string(),
         );
         let line = AtlasResult::from_measurement(result.clone(), None)

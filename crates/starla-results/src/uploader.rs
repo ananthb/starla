@@ -195,7 +195,8 @@ impl ResultUploader {
                 warn!("Clock not in sync with the controller: local {now}, remote {server}");
                 self.host_telemetry
                     .push(format!(
-                        "RESULT 9015 ongoing {now} httppost not in sync, local {now}, remote {server}\n{}",
+                        "RESULT 9015 ongoing {now} httppost not in sync, local {now}, remote \
+                         {server}\n{}",
                         system_status::main_marker()
                     ))
                     .await;
@@ -521,8 +522,11 @@ mod tests {
         let date = (chrono::Utc::now() + chrono::Duration::seconds(offset_secs))
             .format("%a, %d %b %Y %H:%M:%S GMT");
         Box::leak(
-            format!("HTTP/1.1 200 \r\nContent-Length: 3\r\nDate: {date}\r\nConnection: close\r\n\r\nOK\n")
-                .into_boxed_str(),
+            format!(
+                "HTTP/1.1 200 \r\nContent-Length: 3\r\nDate: {date}\r\nConnection: \
+                 close\r\n\r\nOK\n"
+            )
+            .into_boxed_str(),
         )
     }
 

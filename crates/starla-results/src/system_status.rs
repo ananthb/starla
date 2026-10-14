@@ -63,7 +63,8 @@ pub fn uptime_line(lts: i64, uptime: u64) -> String {
 pub fn disk_line(data_dir: &Path) -> Option<String> {
     let disk = disk_stats(data_dir)?;
     Some(format!(
-        "RESULT {{ \"id\":\"9018\", {}, \"time\": {}, \"bsize\": {}, \"blocks\": {}, \"bfree\": {}, \"free\": {} }}\n",
+        "RESULT {{ \"id\":\"9018\", {}, \"time\": {}, \"bsize\": {}, \"blocks\": {}, \"bfree\": \
+         {}, \"free\": {} }}\n",
         version_json(),
         unix_now(),
         disk.block_size,
@@ -83,11 +84,11 @@ pub fn rxtxrpt_line(lts: i64) -> Option<String> {
         ifaces
             .iter()
             .map(|i| format!(
-                "{{ \"name\": \"{}\", \"bytes_recv\": {}, \"pkt_recv\": {}, \"errors_recv\": \
-                 0, \"dropped_recv\": 0, \"fifo_recv\": 0, \"framing_recv\": 0, \
-                 \"compressed_recv\": 0, \"multicast_recv\": 0, \"bytes_sent\": {}, \
-                 \"pkt_sent\": {}, \"errors_sent\": 0, \"dropped_sent\": 0, \"fifo_sent\": 0, \
-                 \"collisions_sent\": 0, \"carr_lost_sent\": 0, \"compressed_sent\": 0 }}",
+                "{{ \"name\": \"{}\", \"bytes_recv\": {}, \"pkt_recv\": {}, \"errors_recv\": 0, \
+                 \"dropped_recv\": 0, \"fifo_recv\": 0, \"framing_recv\": 0, \"compressed_recv\": \
+                 0, \"multicast_recv\": 0, \"bytes_sent\": {}, \"pkt_sent\": {}, \"errors_sent\": \
+                 0, \"dropped_sent\": 0, \"fifo_sent\": 0, \"collisions_sent\": 0, \
+                 \"carr_lost_sent\": 0, \"compressed_sent\": 0 }}",
                 i.name, i.rx_bytes, i.rx_packets, i.tx_bytes, i.tx_packets
             ))
             .collect::<Vec<_>>()
