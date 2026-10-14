@@ -251,9 +251,22 @@ async fn main() -> Result<()> {
     let config_path = args.config.unwrap_or_else(starla_common::config_file);
     // try_exists, not exists: exists() reports "absent" for a config the
     // service may not read (EACCES on its directory), and Starla then ran on
-    // its defaults while saying nothing. Unreadable is an error.
+    // its defaults while saying nothing. A config that is present but
+    // unparseable is an error. A config we cannot even stat is not: the
+    // service runs as a DynamicUser, and systemd will not re-mode an existing
+    // `/etc/starla` on upgrade, so an install that predates the 0755 directory
+    // mode cannot stat its own config. Failing there would just crash-loop
+    // `Restart=on-failure` forever, so warn loudly and run on defaults.
     let config_found = match config_path.try_exists() {
         Ok(found) => found,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            eprintln!(
+                "starla: {}: cannot check for the config file ({}); running on defaults",
+                config_path.display(),
+                e
+            );
+            false
+        }
         Err(e) => {
             eprintln!(
                 "starla: {}: cannot check for the config file: {}",
