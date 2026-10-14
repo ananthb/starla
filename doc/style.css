@@ -209,7 +209,7 @@ body {
 .rail-block dd { color: var(--ink-2); }
 
 /* ————— content typography ————— */
-.content { min-width: 0; }
+.content { min-width: 0; overflow-x: clip; }
 
 .eyebrow {
   font-family: var(--mono);
@@ -715,13 +715,15 @@ hr.divider {
   border: 1px solid var(--rule);
   border-radius: 12px;
   overflow: hidden;
+  max-width: 100%;
   background: radial-gradient(130% 130% at 30% -10%, var(--paper-2), var(--paper) 68%);
   box-shadow: var(--shadow);
 }
-.viz-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: stretch; }
+/* globe and dashboard side by side; they stack once the shell does (1080px). */
+.viz-body { display: grid; grid-template-columns: minmax(0, 1fr) clamp(200px, 30%, 300px); align-items: stretch; }
 .viz-stage { position: relative; height: 430px; min-width: 0; }
-.viz-canvas { position: absolute; inset: 0; }
-.viz-canvas canvas { display: block; width: 100% !important; height: 100% !important; }
+.viz-canvas { position: absolute; inset: 0; overflow: hidden; }
+.viz-canvas canvas { display: block; width: 100% !important; height: 100% !important; max-width: 100%; }
 
 /* static fallback, shown when WebGL or three.js is unavailable */
 .viz-fallback { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; }
@@ -804,13 +806,14 @@ hr.divider {
 .lg-ctrl { background: #ffd27a; }
 .viz-caption { margin-top: 12px; color: var(--ink-mute); font-size: 13px; }
 
-@media (max-width: 760px) {
-  .viz-body { grid-template-columns: 1fr; }
-  .viz-stage { height: 300px; }
+/* Stack the dashboard under the globe as soon as the shell narrows. */
+@media (max-width: 1080px) {
+  .viz-body { grid-template-columns: minmax(0, 1fr); }
+  .viz-stage { height: 340px; }
   .viz-panel { border-left: none; border-top: 1px solid var(--rule); }
   .viz-rows { flex: none; min-height: 132px; overflow: visible; }
 }
-@media (max-width: 520px) {
+@media (max-width: 560px) {
   .viz-stage { height: 260px; }
   .viz-steps { gap: 6px 14px; }
   .viz-legend { display: none; }
