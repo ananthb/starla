@@ -13,8 +13,8 @@ use anyhow::Result;
 use clap::Parser;
 use starla_common::logging::{init_logging, LogConfig};
 use starla_controller::{
-    registration::DEFAULT_WAIT_SECS, InitResponse, KnownHosts, ProbeInitInfo, RegState, RegStep,
-    SshConfig, SshConnection, TelnetCommand,
+    registration::DEFAULT_WAIT_SECS, ConKeep, InitResponse, KnownHosts, ProbeInitInfo, RegState,
+    RegStep, SshConfig, SshConnection, TelnetCommand,
 };
 #[cfg(feature = "metrics-export")]
 use starla_metrics::MetricsRegistry;
@@ -395,6 +395,11 @@ async fn main() -> Result<()> {
         UploaderConfig::default(),
         ResultHandlerConfig {
             max_queue_size: config.storage.max_queue_size,
+            // [network] rxtxrpt: the reference only sends the 9002 interface
+            // counters when RXTXRPT=yes. This was always left at the default.
+            rxtxrpt: config.network.rxtxrpt,
+            // Persist the last clock sync so lts survives a restart.
+            timesync_path: Some(state_dir.join("timesync")),
             ..ResultHandlerConfig::default()
         },
         metrics_for_results,
@@ -661,6 +666,7 @@ async fn main() -> Result<()> {
                         qclass: spec.qclass,
                         query: spec.query_argument,
                         resolv: spec.resolv,
+                        interface: spec.interface,
                         rd: spec.rd,
                         ad: spec.ad,
                         cd: spec.cd,
@@ -699,6 +705,7 @@ async fn main() -> Result<()> {
                         max_body_size: spec.max_body_size,
                         store_headers: spec.store_headers,
                         http10: spec.http10,
+                        timeout_ms: spec.timeout_ms,
                     })
                 ),
                 TelnetCommand::Tls(spec) => dispatch_measurement!(
@@ -974,6 +981,9 @@ async fn main() -> Result<()> {
     // What the registration server last told us, kept across restarts like
     // the reference probe's con_init_conf.txt (registration.rs).
     let reg_path = state_dir.join("con_init_conf.txt");
+    // The controller session to reuse across restarts, the reference probe's
+    // con_keep_conf.txt (registration.rs).
+    let con_keep_path = state_dir.join("con_keep_conf.txt");
 
     // Registration loop: retries indefinitely with backoff
     let mut reg_delay = Duration::from_secs(5);
@@ -1209,91 +1219,129 @@ async fn main() -> Result<()> {
                     s.last_connection_error = None;
                 }
 
+                let mut con_keep = ConKeep::load(&con_keep_path);
+
+                // reginit.sh:404-461: a restart reuses the controller session
+                // cached in con_keep_conf.txt instead of running another
+                // controller INIT. A CON_WAIT_TIMER still running means the
+                // controller asked us to wait; sleep it out first.
+                if let Some(until) = con_keep.waiting_until(unix_now()) {
+                    let secs = (until - unix_now()).max(1) as u64;
+                    info!("The controller asked us to wait; retrying in {}s", secs);
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {
+                            info!("Received Ctrl+C during wait");
+                            metrics_cancel_token.cancel();
+                            result_cancel_token.cancel();
+                            return Ok(());
+                        }
+                        _ = tokio::time::sleep(Duration::from_secs(secs)) => {
+                            ctrl_retry!('register_and_connect);
+                        }
+                    }
+                }
+
                 // Step 3: Controller INIT - get REMOTE_PORT (may need to retry on
-                // WAIT/OK)
-                let (remote_port, session_id) = loop {
-                    match ctrl_ssh.init(None).await {
-                        Ok(InitResponse::ControllerReady {
-                            remote_port,
-                            session_id,
-                        }) => {
-                            info!(
-                                "Controller ready, remote port: {}, session_id: {}",
-                                remote_port, session_id
-                            );
-                            break (remote_port, session_id);
-                        }
-                        Ok(InitResponse::Wait { timeout_secs }) => {
-                            debug!(
-                                "Controller requested wait, retrying in {} seconds",
-                                timeout_secs
-                            );
-                            tokio::select! {
-                                _ = tokio::signal::ctrl_c() => {
-                                    info!("Received Ctrl+C during wait");
-                                    metrics_cancel_token.cancel();
-                                    result_cancel_token.cancel();
-                                    return Ok(());
-                                }
-                                _ = tokio::time::sleep(Duration::from_secs(timeout_secs as u64)) => {
-                                    // Check if connection is still alive before retrying
-                                    if !ctrl_ssh.is_connected().await {
-                                        warn!("Controller connection lost during wait; reconnecting");
-                                        ctrl_retry!('register_and_connect);
+                // WAIT/OK). Skipped when a cached session is reused.
+                let (remote_port, session_id) = if let Some((port, sid)) =
+                    con_keep.reusable(unix_now())
+                {
+                    info!("Reusing the controller session on remote port {}", port);
+                    (port, sid)
+                } else {
+                    loop {
+                        match ctrl_ssh.init(None).await {
+                            Ok(InitResponse::ControllerReady {
+                                remote_port,
+                                session_id,
+                            }) => {
+                                info!(
+                                    "Controller ready, remote port: {}, session_id: {}",
+                                    remote_port, session_id
+                                );
+                                con_keep.set_ready(remote_port, session_id.clone());
+                                save_con_keep(&con_keep, &con_keep_path);
+                                break (remote_port, session_id);
+                            }
+                            Ok(InitResponse::Wait { timeout_secs }) => {
+                                debug!(
+                                    "Controller requested wait, retrying in {} seconds",
+                                    timeout_secs
+                                );
+                                con_keep.set_wait(unix_now() + i64::from(timeout_secs));
+                                save_con_keep(&con_keep, &con_keep_path);
+                                tokio::select! {
+                                    _ = tokio::signal::ctrl_c() => {
+                                        info!("Received Ctrl+C during wait");
+                                        metrics_cancel_token.cancel();
+                                        result_cancel_token.cancel();
+                                        return Ok(());
                                     }
-                                    debug!("Retrying controller INIT...");
-                                    continue;
+                                    _ = tokio::time::sleep(Duration::from_secs(timeout_secs as u64)) => {
+                                        // Check if connection is still alive before retrying
+                                        if !ctrl_ssh.is_connected().await {
+                                            warn!("Controller connection lost during wait; reconnecting");
+                                            ctrl_retry!('register_and_connect);
+                                        }
+                                        debug!("Retrying controller INIT...");
+                                        continue;
+                                    }
                                 }
                             }
-                        }
-                        Ok(InitResponse::Ok) => {
-                            // Controller said OK but no REMOTE_PORT - retry after
-                            // delay
-                            debug!("Controller said OK but no REMOTE_PORT, retrying in 30 seconds");
-                            tokio::select! {
-                                _ = tokio::signal::ctrl_c() => {
-                                    info!("Received Ctrl+C during wait");
-                                    metrics_cancel_token.cancel();
-                                    result_cancel_token.cancel();
-                                    return Ok(());
-                                }
-                                _ = tokio::time::sleep(Duration::from_secs(30)) => {
-                                    // Check if connection is still alive before retrying
-                                    if !ctrl_ssh.is_connected().await {
-                                        warn!("Controller connection lost during wait; reconnecting");
-                                        ctrl_retry!('register_and_connect);
+                            Ok(InitResponse::Ok) => {
+                                // Controller said OK but no REMOTE_PORT - retry after
+                                // delay
+                                debug!(
+                                    "Controller said OK but no REMOTE_PORT, retrying in 30 seconds"
+                                );
+                                tokio::select! {
+                                    _ = tokio::signal::ctrl_c() => {
+                                        info!("Received Ctrl+C during wait");
+                                        metrics_cancel_token.cancel();
+                                        result_cancel_token.cancel();
+                                        return Ok(());
                                     }
-                                    debug!("Retrying controller INIT...");
-                                    continue;
+                                    _ = tokio::time::sleep(Duration::from_secs(30)) => {
+                                        // Check if connection is still alive before retrying
+                                        if !ctrl_ssh.is_connected().await {
+                                            warn!("Controller connection lost during wait; reconnecting");
+                                            ctrl_retry!('register_and_connect);
+                                        }
+                                        debug!("Retrying controller INIT...");
+                                        continue;
+                                    }
                                 }
                             }
-                        }
-                        Ok(InitResponse::Controller(_)) => {
-                            // This shouldn't happen from a controller
-                            error!(
-                                "Got CONTROLLER response from controller (expected REMOTE_PORT)"
-                            );
-                            ctrl_retry!('register_and_connect);
-                        }
-                        Ok(InitResponse::Refused { reason }) => {
-                            // atlasinit: the controller's REFUSED forces a new
-                            // registration after ATLAS_DEFAULT_WAIT.
-                            warn!(
-                                "Controller refused us ({}); registering again in {}s",
-                                reason, DEFAULT_WAIT_SECS
-                            );
-                            reg.refused(&reason);
-                            save_reg(&reg, &reg_path);
-                            ctrl_delay = Duration::from_secs(DEFAULT_WAIT_SECS as u64);
-                            ctrl_retry!('register_and_connect);
-                        }
-                        Err(e) => {
-                            // The reference's reginit.sh exits on a failed
-                            // controller INIT and its main loop runs it again;
-                            // Starla exited 0 here, which Restart=on-failure
-                            // leaves dead. Retry, on the same assignment.
-                            error!("Controller INIT failed: {}; reconnecting", e);
-                            ctrl_retry!('register_and_connect);
+                            Ok(InitResponse::Controller(_)) => {
+                                // This shouldn't happen from a controller
+                                error!(
+                                    "Got CONTROLLER response from controller (expected \
+                                     REMOTE_PORT)"
+                                );
+                                ctrl_retry!('register_and_connect);
+                            }
+                            Ok(InitResponse::Refused { reason }) => {
+                                // atlasinit: the controller's REFUSED forces a new
+                                // registration after ATLAS_DEFAULT_WAIT.
+                                warn!(
+                                    "Controller refused us ({}); registering again in {}s",
+                                    reason, DEFAULT_WAIT_SECS
+                                );
+                                reg.refused(&reason);
+                                save_reg(&reg, &reg_path);
+                                con_keep.clear();
+                                save_con_keep(&con_keep, &con_keep_path);
+                                ctrl_delay = Duration::from_secs(DEFAULT_WAIT_SECS as u64);
+                                ctrl_retry!('register_and_connect);
+                            }
+                            Err(e) => {
+                                // The reference's reginit.sh exits on a failed
+                                // controller INIT and its main loop runs it again;
+                                // Starla exited 0 here, which Restart=on-failure
+                                // leaves dead. Retry, on the same assignment.
+                                error!("Controller INIT failed: {}; reconnecting", e);
+                                ctrl_retry!('register_and_connect);
+                            }
                         }
                     }
                 };
@@ -1569,6 +1617,17 @@ fn save_reg(reg: &RegState, path: &std::path::Path) {
     if let Err(e) = reg.save(path) {
         warn!(
             "Could not save the registration to {}: {}",
+            path.display(),
+            e
+        );
+    }
+}
+
+/// A lost save means one extra controller INIT at the next start, not a fault.
+fn save_con_keep(con_keep: &ConKeep, path: &std::path::Path) {
+    if let Err(e) = con_keep.save(path) {
+        warn!(
+            "Could not save the controller session to {}: {}",
             path.display(),
             e
         );

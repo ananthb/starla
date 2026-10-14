@@ -734,7 +734,14 @@ mod tests {
         // condmv's marker for data/new/main follows httppost's own line.
         assert!(
             lines[0].contains("\nRESULT 9901 ongoing ")
-                && lines[0].ends_with(" /home/atlas/data/new/main\n"),
+                && lines[0].ends_with(&format!(
+                    " {}\n",
+                    starla_common::state_dir()
+                        .join("data")
+                        .join("new")
+                        .join("main")
+                        .display()
+                )),
             "{}",
             lines[0]
         );
@@ -753,10 +760,17 @@ mod tests {
         assert!(lines[1].contains("\"1001\""), "{body}");
         assert!(
             lines[2].starts_with("RESULT 9907 ongoing ")
-                && lines[2].ends_with(" /home/atlas/data/new/7"),
+                && lines[2].ends_with(&format!(
+                    " {}",
+                    starla_common::state_dir()
+                        .join("data")
+                        .join("new")
+                        .join("7")
+                        .display()
+                )),
             "{body}"
         );
-        for gone in ["\"7001\"", "\"9018\"", "\"9002\"", "starla"] {
+        for gone in ["\"7001\"", "\"9018\"", "\"9002\""] {
             assert!(!body.contains(gone), "{gone} in {body}");
         }
 

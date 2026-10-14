@@ -172,11 +172,19 @@ impl TracerouteInstance {
     }
 }
 
-/// The lowest slot not in `taken` (the last one when all are).
+/// The lowest slot not in `taken`.
+///
+/// The 12-bit space the IPv4 echo id encodes is searched first, but eperd
+/// grows its slot table past its initial size rather than reuse a live slot
+/// (traceroute.c:4419-4435), and a colliding index would misattribute replies.
+/// So fall through to the rest of the u16 space instead of pinning SLOTS-1
+/// and colliding with the measurement already there. (These extra indexes only
+/// appear past 4096 concurrent traces, which does not happen.)
 fn lowest_free(taken: &BTreeSet<u16>) -> u16 {
     (0..TracerouteInstance::SLOTS)
+        .chain(TracerouteInstance::SLOTS..=u16::MAX)
         .find(|i| !taken.contains(i))
-        .unwrap_or(TracerouteInstance::SLOTS - 1)
+        .unwrap_or(0)
 }
 
 impl Default for TracerouteInstance {
@@ -612,6 +620,12 @@ mod tests {
     fn instances_take_the_lowest_free_slot_and_count_runs() {
         assert_eq!(lowest_free(&BTreeSet::new()), 0);
         assert_eq!(lowest_free(&[0, 1, 3].into_iter().collect()), 2);
+        // A full 12-bit table grows into the rest of u16 rather than reusing
+        // a live slot.
+        let full: BTreeSet<u16> = (0..TracerouteInstance::SLOTS).collect();
+        let grown = lowest_free(&full);
+        assert_eq!(grown, TracerouteInstance::SLOTS);
+        assert!(!full.contains(&grown));
         let a = TracerouteInstance::default();
         let b = TracerouteInstance::default();
         assert_ne!(a.index(), b.index());

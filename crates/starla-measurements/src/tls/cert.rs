@@ -71,6 +71,13 @@ impl Default for Reader {
     }
 }
 
+/// Cap on bytes buffered from a hostile or broken server: the socket bytes
+/// not yet framed, and the handshake payload framed so far. The reference has
+/// no cap; without one a fast server can force unbounded allocation during the
+/// measurement's timeout window.
+const MAX_PENDING: usize = 1 << 20;
+const MAX_MSG: usize = 1 << 20;
+
 impl Reader {
     pub fn new() -> Self {
         Self {
@@ -88,7 +95,9 @@ impl Reader {
 
     /// Bytes the socket returned.
     pub fn feed(&mut self, data: &[u8]) {
-        self.pending.extend_from_slice(data);
+        let room = MAX_PENDING.saturating_sub(self.pending.len());
+        self.pending
+            .extend_from_slice(&data[..data.len().min(room)]);
     }
 
     /// readcb(), sslgetcert.c:1110-1155
@@ -154,6 +163,15 @@ impl Reader {
                 continue;
             }
             let start = self.in_off + 5;
+            // Drop already-consumed payload, then refuse to grow the message
+            // buffer past the cap (the caller's timeout reports the failure).
+            if self.msg_off == self.msg.len() {
+                self.msg.clear();
+                self.msg_off = 0;
+            }
+            if self.msg.len() + len > MAX_MSG {
+                return None;
+            }
             self.msg.extend_from_slice(&self.inbuf[start..start + len]);
             self.in_off += 5 + len;
             return Some(typ);

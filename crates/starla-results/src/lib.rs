@@ -48,6 +48,9 @@ pub struct ResultHandlerConfig {
     /// Send interface counters (9002) with the 180 s status lines, as the
     /// reference probe does only with RXTXRPT=yes.
     pub rxtxrpt: bool,
+    /// Where to keep the last clock sync so lts survives a restart
+    /// (atlas_timesync.c). None keeps it in memory only, for tests.
+    pub timesync_path: Option<std::path::PathBuf>,
 }
 
 impl Default for ResultHandlerConfig {
@@ -59,6 +62,7 @@ impl Default for ResultHandlerConfig {
             cleanup_interval: Duration::from_secs(300), // 5 minutes
             max_queue_size: 10000,
             rxtxrpt: false,
+            timesync_path: None,
         }
     }
 }
@@ -158,7 +162,13 @@ impl ResultHandler {
     ) -> Self {
         let queue = ResultQueue::new(config.max_queue_size);
         let host_telemetry = HostTelemetry::new();
-        let time_sync = Arc::new(TimeSyncTracker::new());
+        // Keep the last sync on disk so lts does not reset to -1 on restart,
+        // as the reference reads its timesync file back (atlas_timesync.c).
+        // Tests leave `timesync_path` unset and stay in memory.
+        let time_sync = Arc::new(match &config.timesync_path {
+            Some(path) => TimeSyncTracker::open(path.clone()),
+            None => TimeSyncTracker::new(),
+        });
         let uploader = ResultUploader::new(
             transport,
             uploader_config,

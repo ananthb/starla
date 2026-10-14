@@ -19,7 +19,6 @@ use starla_common::{
 };
 use std::fmt::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -53,6 +52,11 @@ pub struct DnsConfig {
     /// `--resolv`: ask each of the probe's resolvers (/etc/resolv.conf), with
     /// RD, and report a `resultset`
     pub resolv: bool,
+    /// `-I <ifname>`: with `--resolv`, read `/etc/resolv.conf.<ifname>` when
+    /// it exists and fall back to `/etc/resolv.conf`, as
+    /// get_local_resolvers() does (readresolv.c:54-67).
+    #[serde(default)]
+    pub interface: Option<String>,
     /// `-R`: set RD (evtdig never does otherwise)
     pub rd: bool,
     /// `--ad`, `--cd`: set those header bits
@@ -171,6 +175,7 @@ impl Default for DnsConfig {
             qclass: 3, // C_CHAOS
             query: String::new(),
             resolv: false,
+            interface: None,
             rd: false,
             ad: false,
             cd: false,
@@ -209,11 +214,11 @@ impl Measurement for Dns {
     }
 
     async fn execute(&self) -> anyhow::Result<MeasurementResult> {
-        // Read at every run, as tdig_start() does
-        let resolvers = self
-            .config
-            .resolv
-            .then(|| resolver::read_resolv_conf(Path::new(resolver::RESOLV_CONF)));
+        // Read at every run, as tdig_start() does. With -I, the interface's
+        // resolv.conf.<ifname> when it exists, else /etc/resolv.conf.
+        let resolvers = self.config.resolv.then(|| {
+            resolver::read_resolv_conf(&resolver::resolv_conf_for(self.config.interface.as_deref()))
+        });
         // get_probe_id() is -1 until the probe knows its id
         let probe_id = match self.probe_id.0 {
             0 => -1,

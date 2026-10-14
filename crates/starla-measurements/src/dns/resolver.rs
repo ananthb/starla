@@ -12,7 +12,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use std::fmt::Write as _;
 use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
@@ -53,26 +53,53 @@ const SYSTEM_EAI_NONAME: [&str; 3] = [
     "nodename nor servname provided, or not known",
 ];
 
+/// The resolv.conf get_local_resolvers() would read: with an interface name,
+/// its `/etc/resolv.conf.<ifname>` when that exists, otherwise
+/// `/etc/resolv.conf` (readresolv.c:48-72).
+pub fn resolv_conf_for(interface: Option<&str>) -> PathBuf {
+    if let Some(ifname) = interface {
+        let named = PathBuf::from(format!("{RESOLV_CONF}.{ifname}"));
+        if named.exists() {
+            return named;
+        }
+    }
+    PathBuf::from(RESOLV_CONF)
+}
+
 /// The probe's resolvers, as get_local_resolvers() (eperd/readresolv.c:35)
 /// reads them: the token after `nameserver` on each line that starts with
 /// it, at most [`MAXNS`]. A missing file is no resolvers.
 pub fn read_resolv_conf(path: &Path) -> Vec<String> {
-    let Ok(text) = std::fs::read(path) else {
+    let Ok(bytes) = std::fs::read(path) else {
         return Vec::new();
     };
-    let text = String::from_utf8_lossy(&text);
+    // get_local_resolvers() reads with fgets(buf, LINEL), LINEL being
+    // INET6_ADDRSTRLEN * 2 = 92 (readresolv.c:7,35): at most 91 bytes per
+    // call, through the next newline or the buffer's end. A line longer than
+    // that is parsed as several chunks, so its nameserver token is truncated
+    // exactly as the reference's is. Read the same way here.
+    const LINEL: usize = 92;
     let mut list = Vec::new();
-    for line in text.split('\n') {
-        if list.len() >= MAXNS {
-            break;
-        }
+    let mut rest = bytes.as_slice();
+    while !rest.is_empty() && list.len() < MAXNS {
+        let take = rest
+            .iter()
+            .take(LINEL - 1)
+            .position(|&b| b == b'\n')
+            .map(|p| p + 1)
+            .unwrap_or_else(|| rest.len().min(LINEL - 1));
+        let chunk = &rest[..take];
+        rest = &rest[take..];
         // strtok_r(line, " \t"): the first token, then the next
-        let mut tokens = line.split([' ', '\t']).filter(|t| !t.is_empty());
+        let text = String::from_utf8_lossy(chunk);
+        let mut tokens = text.split([' ', '\t']).filter(|t| !t.is_empty());
         if tokens.next() != Some("nameserver") {
             continue;
         }
         if let Some(ns) = tokens.next() {
-            list.push(ns.to_string());
+            // The token may carry the newline fgets stopped on; the reference
+            // strips it explicitly.
+            list.push(ns.trim_end_matches('\n').to_string());
         }
     }
     list
