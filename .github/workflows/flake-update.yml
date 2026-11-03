@@ -31,6 +31,13 @@ jobs:
           name: ananthb
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
+      # `nix flake update --commit-lock-file` shells out to `git commit`, which
+      # needs an author the runner does not have.
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Update flake inputs
         run: nix flake update --commit-lock-file
 
