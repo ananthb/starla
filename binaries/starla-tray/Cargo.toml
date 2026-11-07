@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 starla-common = { workspace = true }
-tray-icon = "0.24"
+tray-icon = "0.26"
 winit = "0.30"
 serde_json = { workspace = true }
 anyhow = { workspace = true }
